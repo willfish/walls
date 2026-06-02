@@ -31,7 +31,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v14
-      - uses: DeterminateSystems/magic-nix-cache-action@v9
       - run: nix develop -c cargo fmt --all -- --check
 
   clippy:
@@ -40,7 +39,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v14
-      - uses: DeterminateSystems/magic-nix-cache-action@v9
       - run: nix develop -c cargo clippy --workspace --all-targets -- -D warnings
 
   test:
@@ -49,7 +47,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v14
-      - uses: DeterminateSystems/magic-nix-cache-action@v9
       - run: nix develop -c cargo test --workspace
 
   build-release:
@@ -59,7 +56,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v14
-      - uses: DeterminateSystems/magic-nix-cache-action@v9
       - run: nix develop -c cargo build --release -p walls -p walls-tray
       - name: Verify binaries
         run: |
@@ -75,7 +71,6 @@ jobs:
         with:
           fetch-depth: 0
       - uses: DeterminateSystems/nix-installer-action@v14
-      - uses: DeterminateSystems/magic-nix-cache-action@v9
       - name: cargo audit
         run: nix develop -c cargo audit
       - name: cargo deny
@@ -104,7 +99,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v14
-      - uses: DeterminateSystems/magic-nix-cache-action@v9
       - name: Build derivation (tests in checkPhase, PTY test skipped)
         run: nix build .#checks.${{ matrix.system }}.default --print-build-logs
       - name: Verify binaries in store
