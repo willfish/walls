@@ -1,0 +1,18 @@
+[package]
+name = "walls-tray"
+description = "System tray for walls wallpaper manager"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "walls-tray"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+muda = "0.15"
+tray-icon = { version = "0.19", default-features = false }
+tracing.workspace = true
+tracing-subscriber.workspace = true

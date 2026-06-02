@@ -1,0 +1,6 @@
+/target/
+.env
+*.swp
+
+# Plans reviewed locally before commit
+/docs/plans/
