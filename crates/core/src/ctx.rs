@@ -72,6 +72,17 @@ impl WallsCtx {
         self.state.current.as_ref()
     }
 
+    /// Copy the current wallpaper's original file into the favorites directory.
+    pub fn favorite_current(&self) -> anyhow::Result<PathBuf> {
+        let current = self
+            .state
+            .current
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no current wallpaper"))?;
+        let src = Path::new(&current.original_path);
+        crate::library::copy_into_dir(src, &self.paths.favorites_dir)
+    }
+
     pub fn fill_mode(&self) -> FillMode {
         FillMode::from_display_mode(&self.config.display.mode)
     }

@@ -1,6 +1,7 @@
 pub mod apply;
 pub mod config;
 pub mod ctx;
+pub mod library;
 pub mod paths;
 pub mod pipeline;
 pub mod quota;
