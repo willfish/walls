@@ -41,6 +41,7 @@ walls-tray         # tray menu → walls prev/next/toggle-pause
 | `walls status [--json]` | Works |
 | `walls current [--meta]` | Works |
 | `walls favorite` | Works |
+| `walls fetch <paths...> [--move]` | Works |
 | `walls pause` / `walls resume` / `walls toggle-pause` | Works |
 | `walls next` / `walls prev` | Works (local + Wallhaven cache queue) |
 | `walls tui` | Works (also runs when TTY + no subcommand) |
