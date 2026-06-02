@@ -1,0 +1,28 @@
+[package]
+name = "walls-core"
+description = "Core library for the walls wallpaper manager"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs"] }
+directories = "5"
+dirs = "5"
+rand = "0.8"
+regex = "1"
+serde.workspace = true
+walkdir = "2"
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+wiremock = "0.6"

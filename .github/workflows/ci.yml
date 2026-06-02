@@ -1,0 +1,108 @@
+# Testing pyramid for walls:
+#   1. Static — rustfmt, clippy
+#   2. Unit/integration — cargo test (core fixtures, wiremock, CLI/TUI smoke)
+#   3. Packaging — release build + Nix derivations per OS/CPU
+#   4. Security — cargo audit, cargo deny, secret scan
+#
+# Aligns with docs/plans testing strategy (serde fixtures, wiremock, assert_cmd, manual DE matrix deferred).
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v14
+      - run: nix develop -c cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v14
+      - run: nix develop -c cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: Test (integration)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v14
+      - run: nix develop -c cargo test --workspace
+
+  build-release:
+    name: Build (release)
+    runs-on: ubuntu-latest
+    needs: [fmt, clippy, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v14
+      - run: nix develop -c cargo build --release -p walls -p walls-tray
+      - name: Verify binaries
+        run: |
+          test -x target/release/walls
+          test -x target/release/walls-tray
+          file target/release/walls | grep -q ELF
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: DeterminateSystems/nix-installer-action@v14
+      - name: cargo audit
+        run: nix develop -c cargo audit
+      - name: cargo deny
+        run: nix develop -c cargo deny check
+      - name: trufflehog
+        uses: trufflesecurity/trufflehog@v3.95.3
+        with:
+          extra_args: --only-verified
+
+  nix:
+    name: Nix (${{ matrix.system }})
+    needs: [fmt, clippy, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            system: x86_64-linux
+          - runner: ubuntu-24.04-arm
+            system: aarch64-linux
+          - runner: macos-14
+            system: aarch64-darwin
+          - runner: macos-13
+            system: x86_64-darwin
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v14
+      - name: Build derivation (tests in checkPhase, PTY test skipped)
+        run: nix build .#checks.${{ matrix.system }}.default --print-build-logs
+      - name: Verify binaries in store
+        run: |
+          walls=$(nix build .#packages.${{ matrix.system }}.walls --no-link --print-out-paths)
+          test -x "$walls/bin/walls"
+          test -x "$walls/bin/walls-tray"
