@@ -41,6 +41,8 @@ enum Command {
         #[arg(long)]
         meta: bool,
     },
+    /// Copy the current wallpaper into the favorites folder
+    Favorite,
     /// Interactive terminal UI
     #[cfg(feature = "tui")]
     Tui,
@@ -62,6 +64,7 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Resume) => cmd_pause(false)?,
         Some(Command::TogglePause) => cmd_toggle_pause()?,
         Some(Command::Current { meta }) => cmd_current(meta)?,
+        Some(Command::Favorite) => cmd_favorite()?,
         #[cfg(feature = "tui")]
         Some(Command::Tui) => return tui::run().context("tui failed"),
         None => {
@@ -146,6 +149,13 @@ fn cmd_toggle_pause() -> anyhow::Result<()> {
     let mut ctx = WallsCtx::load()?;
     ctx.toggle_pause()?;
     println!("paused: {}", ctx.state.paused);
+    Ok(())
+}
+
+fn cmd_favorite() -> anyhow::Result<()> {
+    let ctx = WallsCtx::load()?;
+    let dest = ctx.favorite_current()?;
+    println!("{}", dest.display());
     Ok(())
 }
 
