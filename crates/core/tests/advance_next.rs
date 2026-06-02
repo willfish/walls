@@ -2,7 +2,11 @@ use std::fs;
 
 use walls_core::WallsCtx;
 
-fn write_test_config(root: &std::path::Path, image_dir: &std::path::Path, noop_script: &std::path::Path) {
+fn write_test_config(
+    root: &std::path::Path,
+    image_dir: &std::path::Path,
+    noop_script: &std::path::Path,
+) {
     let config = serde_json::json!({
         "change": { "enabled": true, "internet_enabled": false },
         "paths": {

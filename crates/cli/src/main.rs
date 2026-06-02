@@ -20,9 +20,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Set a local image as the wallpaper
-    Apply {
-        path: PathBuf,
-    },
+    Apply { path: PathBuf },
     /// Show next wallpaper from configured sources
     Next,
     /// Show previous wallpaper from history

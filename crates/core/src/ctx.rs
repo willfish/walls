@@ -36,12 +36,8 @@ impl WallsCtx {
     }
 
     pub fn load_with_paths(mut paths: WallsPaths) -> anyhow::Result<Self> {
-        let config = load_config(&paths.config_file).map_err(|e| {
-            anyhow::anyhow!(
-                "failed to load {}: {e}",
-                paths.config_file.display()
-            )
-        })?;
+        let config = load_config(&paths.config_file)
+            .map_err(|e| anyhow::anyhow!("failed to load {}: {e}", paths.config_file.display()))?;
         let secrets = load_secrets(&paths.secrets_file)?;
         paths.apply_config_paths(&config.paths);
         paths.ensure_data_dirs()?;
@@ -67,11 +63,7 @@ impl WallsCtx {
         FillMode::from_display_mode(&self.config.display.mode)
     }
 
-    pub fn apply_file(
-        &mut self,
-        original: &Path,
-        trigger: ApplyTrigger,
-    ) -> anyhow::Result<()> {
+    pub fn apply_file(&mut self, original: &Path, trigger: ApplyTrigger) -> anyhow::Result<()> {
         self.apply_file_inner(original, trigger, None, true)
     }
 
@@ -128,11 +120,9 @@ impl WallsCtx {
             ) {
                 continue;
             }
-            for img in list_images_with_paths(
-                src,
-                &self.paths.favorites_dir,
-                &self.paths.fetched_dir,
-            )? {
+            for img in
+                list_images_with_paths(src, &self.paths.favorites_dir, &self.paths.fetched_dir)?
+            {
                 paths.push(img.path);
             }
         }
@@ -146,7 +136,10 @@ impl WallsCtx {
         )
     }
 
-    async fn try_apply_cache_head(&mut self, client: &crate::wallhaven::WallhavenClient) -> anyhow::Result<Option<PathBuf>> {
+    async fn try_apply_cache_head(
+        &mut self,
+        client: &crate::wallhaven::WallhavenClient,
+    ) -> anyhow::Result<Option<PathBuf>> {
         let Some(id) = self.state.cache_queue.first().cloned() else {
             return Ok(None);
         };

@@ -42,10 +42,7 @@ pub async fn refill_wallhaven_cache(
                 .unwrap_or(1)
                 .max(1);
             let resp = client.collection_wallpapers(coll, page).await?;
-            push_ids(
-                state,
-                resp.data.into_iter().map(|wp| wp.id),
-            );
+            push_ids(state, resp.data.into_iter().map(|wp| wp.id));
             state.wallhaven.collection_pages.insert(
                 key,
                 if resp.meta.current_page < resp.meta.last_page {

@@ -73,7 +73,10 @@ fn tui_without_tty_returns_clear_error_not_panic() {
         "expected TTY hint on stderr, got: {stderr}"
     );
     assert!(!stderr.contains("panicked"), "must not panic: {stderr}");
-    assert!(!stderr.contains("ENXIO"), "must not hit raw-mode ENXIO: {stderr}");
+    assert!(
+        !stderr.contains("ENXIO"),
+        "must not hit raw-mode ENXIO: {stderr}"
+    );
 }
 
 #[test]
@@ -94,6 +97,11 @@ fn bare_walls_without_tty_does_not_launch_tui() {
 
 #[test]
 fn tui_with_pty_exits_cleanly_on_quit() {
+    // buildRustPackage / Nix sandbox: cargo_bin path is not always spawnable via portable-pty.
+    if std::env::var_os("NIX_BUILD_TOP").is_some() {
+        return;
+    }
+
     let tmp = tempfile::tempdir().unwrap();
     let (config_home, state_home) = setup_xdg_home(tmp.path());
 
@@ -113,7 +121,10 @@ fn tui_with_pty_exits_cleanly_on_quit() {
     cmd.env("XDG_STATE_HOME", state_home);
     cmd.env("RUST_BACKTRACE", "0");
 
-    let mut child = pair.slave.spawn_command(cmd).expect("spawn walls tui in pty");
+    let mut child = pair
+        .slave
+        .spawn_command(cmd)
+        .expect("spawn walls tui in pty");
     drop(pair.slave);
 
     let mut writer = pair.master.take_writer().expect("pty writer");
@@ -122,5 +133,8 @@ fn tui_with_pty_exits_cleanly_on_quit() {
     drop(writer);
 
     let status = child.wait().expect("wait for walls tui");
-    assert!(status.success(), "walls tui should exit 0 after q, got {status:?}");
+    assert!(
+        status.success(),
+        "walls tui should exit 0 after q, got {status:?}"
+    );
 }

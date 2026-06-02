@@ -7,7 +7,15 @@
   };
 
   outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
+    let
+      supportedSystems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
+      ];
+    in
+    flake-utils.lib.eachSystem supportedSystems (system:
       let
         pkgs = import nixpkgs { inherit system; };
         lib = pkgs.lib;
@@ -19,6 +27,18 @@
 
         wallsSrc = lib.cleanSource ./.;
 
+        linuxTrayDeps = with pkgs; [
+          gtk3
+          gdk-pixbuf
+          cairo
+          pango
+          glib
+          atk
+          libappindicator
+          libdbusmenu-gtk3
+          xdotool
+        ];
+
         wallsPkg = rustPlatform.buildRustPackage {
           pname = "walls";
           version = "0.1.0";
@@ -26,24 +46,21 @@
           cargoLock.lockFile = ./Cargo.lock;
           cargoBuildFlags = [ "-p" "walls" "-p" "walls-tray" ];
           nativeBuildInputs = with pkgs; [ pkg-config ];
-          buildInputs = with pkgs;
-            lib.optionals stdenv.isLinux [
-              gtk3
-              gdk-pixbuf
-              cairo
-              pango
-              glib
-              atk
-              libappindicator
-              libdbusmenu-gtk3
-              xdotool
-            ];
+          buildInputs = lib.optionals pkgs.stdenv.isLinux linuxTrayDeps;
+          # PTY integration test is unreliable in the Nix build sandbox; CI runs it via cargo.
+          cargoTestFlags = [
+            "--workspace"
+            "--"
+            "--skip"
+            "tui_with_pty_exits_cleanly_on_quit"
+          ];
           doCheck = true;
 
           meta = with lib; {
             description = "Personal wallpaper manager (CLI + tray)";
             license = licenses.mit;
             mainProgram = "walls";
+            platforms = platforms.linux ++ platforms.darwin;
           };
         };
       in
@@ -51,7 +68,11 @@
         packages = {
           default = wallsPkg;
           walls = wallsPkg;
-          walls-tray = wallsPkg;
+        };
+
+        checks = {
+          default = wallsPkg;
+          walls = wallsPkg;
         };
 
         apps.default = {
@@ -67,6 +88,8 @@
               clippy
               rustfmt
               rust-analyzer
+              cargo-audit
+              cargo-deny
               pkg-config
               openssl
               imagemagick
@@ -75,17 +98,7 @@
               jq
               cosmic-bg
             ]
-            ++ lib.optionals stdenv.isLinux [
-              gtk3
-              gdk-pixbuf
-              cairo
-              pango
-              glib
-              atk
-              libappindicator
-              libdbusmenu-gtk3
-              xdotool
-            ];
+            ++ lib.optionals pkgs.stdenv.isLinux linuxTrayDeps;
 
           RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
           RUST_BACKTRACE = "1";
@@ -94,9 +107,10 @@
             echo "walls dev shell"
             echo "  cargo build          — debug build"
             echo "  cargo test           — run tests"
-            echo "  cargo run -- apply <path>"
-            echo "  cargo run -- tui"
-            echo "  cargo build -p walls-tray && ./target/debug/walls-tray"
+            echo "  cargo clippy -- -D warnings"
+            echo "  cargo fmt --all -- --check"
+            echo "  cargo audit && cargo deny check"
+            echo "  nix build .#checks.${system}.default"
             echo "  config: ~/.config/walls/config.json"
           '';
         };

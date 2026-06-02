@@ -24,11 +24,10 @@ async fn download_to_cache_writes_file() {
 
     assert!(dest.exists());
     assert_eq!(fs::read(&dest).unwrap(), b"jpeg-bytes");
-    assert!(
-        dest.file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .contains("wallhaven-abc123")
-    );
+    assert!(dest
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("wallhaven-abc123"));
 }

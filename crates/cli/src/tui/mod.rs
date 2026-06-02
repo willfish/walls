@@ -27,11 +27,9 @@ pub fn run() -> anyhow::Result<()> {
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
     let _restore = TerminalRestore;
 
-    let mut app = App::new(
-        WallsCtx::load().context(
-            "failed to load ~/.config/walls/config.json — copy config.example.json to get started",
-        )?,
-    )?;
+    let mut app = App::new(WallsCtx::load().context(
+        "failed to load ~/.config/walls/config.json — copy config.example.json to get started",
+    )?)?;
 
     loop {
         terminal.draw(|f| draw(f, &app))?;
@@ -68,14 +66,11 @@ impl Drop for TerminalRestore {
     }
 }
 
-fn handle_key(
-    app: &mut App,
-    key: KeyEvent,
-    rt: &tokio::runtime::Handle,
-) -> anyhow::Result<bool> {
+fn handle_key(app: &mut App, key: KeyEvent, rt: &tokio::runtime::Handle) -> anyhow::Result<bool> {
     match key.code {
         KeyCode::Char('q') => return Ok(true),
-        KeyCode::Char('n') | KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {}
+        KeyCode::Char('n') | KeyCode::Char('p')
+            if key.modifiers.contains(KeyModifiers::CONTROL) => {}
         KeyCode::Char('n') => {
             app.message = match rt.block_on(app.ctx.advance_next()) {
                 Ok(Some(p)) => format!("next: {}", p.display()),
@@ -136,7 +131,11 @@ fn draw(f: &mut Frame, app: &App) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(3)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(3),
+        ])
         .split(area);
 
     let titles = vec!["Status", "Now", "History", "Browse"];
@@ -152,7 +151,11 @@ fn draw(f: &mut Frame, app: &App) {
         Tab::Browse => app.browse_lines(),
     };
     let items: Vec<ListItem> = body.iter().map(|l| ListItem::new(l.as_str())).collect();
-    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(app.tab.title()));
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(app.tab.title()),
+    );
     f.render_widget(list, chunks[1]);
 
     let help = Paragraph::new(app.footer_help())

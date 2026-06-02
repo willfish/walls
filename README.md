@@ -10,9 +10,12 @@ direnv allow   # if using direnv — loads flake via .envrc
 nix develop    # or: direnv exec . cargo test
 
 cargo build
-cargo test           # 27 integration tests (core + CLI)
+cargo test           # integration tests (core + CLI + TUI smoke)
 cargo test -p walls-tray   # tray builds; no automated tests yet
+nix build .#checks.x86_64-linux.default   # Nix package + tests (PTY test skipped in sandbox)
 ```
+
+CI (GitHub Actions) runs rustfmt, clippy, `cargo test`, release build, `cargo audit` / `cargo deny`, secret scan, and Nix builds on `x86_64-linux`, `aarch64-linux`, `x86_64-darwin`, and `aarch64-darwin`.
 
 ## Quick start
 

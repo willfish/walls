@@ -1,12 +1,12 @@
 mod cosmic;
 mod detect;
-pub mod fill_mode;
 mod feh_nitrogen;
+pub mod fill_mode;
 
 pub use cosmic::{patch_wallpaper_path, CosmicConfigApplier};
 pub use detect::{detect_desktop, Desktop};
-pub use fill_mode::{ApplyTrigger, FillMode};
 pub use feh_nitrogen::FehNitrogenApplier;
+pub use fill_mode::{ApplyTrigger, FillMode};
 
 use std::path::Path;
 use std::process::Command;

@@ -1,4 +1,7 @@
-use walls_core::config::{ChangeConfig, Config, PathsConfig, SelectionConfig, WallhavenCollection, WallhavenConfig, WallhavenPrefer};
+use walls_core::config::{
+    ChangeConfig, Config, PathsConfig, SelectionConfig, WallhavenCollection, WallhavenConfig,
+    WallhavenPrefer,
+};
 use walls_core::state::State;
 use walls_core::wallhaven::{refill_wallhaven_cache, WallhavenClient};
 use wiremock::matchers::{header, method, path};

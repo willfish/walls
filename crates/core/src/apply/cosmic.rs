@@ -12,7 +12,11 @@ use super::Applier;
 
 /// Patch `source: Path("...")` in COSMIC background RON config (Variety-compatible).
 pub fn patch_wallpaper_path(contents: &str, new_path: &Path) -> String {
-    let escaped = new_path.display().to_string().replace('\\', "\\\\").replace('"', "\\\"");
+    let escaped = new_path
+        .display()
+        .to_string()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
     let replacement = format!(r#"source: Path("{escaped}")"#);
     Regex::new(r#"source: Path\("[^"]+"\)"#)
         .expect("valid regex")
@@ -92,4 +96,3 @@ pub fn build_cosmic_applier(apply: &ApplyConfig) -> anyhow::Result<Box<dyn Appli
         CosmicMethod::CosmicExtBgCtl => Ok(Box::new(CosmicExtBgApplier)),
     }
 }
-
