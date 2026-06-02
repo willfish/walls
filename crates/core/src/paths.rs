@@ -14,15 +14,28 @@ pub struct WallsPaths {
     pub compose_dir: PathBuf,
 }
 
+fn config_dir() -> anyhow::Result<PathBuf> {
+    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+        return Ok(PathBuf::from(xdg).join("walls"));
+    }
+    let proj = directories::ProjectDirs::from("", "", "walls")
+        .ok_or_else(|| anyhow::anyhow!("could not determine config directory"))?;
+    Ok(proj.config_dir().to_path_buf())
+}
+
+fn state_file() -> anyhow::Result<PathBuf> {
+    let base = if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
+        PathBuf::from(xdg)
+    } else {
+        dirs::state_dir().ok_or_else(|| anyhow::anyhow!("could not determine state directory"))?
+    };
+    Ok(base.join("walls").join("state.json"))
+}
+
 impl WallsPaths {
     pub fn discover() -> anyhow::Result<Self> {
-        let proj = directories::ProjectDirs::from("", "", "walls")
-            .ok_or_else(|| anyhow::anyhow!("could not determine config directory"))?;
-        let config_dir = proj.config_dir().to_path_buf();
-        let state_file = dirs::state_dir()
-            .ok_or_else(|| anyhow::anyhow!("could not determine state directory"))?
-            .join("walls")
-            .join("state.json");
+        let config_dir = config_dir()?;
+        let state_file = state_file()?;
         Ok(Self {
             config_file: config_dir.join("config.json"),
             secrets_file: config_dir.join("secrets.json"),
