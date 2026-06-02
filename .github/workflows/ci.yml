@@ -99,7 +99,7 @@ jobs:
             system: aarch64-linux
           - runner: macos-14
             system: aarch64-darwin
-          - runner: macos-13
+          - runner: macos-15-intel
             system: x86_64-darwin
     runs-on: ${{ matrix.runner }}
     steps:

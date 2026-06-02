@@ -7,7 +7,7 @@ Personal wallpaper manager (Rust). JSON config under `~/.config/walls`, COSMIC +
 ```bash
 cd ~/Repositories/walls
 direnv allow   # if using direnv — loads flake via .envrc
-nix develop    # or: direnv exec . cargo test
+nix develop    # installs git pre-commit + pre-push hooks (see flake.nix)
 
 cargo build
 cargo test           # integration tests (core + CLI + TUI smoke)
@@ -16,6 +16,8 @@ nix build .#checks.x86_64-linux.default   # Nix package + tests (PTY test skippe
 ```
 
 CI (GitHub Actions) runs rustfmt, clippy, `cargo test`, release build, `cargo audit` / `cargo deny`, secret scan, and Nix builds on `x86_64-linux`, `aarch64-linux`, `x86_64-darwin`, and `aarch64-darwin`.
+
+**Local hooks** (Nix-managed, like [forte#194](https://github.com/willfish/forte/pull/194)): on `nix develop` / direnv, **commit** runs hygiene + `nixfmt` + `rustfmt` + `actionlint` + shell checks; **push** runs `clippy` and `cargo test --workspace`. Run everything with `nix fmt` or `pre-commit run -a`.
 
 ## Quick start
 
