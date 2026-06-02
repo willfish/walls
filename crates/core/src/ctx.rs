@@ -59,6 +59,19 @@ impl WallsCtx {
         self.save_state()
     }
 
+    /// Path to the composed wallpaper on disk, if one is set.
+    pub fn current_path(&self) -> Option<&Path> {
+        self.state
+            .current
+            .as_ref()
+            .map(|c| Path::new(&c.composed_path))
+    }
+
+    /// Metadata for the active wallpaper.
+    pub fn current_meta(&self) -> Option<&crate::state::CurrentWall> {
+        self.state.current.as_ref()
+    }
+
     pub fn fill_mode(&self) -> FillMode {
         FillMode::from_display_mode(&self.config.display.mode)
     }
