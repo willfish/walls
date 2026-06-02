@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: cachix/install-nix-action@v30
       - run: nix develop -c cargo fmt --all -- --check
 
@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: cachix/install-nix-action@v30
       - run: nix develop -c cargo clippy --workspace --all-targets -- -D warnings
 
@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: cachix/install-nix-action@v30
       - run: nix develop -c cargo test --workspace
 
@@ -58,7 +58,7 @@ jobs:
     needs: [fmt, clippy, test]
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: cachix/install-nix-action@v30
       - run: nix develop -c cargo build --release -p walls -p walls-tray
       - name: Verify binaries
@@ -72,7 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - uses: cachix/install-nix-action@v30
@@ -103,7 +103,7 @@ jobs:
             system: x86_64-darwin
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: cachix/install-nix-action@v30
       - name: Build derivation (tests in checkPhase, PTY test skipped)
         run: nix build .#checks.${{ matrix.system }}.default --print-build-logs
