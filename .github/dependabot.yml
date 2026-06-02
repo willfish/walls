@@ -1,0 +1,33 @@
+# Weekly dependency updates with a 7-day cooldown so new releases can stabilise
+# before we merge (cargo, GitHub Actions, Nix flake inputs).
+
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/London
+    cooldown:
+      default-days: 7
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/London
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: gitsubmodule
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/London
+    cooldown:
+      default-days: 7

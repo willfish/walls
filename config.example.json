@@ -1,0 +1,58 @@
+{
+  "change": {
+    "enabled": true,
+    "on_start": false,
+    "interval_secs": 300,
+    "internet_enabled": true,
+    "safe_mode": false,
+    "change_lock_screen": false,
+    "download_preference_ratio": 0.9
+  },
+  "paths": {
+    "cache_dir": "~/.local/share/walls/cache",
+    "download_dir": "~/.local/share/walls/downloaded",
+    "favorites_dir": "~/.local/share/walls/favorites",
+    "fetched_dir": "~/.local/share/walls/fetched",
+    "compose_dir": "~/.local/share/walls/wallpaper"
+  },
+  "quota": {
+    "enabled": true,
+    "size_mb": 1000
+  },
+  "apply": {
+    "backend": "auto",
+    "cosmic": {
+      "method": "cosmic-config",
+      "config_path": "~/.config/cosmic/com.system76.CosmicBackground/v1/all",
+      "use_original_path": false
+    },
+    "custom_script": null
+  },
+  "display": {
+    "mode": "os",
+    "auto_rotate": false
+  },
+  "selection": {
+    "use_landscape_enabled": true,
+    "avoid_recent": 50,
+    "refetch_when_cache_below": 5,
+    "strategy": "random"
+  },
+  "sources": [
+    { "enabled": true, "type": "favorites", "label": "The Favorites folder" },
+    { "enabled": true, "type": "fetched", "label": "The Fetched folder" },
+    { "enabled": true, "type": "folder", "path": "/usr/share/backgrounds" }
+  ],
+  "wallhaven": {
+    "collections": [],
+    "search": {
+      "q": "",
+      "categories": "111",
+      "purity": "100",
+      "sorting": "random",
+      "order": "desc",
+      "atleast": "1920x1080"
+    },
+    "prefer": "collections_then_search"
+  }
+}

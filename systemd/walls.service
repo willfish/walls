@@ -1,0 +1,7 @@
+[Unit]
+Description=walls — rotate wallpaper
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/walls next
+Environment=RUST_LOG=walls=info
