@@ -36,6 +36,11 @@ enum Command {
     Resume,
     /// Toggle pause state
     TogglePause,
+    /// Print the current wallpaper path
+    Current {
+        #[arg(long)]
+        meta: bool,
+    },
     /// Interactive terminal UI
     #[cfg(feature = "tui")]
     Tui,
@@ -56,6 +61,7 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Pause) => cmd_pause(true)?,
         Some(Command::Resume) => cmd_pause(false)?,
         Some(Command::TogglePause) => cmd_toggle_pause()?,
+        Some(Command::Current { meta }) => cmd_current(meta)?,
         #[cfg(feature = "tui")]
         Some(Command::Tui) => return tui::run().context("tui failed"),
         None => {
@@ -140,5 +146,26 @@ fn cmd_toggle_pause() -> anyhow::Result<()> {
     let mut ctx = WallsCtx::load()?;
     ctx.toggle_pause()?;
     println!("paused: {}", ctx.state.paused);
+    Ok(())
+}
+
+fn cmd_current(meta: bool) -> anyhow::Result<()> {
+    let ctx = WallsCtx::load()?;
+    if meta {
+        let value = ctx
+            .current_meta()
+            .map(serde_json::to_value)
+            .transpose()?
+            .unwrap_or(serde_json::Value::Null);
+        println!("{}", serde_json::to_string_pretty(&value)?);
+        return Ok(());
+    }
+    match ctx.current_path() {
+        Some(p) => println!("{}", p.display()),
+        None => {
+            println!("(none)");
+            std::process::exit(1);
+        }
+    }
     Ok(())
 }
