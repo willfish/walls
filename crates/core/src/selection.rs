@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 
 pub struct PickInput<'a> {
     pub candidates: &'a [String],
@@ -21,7 +21,7 @@ pub fn pick_next(input: &PickInput) -> anyhow::Result<String> {
     } else {
         pool
     };
-    pool.choose(&mut rand::thread_rng())
+    pool.choose(&mut rand::rng())
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("no candidates"))
 }
