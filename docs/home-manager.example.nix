@@ -2,7 +2,10 @@
 # Timer interval is configured here (not duplicated in config.json).
 { pkgs, ... }:
 {
-  home.packages = [ pkgs.walls pkgs.walls-tray ];
+  home.packages = [
+    pkgs.walls
+    pkgs.walls-tray
+  ];
 
   xdg.configFile."walls/config.json".source = ./walls-config.json;
   # Prefer sops-nix for secrets:
