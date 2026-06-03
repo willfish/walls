@@ -80,6 +80,15 @@ impl WallsCtx {
         })
     }
 
+    /// Move a Wallhaven id to the front of the download queue.
+    pub fn prioritize_cache_id(&mut self, id: &str) -> anyhow::Result<()> {
+        self.with_state_lock(|ctx| {
+            ctx.state.cache_queue.retain(|q| q != id);
+            ctx.state.cache_queue.insert(0, id.to_string());
+            ctx.save_state()
+        })
+    }
+
     /// Path to the composed wallpaper on disk, if one is set.
     pub fn current_path(&self) -> Option<&Path> {
         self.state

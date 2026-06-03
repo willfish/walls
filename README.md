@@ -46,7 +46,7 @@ walls-tray         # tray menu → walls prev/next/toggle-pause
 | `walls config validate` | Works |
 | `walls pause` / `walls resume` / `walls toggle-pause` | Works |
 | `walls next` / `walls prev` | Works (local + Wallhaven cache queue) |
-| `walls tui` | Works (also runs when TTY + no subcommand) |
+| `walls tui` | Works — tabs: Status/Now/History/Browse/Search; `:` commands; `f`/`d` favorite/trash |
 | `walls-tray` | Works (prev/next/pause, Open TUI, thumbnail icon) |
 
 Set `WALLS_TUI_CMD` to override the terminal launch command (`{walls}` is substituted). Defaults to `$TERMINAL -e walls tui` (terminal: `alacritty`).
