@@ -26,6 +26,9 @@ flowchart TD
     WH --> CORE
     CLI --> CORE
     CORE --> APPLY
+
+    classDef box stroke:#6366f1,stroke-width:2px
+    class CONFIG,CACHE,LOCAL,WH,TIMER,TRAY,CLI,CORE,APPLY box
 ```
 
 - **Config** — `config.json`, `secrets.json`, locked `state.json` (history, queue, current).
