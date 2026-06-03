@@ -6,7 +6,7 @@ Personal wallpaper manager (Rust). JSON config under `~/.config/walls`, COSMIC +
 
 **walls is:** a small daily-driver for rotating wallpapers — local folders, Wallhaven search/cache, CLI + TUI + tray, and a systemd user timer. Apply targets **COSMIC** first (`cosmic-ext-bg-ctl` + RON patch), with **feh/nitrogen** fallback when detection does not find COSMIC.
 
-**walls is not:** a [Variety](https://github.com/varietywalls/variety) clone. There is no quotes/clock overlay pipeline, no broad multi-DE matrix yet (see [v0.5 roadmap](docs/plans/2026-06-02-walls-roadmap-to-1.0.md)), and no image-effect pipeline (v0.6). PRs welcome, but the 1.0 bar is “install and rotate on COSMIC (or feh fallback)”.
+**walls is not:** a [Variety](https://github.com/varietywalls/variety) clone. There is no quotes/clock overlay pipeline, no broad multi-DE matrix yet ([v0.5 milestone](https://github.com/willfish/walls/milestone/4)), and no image-effect pipeline ([v0.6](https://github.com/willfish/walls/milestone/5)). PRs welcome, but the 1.0 bar is “install and rotate on COSMIC (or feh fallback)”. [Roadmap issues](https://github.com/willfish/walls/issues?q=is%3Aopen+label%3Aepic).
 
 **MSRV:** `1.78` (workspace `rust-version`). **License:** MIT.
 
