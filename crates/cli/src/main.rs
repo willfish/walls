@@ -147,10 +147,7 @@ fn cmd_prev() -> anyhow::Result<()> {
 
 fn cmd_pause(paused: bool) -> anyhow::Result<()> {
     let mut ctx = WallsCtx::load()?;
-    if ctx.state.paused != paused {
-        ctx.state.paused = paused;
-        ctx.save_state()?;
-    }
+    ctx.set_paused(paused)?;
     println!("paused: {paused}");
     Ok(())
 }
