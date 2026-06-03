@@ -3,9 +3,9 @@ mod app;
 use std::io::{stdout, IsTerminal};
 
 use anyhow::Context;
-use app::{App, Tab};
+use app::{App, InputMode, Tab};
 use ratatui::backend::CrosstermBackend;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent};
 use ratatui::crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -14,7 +14,6 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Tabs};
 use walls_core::WallsCtx;
 
-/// Blocking TUI loop. Uses the `#[tokio::main]` runtime via [`Handle::current`].
 pub fn run() -> anyhow::Result<()> {
     require_tty()?;
     let rt = tokio::runtime::Handle::current();
@@ -56,7 +55,6 @@ fn require_tty() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Restore terminal state even when the loop errors or panics.
 struct TerminalRestore;
 
 impl Drop for TerminalRestore {
@@ -67,10 +65,18 @@ impl Drop for TerminalRestore {
 }
 
 fn handle_key(app: &mut App, key: KeyEvent, rt: &tokio::runtime::Handle) -> anyhow::Result<bool> {
+    match app.input_mode {
+        InputMode::Command => return handle_command_key(app, key, rt),
+        InputMode::SearchInput => return handle_search_input_key(app, key, rt),
+        InputMode::Normal => {}
+    }
+
     match key.code {
         KeyCode::Char('q') => return Ok(true),
-        KeyCode::Char('n') | KeyCode::Char('p')
-            if key.modifiers.contains(KeyModifiers::CONTROL) => {}
+        KeyCode::Char(':') => {
+            app.input_mode = InputMode::Command;
+            app.cmd_line.clear();
+        }
         KeyCode::Char('n') => {
             app.message = match rt.block_on(app.ctx.advance_next()) {
                 Ok(Some(p)) => format!("next: {}", p.display()),
@@ -87,40 +93,115 @@ fn handle_key(app: &mut App, key: KeyEvent, rt: &tokio::runtime::Handle) -> anyh
             };
             app.reload_ctx()?;
         }
-        KeyCode::Char(' ') => {
-            let paused = !app.ctx.state.paused;
-            app.ctx.state.paused = paused;
-            app.ctx.save_state()?;
-            app.message = format!("paused: {paused}");
-        }
-        KeyCode::Char('1') => app.tab = Tab::Status,
-        KeyCode::Char('2') => app.tab = Tab::Now,
-        KeyCode::Char('3') => {
-            app.tab = Tab::History;
+        KeyCode::Char('f') => match app.favorite_current() {
+            Ok(msg) => {
+                app.message = msg;
+                app.reload_ctx()?;
+            }
+            Err(e) => app.message = format!("favorite error: {e}"),
+        },
+        KeyCode::Char('d') => match app.trash_current() {
+            Ok(msg) => {
+                app.message = msg;
+                app.reload_ctx()?;
+            }
+            Err(e) => app.message = format!("trash error: {e}"),
+        },
+        KeyCode::Char(' ') => match app.ctx.toggle_pause() {
+            Ok(()) => app.message = format!("paused: {}", app.ctx.state.paused),
+            Err(e) => app.message = format!("pause error: {e}"),
+        },
+        KeyCode::Char(c @ '1'..='5') => {
+            app.tab = Tab::from_index(c as usize - 1);
             app.cursor = 0;
         }
-        KeyCode::Char('4') => {
-            app.tab = Tab::Browse;
-            app.cursor = 0;
+        KeyCode::Char('i') if app.tab == Tab::Search => {
+            app.input_mode = InputMode::SearchInput;
         }
         KeyCode::Down | KeyCode::Char('j') => app.move_down(),
         KeyCode::Up | KeyCode::Char('k') => app.move_up(),
+        KeyCode::Enter => handle_enter(app, rt)?,
+        _ => {}
+    }
+    Ok(false)
+}
+
+fn handle_command_key(
+    app: &mut App,
+    key: KeyEvent,
+    rt: &tokio::runtime::Handle,
+) -> anyhow::Result<bool> {
+    match key.code {
+        KeyCode::Esc => {
+            app.input_mode = InputMode::Normal;
+            app.cmd_line.clear();
+        }
         KeyCode::Enter => {
-            if app.tab == Tab::History {
-                if let Some(path) = app.apply_history_selection() {
-                    app.message = format!("applied: {}", path.display());
-                    app.reload_ctx()?;
-                }
-            } else if app.tab == Tab::Browse {
-                if let Some(msg) = rt.block_on(app.apply_browse_selection())? {
-                    app.message = msg;
-                    app.reload_ctx()?;
-                }
+            match app.run_command(rt)? {
+                None => return Ok(true),
+                Some(msg) => app.message = msg,
+            }
+            app.input_mode = InputMode::Normal;
+            app.cmd_line.clear();
+            app.reload_ctx()?;
+        }
+        KeyCode::Backspace => {
+            app.cmd_line.pop();
+        }
+        KeyCode::Char(c) => app.cmd_line.push(c),
+        _ => {}
+    }
+    Ok(false)
+}
+
+fn handle_search_input_key(
+    app: &mut App,
+    key: KeyEvent,
+    rt: &tokio::runtime::Handle,
+) -> anyhow::Result<bool> {
+    match key.code {
+        KeyCode::Esc => app.input_mode = InputMode::Normal,
+        KeyCode::Enter => {
+            app.input_mode = InputMode::Normal;
+            app.message = match rt.block_on(app.run_search()) {
+                Ok(()) => format!("search: {} results", app.search_results.len()),
+                Err(e) => format!("search error: {e}"),
+            };
+        }
+        KeyCode::Backspace => {
+            app.search_query.pop();
+        }
+        KeyCode::Char(c) => app.search_query.push(c),
+        _ => {}
+    }
+    Ok(false)
+}
+
+fn handle_enter(app: &mut App, rt: &tokio::runtime::Handle) -> anyhow::Result<()> {
+    match app.tab {
+        Tab::History => {
+            if let Some(path) = app.apply_history_selection() {
+                app.message = format!("applied: {}", path.display());
+                app.reload_ctx()?;
+            }
+        }
+        Tab::Browse => {
+            if let Some(msg) = rt.block_on(app.apply_browse_selection())? {
+                app.message = msg;
+                app.reload_ctx()?;
+            }
+        }
+        Tab::Search => {
+            if app.search_results.is_empty() {
+                app.input_mode = InputMode::SearchInput;
+            } else if let Some(msg) = rt.block_on(app.apply_search_selection())? {
+                app.message = msg;
+                app.reload_ctx()?;
             }
         }
         _ => {}
     }
-    Ok(false)
+    Ok(())
 }
 
 fn draw(f: &mut Frame, app: &App) {
@@ -138,7 +219,7 @@ fn draw(f: &mut Frame, app: &App) {
         ])
         .split(area);
 
-    let titles = vec!["Status", "Now", "History", "Browse"];
+    let titles = vec!["Status", "Now", "History", "Browse", "Search"];
     let tabs = Tabs::new(titles)
         .block(Block::default().borders(Borders::ALL).title("walls"))
         .select(app.tab.index());
@@ -149,6 +230,7 @@ fn draw(f: &mut Frame, app: &App) {
         Tab::Now => now_lines(app),
         Tab::History => app.history_lines(),
         Tab::Browse => app.browse_lines(),
+        Tab::Search => app.search_lines(),
     };
     let items: Vec<ListItem> = body.iter().map(|l| ListItem::new(l.as_str())).collect();
     let list = List::new(items).block(
@@ -171,6 +253,7 @@ fn status_lines(app: &App) -> Vec<String> {
         format!("state: {}", app.ctx.paths.state_file.display()),
         format!("history: {} entries", app.ctx.state.history.len()),
         format!("cache queue: {} ids", app.ctx.state.cache_queue.len()),
+        format!("local candidates: {} paths", app.local_candidates.len()),
         format!("cache dir: {}", app.ctx.paths.cache_dir.display()),
         app.message.clone(),
     ]
