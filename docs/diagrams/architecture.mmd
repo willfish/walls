@@ -1,0 +1,19 @@
+flowchart TD
+    CONFIG["~/.config/walls"]
+    CACHE["~/.cache/walls"]
+    LOCAL[Local folders]
+    WH[Wallhaven API]
+    TIMER[walls.timer]
+    TRAY[walls-tray]
+    CLI["walls CLI / TUI"]
+    CORE[walls-core]
+    APPLY["COSMIC or feh"]
+
+    TIMER -->|walls next| CLI
+    TRAY -->|subprocess| CLI
+    CONFIG --> CORE
+    CACHE --> CORE
+    LOCAL --> CORE
+    WH --> CORE
+    CLI --> CORE
+    CORE --> APPLY

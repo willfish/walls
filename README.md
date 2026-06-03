@@ -4,42 +4,52 @@ Personal wallpaper manager (Rust). JSON config under `~/.config/walls`, COSMIC +
 
 ## Architecture
 
+Component flow (source: [`docs/diagrams/architecture.mmd`](docs/diagrams/architecture.mmd)):
+
+```mermaid
+flowchart TD
+    CONFIG["~/.config/walls"]
+    CACHE["~/.cache/walls"]
+    LOCAL[Local folders]
+    WH[Wallhaven API]
+    TIMER[walls.timer]
+    TRAY[walls-tray]
+    CLI["walls CLI / TUI"]
+    CORE[walls-core]
+    APPLY["COSMIC or feh"]
+
+    TIMER -->|walls next| CLI
+    TRAY -->|subprocess| CLI
+    CONFIG --> CORE
+    CACHE --> CORE
+    LOCAL --> CORE
+    WH --> CORE
+    CLI --> CORE
+    CORE --> APPLY
 ```
-  ~/.config/walls/          systemd user units
-  ├── config.json         walls.timer ──▶ walls.service ──┐
-  ├── secrets.json        walls-tray.service ───────────┤
-  └── state.json (lock)                                  │
-                                                         ▼
-  local folders ──▶  ┌─────────────┐     subprocess    ┌──────────┐
-  Wallhaven API  ──▶ │ walls-core  │ ◀──────────────── │   walls   │
-                     │  WallsCtx   │                   │ CLI + TUI │
-                     │ apply/next  │                   └──────────┘
-                     │ state/queue │                         ▲
-                     └──────┬──────┘                         │
-                            │                          ┌─────┴──────┐
-                            ▼                          │ walls-tray │
-                     COSMIC RON patch                  │ prev/next  │
-                     (cosmic-ext-bg-ctl)               │ pause, TUI │
-                     or feh/nitrogen fallback           └────────────┘
-```
+
+- **Config** — `config.json`, `secrets.json`, locked `state.json` (history, queue, current).
+- **Cache** — downloaded Wallhaven images and composed outputs.
+- **Triggers** — `walls.timer` runs `walls next`; tray runs `walls prev` / `next` / `toggle-pause` / opens TUI.
 
 ### TUI layout (`walls tui`)
 
-```
-┌ walls ─────────────────────────────────────────────────────────────┐
-│ [Status] [Now] [History] [Browse] [Search]          tabs 1-5       │
-├────────────────────────────────────────────────────────────────────┤
-│ > tab body                                                         │
-│   Status  — paused, paths, queue size                              │
-│   Now     — current wallpaper metadata                             │
-│   History — j/k, Enter apply                                       │
-│   Browse  — queue · local folders · history; Enter apply           │
-│   Search  — i edit query, Enter search/apply (needs API key)       │
-├ keys ──────────────────────────────────────────────────────────────┤
-│ n/p next·prev   f/d favorite·trash   space pause   : command  q quit│
-└────────────────────────────────────────────────────────────────────┘
+Terminal screen regions (not a second runtime — same `walls` binary as the CLI):
 
-  :next | :prev | :pause | :status | :quit     command mode (Esc cancel)
+```
+┌ walls ────────────────────────────────────────────────┐
+│ [Status][Now][History][Browse][Search]     1-5 tabs   │
+├───────────────────────────────────────────────────────┤
+│ > list (tab-specific)                                 │
+│   Status   paused, paths, queue count                 │
+│   Now      current wallpaper paths                    │
+│   History  j/k · Enter apply                          │
+│   Browse   queue · locals · history · Enter apply     │
+│   Search   i query · Enter search/apply (API key)     │
+├ keys ─────────────────────────────────────────────────┤
+│ n/p  f/d  space  :  q                                 │
+└───────────────────────────────────────────────────────┘
+  :next :prev :pause :status :quit   (Esc cancels : mode)
 ```
 
 ## Development (Nix)
