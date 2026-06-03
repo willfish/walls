@@ -49,6 +49,9 @@ impl State {
             return Ok(Self::default());
         }
         let data = fs::read_to_string(path)?;
+        if data.trim().is_empty() {
+            return Ok(Self::default());
+        }
         Ok(serde_json::from_str(&data)?)
     }
 
