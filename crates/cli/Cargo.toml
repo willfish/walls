@@ -17,7 +17,7 @@ tui = ["dep:ratatui"]
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-ratatui = { version = "0.29", features = ["crossterm"], optional = true }
+ratatui = { version = "0.30", features = ["crossterm"], optional = true }
 serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
