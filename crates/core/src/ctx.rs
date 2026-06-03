@@ -54,9 +54,30 @@ impl WallsCtx {
         self.state.save(&self.paths.state_file)
     }
 
+    fn with_state_lock<R>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> anyhow::Result<R>,
+    ) -> anyhow::Result<R> {
+        let _lock = crate::lock::StateLock::acquire(&self.paths.state_file)?;
+        self.state = State::load_or_default(&self.paths.state_file)?;
+        f(self)
+    }
+
+    pub fn set_paused(&mut self, paused: bool) -> anyhow::Result<()> {
+        self.with_state_lock(|ctx| {
+            if ctx.state.paused != paused {
+                ctx.state.paused = paused;
+                ctx.save_state()?;
+            }
+            Ok(())
+        })
+    }
+
     pub fn toggle_pause(&mut self) -> anyhow::Result<()> {
-        self.state.paused = !self.state.paused;
-        self.save_state()
+        self.with_state_lock(|ctx| {
+            ctx.state.paused = !ctx.state.paused;
+            ctx.save_state()
+        })
     }
 
     /// Path to the composed wallpaper on disk, if one is set.
@@ -89,6 +110,10 @@ impl WallsCtx {
 
     /// Delete the current wallpaper file and clear it from state/history.
     pub fn trash_current(&mut self) -> anyhow::Result<()> {
+        self.with_state_lock(|ctx| ctx.trash_current_inner())
+    }
+
+    fn trash_current_inner(&mut self) -> anyhow::Result<()> {
         let Some(current) = self.state.current.take() else {
             anyhow::bail!("no current wallpaper");
         };
@@ -132,7 +157,8 @@ impl WallsCtx {
     }
 
     pub fn apply_file(&mut self, original: &Path, trigger: ApplyTrigger) -> anyhow::Result<()> {
-        self.apply_file_inner(original, trigger, None, true)
+        let original = original.to_path_buf();
+        self.with_state_lock(|ctx| ctx.apply_file_inner(&original, trigger, None, true))
     }
 
     fn apply_file_inner(
@@ -243,6 +269,12 @@ impl WallsCtx {
     }
 
     pub async fn advance_next(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        let _lock = crate::lock::StateLock::acquire(&self.paths.state_file)?;
+        self.state = State::load_or_default(&self.paths.state_file)?;
+        self.advance_next_inner().await
+    }
+
+    async fn advance_next_inner(&mut self) -> anyhow::Result<Option<PathBuf>> {
         if self.state.paused || !self.config.change.enabled {
             tracing::info!("skipped: paused or change disabled");
             return Ok(None);
@@ -280,7 +312,7 @@ impl WallsCtx {
             .into_iter()
             .find(|p| p.display().to_string() == id)
             .ok_or_else(|| anyhow::anyhow!("picked path vanished"))?;
-        self.apply_file(&path, ApplyTrigger::Auto)?;
+        self.apply_file_inner(&path, ApplyTrigger::Auto, None, true)?;
         Ok(Some(path))
     }
 
@@ -303,6 +335,10 @@ impl WallsCtx {
     }
 
     pub fn advance_prev(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        self.with_state_lock(|ctx| ctx.advance_prev_inner())
+    }
+
+    fn advance_prev_inner(&mut self) -> anyhow::Result<Option<PathBuf>> {
         if self.state.history.len() < 2 {
             return Ok(None);
         }
