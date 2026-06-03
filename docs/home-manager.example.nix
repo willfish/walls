@@ -20,6 +20,17 @@
     };
   };
 
+  systemd.user.services.walls-tray = {
+    description = "walls system tray";
+    serviceConfig = {
+      Type = "simple";
+      ExecStart = "${pkgs.walls-tray}/bin/walls-tray";
+      Restart = "on-failure";
+      Environment = "RUST_LOG=walls_tray=info";
+    };
+    installConfig.WantedBy = [ "graphical-session.target" ];
+  };
+
   systemd.user.timers.walls = {
     description = "walls wallpaper rotation";
     timerConfig = {

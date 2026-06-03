@@ -50,11 +50,12 @@ walls-tray         # tray menu → walls prev/next/toggle-pause
 
 ## systemd timer
 
-User timer units live in `systemd/`. Install `walls.service` and `walls.timer` under `~/.config/systemd/user/`, then:
+User units live in `systemd/`. Install `walls.service`, `walls.timer`, and optionally `walls-tray.service` under `~/.config/systemd/user/`, then:
 
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now walls.timer
+systemctl --user enable --now walls-tray.service
 ```
 
 Rotation interval is configured in the **timer unit** (or home-manager), not in `config.json`. `walls pause` makes `walls next` a no-op (exit 0).

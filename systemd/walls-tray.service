@@ -1,0 +1,12 @@
+[Unit]
+Description=walls system tray
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/walls-tray
+Restart=on-failure
+Environment=RUST_LOG=walls_tray=info
+
+[Install]
+WantedBy=default.target
