@@ -54,6 +54,17 @@ enum Command {
     /// Interactive terminal UI
     #[cfg(feature = "tui")]
     Tui,
+    /// Config file utilities
+    Config {
+        #[command(subcommand)]
+        sub: ConfigSub,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigSub {
+    /// Validate config.json and secrets
+    Validate,
 }
 
 #[tokio::main]
@@ -75,6 +86,9 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Favorite) => cmd_favorite()?,
         Some(Command::Fetch { paths, r#move }) => cmd_fetch(paths, r#move)?,
         Some(Command::Trash) => cmd_trash()?,
+        Some(Command::Config { sub }) => match sub {
+            ConfigSub::Validate => cmd_config_validate()?,
+        },
         #[cfg(feature = "tui")]
         Some(Command::Tui) => return tui::run().context("tui failed"),
         None => {
@@ -160,6 +174,19 @@ fn cmd_toggle_pause() -> anyhow::Result<()> {
     ctx.toggle_pause()?;
     println!("paused: {}", ctx.state.paused);
     Ok(())
+}
+
+fn cmd_config_validate() -> anyhow::Result<()> {
+    let ctx = WallsCtx::load()?;
+    let errors = walls_core::validate::validate_config(&ctx.config, &ctx.secrets, &ctx.paths);
+    if errors.is_empty() {
+        println!("config ok");
+        return Ok(());
+    }
+    for err in &errors {
+        eprintln!("error: {err}");
+    }
+    std::process::exit(1);
 }
 
 fn cmd_trash() -> anyhow::Result<()> {
