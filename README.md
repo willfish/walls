@@ -113,6 +113,14 @@ CI (GitHub Actions) runs rustfmt, clippy, `cargo test`, release build, `cargo au
 
 **Local hooks** (Nix-managed, like [forte#194](https://github.com/willfish/forte/pull/194)): on `nix develop` / direnv, **commit** runs hygiene + `nixfmt` + `rustfmt` + `actionlint` + shell checks; **push** runs `clippy` and `cargo test --workspace`. Run everything with `nix fmt` or `pre-commit run -a`.
 
+## Demo
+
+CLI workflow (isolated config; `custom-script` apply). The TUI uses the terminal alternate screen — record it with [`demo/record-tui.sh`](demo/record-tui.sh) (gpu-screen-recorder), or validate headless with [`scripts/validate-tui-pty.sh`](scripts/validate-tui-pty.sh).
+
+![walls CLI demo](demo/demo.gif)
+
+Regenerate: `nix-shell -p asciinema asciinema-agg --run './demo/record-cli.sh'`
+
 ## Quick start
 
 After [install](#install):
