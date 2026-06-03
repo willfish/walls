@@ -2975,7 +2975,7 @@ dependencies = [
 
 [[package]]
 name = "walls"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -2993,7 +2993,7 @@ dependencies = [
 
 [[package]]
 name = "walls-core"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3014,7 +3014,7 @@ dependencies = [
 
 [[package]]
 name = "walls-tray"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "muda",
