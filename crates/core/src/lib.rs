@@ -9,6 +9,7 @@ pub mod quota;
 pub mod selection;
 pub mod sources;
 pub mod state;
+pub mod validate;
 pub mod wallhaven;
 
 pub use ctx::WallsCtx;
