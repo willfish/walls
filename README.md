@@ -8,7 +8,7 @@ Personal wallpaper manager (Rust). JSON config under `~/.config/walls`, COSMIC +
 
 **walls is not:** a [Variety](https://github.com/varietywalls/variety) clone. There is no quotes/clock overlay pipeline, no broad multi-DE matrix yet ([v0.5 milestone](https://github.com/willfish/walls/milestone/4)), and no image-effect pipeline ([v0.6](https://github.com/willfish/walls/milestone/5)). PRs welcome, but the 1.0 bar is “install and rotate on COSMIC (or feh fallback)”. [Roadmap issues](https://github.com/willfish/walls/issues?q=is%3Aopen+label%3Aepic).
 
-**MSRV:** `1.78` (workspace `rust-version`). **License:** MIT.
+**MSRV:** `1.78` (workspace `rust-version`). **License:** MIT. See [CHANGELOG](CHANGELOG.md) for release history.
 
 ## Install
 
