@@ -72,6 +72,21 @@ impl WallsCtx {
         self.state.current.as_ref()
     }
 
+    /// Import image files into the fetched directory (copy by default).
+    pub fn fetch_files(&self, paths: &[PathBuf], move_files: bool) -> anyhow::Result<Vec<PathBuf>> {
+        let mut imported = Vec::new();
+        for path in paths {
+            let path = crate::paths::expand_home(path);
+            let dest = if move_files {
+                crate::library::move_into_dir(&path, &self.paths.fetched_dir)?
+            } else {
+                crate::library::copy_into_dir(&path, &self.paths.fetched_dir)?
+            };
+            imported.push(dest);
+        }
+        Ok(imported)
+    }
+
     /// Copy the current wallpaper's original file into the favorites directory.
     pub fn favorite_current(&self) -> anyhow::Result<PathBuf> {
         let current = self

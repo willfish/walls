@@ -2,6 +2,20 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Move `src` into `dest_dir`, picking a non-colliding filename.
+pub fn move_into_dir(src: &Path, dest_dir: &Path) -> anyhow::Result<PathBuf> {
+    if !src.is_file() {
+        anyhow::bail!("not a file: {}", src.display());
+    }
+    fs::create_dir_all(dest_dir)?;
+    let name = src
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("path has no file name: {}", src.display()))?;
+    let dest = unique_path(dest_dir, name);
+    fs::rename(src, &dest)?;
+    Ok(dest)
+}
+
 /// Copy `src` into `dest_dir`, picking a non-colliding filename.
 pub fn copy_into_dir(src: &Path, dest_dir: &Path) -> anyhow::Result<PathBuf> {
     if !src.is_file() {
