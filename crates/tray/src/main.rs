@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
@@ -5,15 +6,24 @@ use std::time::Duration;
 use muda::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tracing_subscriber::EnvFilter;
 
-fn walls_bin() -> String {
-    std::env::var("WALLS_BIN").unwrap_or_else(|_| "walls".into())
+fn walls_bin() -> PathBuf {
+    if let Ok(p) = std::env::var("WALLS_BIN") {
+        return PathBuf::from(p);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let sibling = exe.parent().unwrap().join("walls");
+        if sibling.is_file() {
+            return sibling;
+        }
+    }
+    PathBuf::from("walls")
 }
 
 fn run_walls(args: &[&str]) -> anyhow::Result<()> {
     let bin = walls_bin();
     let status = Command::new(&bin).args(args).status()?;
     if !status.success() {
-        anyhow::bail!("{bin} {} failed: {status}", args.join(" "));
+        anyhow::bail!("{} {} failed: {status}", bin.display(), args.join(" "));
     }
     Ok(())
 }
