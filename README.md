@@ -2,6 +2,47 @@
 
 Personal wallpaper manager (Rust). JSON config under `~/.config/walls`, COSMIC + Wallhaven-first.
 
+## Scope
+
+**walls is:** a small daily-driver for rotating wallpapers — local folders, Wallhaven search/cache, CLI + TUI + tray, and a systemd user timer. Apply targets **COSMIC** first (`cosmic-ext-bg-ctl` + RON patch), with **feh/nitrogen** fallback when detection does not find COSMIC.
+
+**walls is not:** a [Variety](https://github.com/varietywalls/variety) clone. There is no quotes/clock overlay pipeline, no broad multi-DE matrix yet (see [v0.5 roadmap](docs/plans/2026-06-02-walls-roadmap-to-1.0.md)), and no image-effect pipeline (v0.6). PRs welcome, but the 1.0 bar is “install and rotate on COSMIC (or feh fallback)”.
+
+**MSRV:** `1.78` (workspace `rust-version`). **License:** MIT.
+
+## Install
+
+### Nix (recommended)
+
+```bash
+nix build github:willfish/walls#walls
+# binaries: result/bin/walls, result/bin/walls-tray
+
+# or from a clone:
+cd walls && nix build .#walls
+```
+
+Add `walls` and `walls-tray` to `home.packages`, wire the user timer and tray — see [`docs/home-manager.example.nix`](docs/home-manager.example.nix). Rotation interval lives in the **timer unit**, not `config.json`.
+
+### Cargo (from source)
+
+```bash
+git clone https://github.com/willfish/walls.git && cd walls
+nix develop   # optional: hooks, cosmic-bg, feh for local apply tests
+cargo install --path crates/cli --locked
+cargo install --path crates/tray --locked
+```
+
+On Linux, `walls-tray` needs GTK/libappindicator (see `flake.nix` `linuxTrayDeps`).
+
+### Config
+
+```bash
+mkdir -p ~/.config/walls
+cp config.example.json ~/.config/walls/config.json
+cp secrets.example.json ~/.config/walls/secrets.json   # wallhaven_api_key for online next
+```
+
 ## Architecture
 
 Component flow (source: [`docs/diagrams/architecture.mmd`](docs/diagrams/architecture.mmd)):
@@ -74,11 +115,9 @@ CI (GitHub Actions) runs rustfmt, clippy, `cargo test`, release build, `cargo au
 
 ## Quick start
 
+After [install](#install):
+
 ```bash
-cargo build --release
-mkdir -p ~/.config/walls
-cp config.example.json ~/.config/walls/config.json
-cp secrets.example.json ~/.config/walls/secrets.json   # add wallhaven_api_key for online next
 walls apply ~/Pictures/wallpaper.jpg
 walls next
 walls status
