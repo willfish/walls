@@ -49,6 +49,8 @@ enum Command {
         #[arg(long)]
         r#move: bool,
     },
+    /// Delete the current wallpaper from disk and state
+    Trash,
     /// Interactive terminal UI
     #[cfg(feature = "tui")]
     Tui,
@@ -72,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Current { meta }) => cmd_current(meta)?,
         Some(Command::Favorite) => cmd_favorite()?,
         Some(Command::Fetch { paths, r#move }) => cmd_fetch(paths, r#move)?,
+        Some(Command::Trash) => cmd_trash()?,
         #[cfg(feature = "tui")]
         Some(Command::Tui) => return tui::run().context("tui failed"),
         None => {
@@ -156,6 +159,13 @@ fn cmd_toggle_pause() -> anyhow::Result<()> {
     let mut ctx = WallsCtx::load()?;
     ctx.toggle_pause()?;
     println!("paused: {}", ctx.state.paused);
+    Ok(())
+}
+
+fn cmd_trash() -> anyhow::Result<()> {
+    let mut ctx = WallsCtx::load()?;
+    ctx.trash_current()?;
+    println!("trashed");
     Ok(())
 }
 

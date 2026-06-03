@@ -87,6 +87,35 @@ impl WallsCtx {
         Ok(imported)
     }
 
+    /// Delete the current wallpaper file and clear it from state/history.
+    pub fn trash_current(&mut self) -> anyhow::Result<()> {
+        let Some(current) = self.state.current.take() else {
+            anyhow::bail!("no current wallpaper");
+        };
+        let original = current.original_path.clone();
+        let composed = current.composed_path.clone();
+        if let Some(id) = current.wallhaven_id {
+            self.state.cache_queue.retain(|q| q != &id);
+        }
+        self.state.history.retain(|h| h != &original);
+        if self.state.history_index >= self.state.history.len() && !self.state.history.is_empty() {
+            self.state.history_index = self.state.history.len() - 1;
+        }
+        self.remove_file_if_exists(&original)?;
+        if composed != original {
+            self.remove_file_if_exists(&composed)?;
+        }
+        self.save_state()
+    }
+
+    fn remove_file_if_exists(&self, path: &str) -> anyhow::Result<()> {
+        let p = Path::new(path);
+        if p.is_file() {
+            std::fs::remove_file(p)?;
+        }
+        Ok(())
+    }
+
     /// Copy the current wallpaper's original file into the favorites directory.
     pub fn favorite_current(&self) -> anyhow::Result<PathBuf> {
         let current = self
