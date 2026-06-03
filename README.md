@@ -2,6 +2,46 @@
 
 Personal wallpaper manager (Rust). JSON config under `~/.config/walls`, COSMIC + Wallhaven-first.
 
+## Architecture
+
+```
+  ~/.config/walls/          systemd user units
+  ├── config.json         walls.timer ──▶ walls.service ──┐
+  ├── secrets.json        walls-tray.service ───────────┤
+  └── state.json (lock)                                  │
+                                                         ▼
+  local folders ──▶  ┌─────────────┐     subprocess    ┌──────────┐
+  Wallhaven API  ──▶ │ walls-core  │ ◀──────────────── │   walls   │
+                     │  WallsCtx   │                   │ CLI + TUI │
+                     │ apply/next  │                   └──────────┘
+                     │ state/queue │                         ▲
+                     └──────┬──────┘                         │
+                            │                          ┌─────┴──────┐
+                            ▼                          │ walls-tray │
+                     COSMIC RON patch                  │ prev/next  │
+                     (cosmic-ext-bg-ctl)               │ pause, TUI │
+                     or feh/nitrogen fallback           └────────────┘
+```
+
+### TUI layout (`walls tui`)
+
+```
+┌ walls ─────────────────────────────────────────────────────────────┐
+│ [Status] [Now] [History] [Browse] [Search]          tabs 1-5       │
+├────────────────────────────────────────────────────────────────────┤
+│ > tab body                                                         │
+│   Status  — paused, paths, queue size                              │
+│   Now     — current wallpaper metadata                             │
+│   History — j/k, Enter apply                                       │
+│   Browse  — queue · local folders · history; Enter apply           │
+│   Search  — i edit query, Enter search/apply (needs API key)       │
+├ keys ──────────────────────────────────────────────────────────────┤
+│ n/p next·prev   f/d favorite·trash   space pause   : command  q quit│
+└────────────────────────────────────────────────────────────────────┘
+
+  :next | :prev | :pause | :status | :quit     command mode (Esc cancel)
+```
+
 ## Development (Nix)
 
 ```bash
