@@ -4,5 +4,5 @@
 .env
 *.swp
 
-# Plans reviewed locally before commit
-/docs/plans/
+# Local plan scratch only (committed plans live under docs/plans/*.md)
+/docs/plans/scratch/
