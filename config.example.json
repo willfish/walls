@@ -31,6 +31,9 @@
   "display": {
     "mode": "os",
     "auto_rotate": false,
+    "imagemagick_command": "magick",
+    "target_width": null,
+    "target_height": null,
     "filters": {
       "enabled": false,
       "command": "magick",
