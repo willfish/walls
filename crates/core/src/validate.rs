@@ -6,6 +6,9 @@ pub fn warn_validation_issues(config: &Config, secrets: &Secrets, paths: &WallsP
     for issue in validate_config(config, secrets, paths) {
         tracing::warn!(issue, "config validation");
     }
+    for issue in secrets_file_permission_warnings(paths) {
+        tracing::warn!(issue, "secrets file permissions");
+    }
 }
 
 pub fn validate_config(config: &Config, secrets: &Secrets, paths: &WallsPaths) -> Vec<String> {
@@ -61,4 +64,28 @@ pub fn validate_config(config: &Config, secrets: &Secrets, paths: &WallsPaths) -
     }
 
     errors
+}
+
+#[cfg(unix)]
+pub fn secrets_file_permission_warnings(paths: &WallsPaths) -> Vec<String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let Ok(metadata) = std::fs::metadata(&paths.secrets_file) else {
+        return Vec::new();
+    };
+    let mode = metadata.permissions().mode();
+    if mode & 0o077 == 0 {
+        return Vec::new();
+    }
+
+    vec![format!(
+        "secrets file is readable by group or other users: {}; run `chmod 600 {}`",
+        paths.secrets_file.display(),
+        paths.secrets_file.display()
+    )]
+}
+
+#[cfg(not(unix))]
+pub fn secrets_file_permission_warnings(_paths: &WallsPaths) -> Vec<String> {
+    Vec::new()
 }
