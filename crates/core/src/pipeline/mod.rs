@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, ExitStatus};
+use std::thread;
+use std::time::Duration;
 
 use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
 use rand::seq::IndexedRandom;
@@ -95,11 +97,7 @@ fn run_imagemagick_filter(
     filter: &ImageMagickFilterConfig,
     output: &Path,
 ) -> anyhow::Result<()> {
-    let status = Command::new(command)
-        .arg(input)
-        .args(&filter.args)
-        .arg(output)
-        .status()?;
+    let status = run_imagemagick_command(command, input, &filter.args, output)?;
     if !status.success() {
         anyhow::bail!(
             "ImageMagick filter '{}' failed for {}: {status}",
@@ -207,11 +205,7 @@ fn run_display_mode_command(
     args: &[String],
     output: &Path,
 ) -> anyhow::Result<()> {
-    let status = Command::new(command)
-        .arg(input)
-        .args(args)
-        .arg(output)
-        .status()?;
+    let status = run_imagemagick_command(command, input, args, output)?;
     if !status.success() {
         anyhow::bail!(
             "ImageMagick display mode failed for {}: {status}",
@@ -219,6 +213,37 @@ fn run_display_mode_command(
         );
     }
     Ok(())
+}
+
+fn run_imagemagick_command(
+    command: &str,
+    input: &Path,
+    args: &[String],
+    output: &Path,
+) -> std::io::Result<ExitStatus> {
+    let mut attempts = 0;
+    loop {
+        let result = Command::new(command)
+            .arg(input)
+            .args(args)
+            .arg(output)
+            .status();
+        if !matches!(result, Err(ref err) if is_text_file_busy(err)) || attempts >= 3 {
+            return result;
+        }
+        attempts += 1;
+        thread::sleep(Duration::from_millis(25));
+    }
+}
+
+#[cfg(unix)]
+fn is_text_file_busy(err: &std::io::Error) -> bool {
+    err.raw_os_error() == Some(26)
+}
+
+#[cfg(not(unix))]
+fn is_text_file_busy(_err: &std::io::Error) -> bool {
+    false
 }
 
 fn display_mode_path(
