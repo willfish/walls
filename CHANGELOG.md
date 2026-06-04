@@ -9,9 +9,11 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-04
+
 ### Added
 
-- `display.auto_rotate` now applies EXIF orientation into the composed wallpaper output before applying wallpapers.
+- `display.auto_rotate` now applies EXIF orientation into the composed wallpaper output before applying wallpapers ([#82](https://github.com/willfish/walls/pull/82))
 
 ## [0.5.5] - 2026-06-04
 
@@ -95,7 +97,8 @@ Initial share of the workspace (M1–M5 scaffold).
 - `systemd` user `walls.service` + `walls.timer`; Nix flake; CI (rustfmt, clippy, test, audit/deny, multi-arch Nix)
 - Example `config.json` / `secrets.json` and home-manager timer sketch
 
-[unreleased]: https://github.com/willfish/walls/compare/v0.5.5...HEAD
+[unreleased]: https://github.com/willfish/walls/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/willfish/walls/compare/v0.5.5...v0.6.0
 [0.5.5]: https://github.com/willfish/walls/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/willfish/walls/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/willfish/walls/compare/v0.5.2...v0.5.3
