@@ -4,9 +4,9 @@ Personal wallpaper manager (Rust). JSON config under `~/.config/walls`, COSMIC +
 
 ## Scope
 
-**walls is:** a small daily-driver for rotating wallpapers — local folders, Wallhaven search/cache, CLI + TUI + tray, and a systemd user timer. Apply targets **COSMIC** first (`cosmic-ext-bg-ctl` + RON patch), GNOME-family desktops via `gsettings`, KDE Plasma via `dbus-send`, with **feh/nitrogen** fallback when detection does not find a native backend.
+**walls is:** a small daily-driver for rotating wallpapers — local folders, Wallhaven search/cache, CLI + TUI + tray, and a systemd user timer. Apply targets **COSMIC** first (`cosmic-ext-bg-ctl` + RON patch), GNOME-family desktops via `gsettings`, KDE Plasma via `dbus-send`, XFCE via `xfconf-query`, with **feh/nitrogen** fallback when detection does not find a native backend.
 
-**walls is not:** a [Variety](https://github.com/varietywalls/variety) clone. There is no quotes/clock overlay pipeline, no broad multi-DE matrix yet ([v0.5 milestone](https://github.com/willfish/walls/milestone/4), [apply backend matrix](docs/apply-backends.md)), and no image-effect pipeline ([v0.6](https://github.com/willfish/walls/milestone/5)). PRs welcome, but the 1.0 bar is “install and rotate on COSMIC/GNOME-family/KDE desktops (or feh fallback)”. [Roadmap issues](https://github.com/willfish/walls/issues?q=is%3Aopen+label%3Aepic).
+**walls is not:** a [Variety](https://github.com/varietywalls/variety) clone. There is no quotes/clock overlay pipeline, no broad multi-DE matrix yet ([v0.5 milestone](https://github.com/willfish/walls/milestone/4), [apply backend matrix](docs/apply-backends.md)), and no image-effect pipeline ([v0.6](https://github.com/willfish/walls/milestone/5)). PRs welcome, but the 1.0 bar is “install and rotate on COSMIC/GNOME-family/KDE/XFCE desktops (or feh fallback)”. [Roadmap issues](https://github.com/willfish/walls/issues?q=is%3Aopen+label%3Aepic).
 
 **MSRV:** `1.78` (workspace `rust-version`). **License:** MIT. See [CHANGELOG](CHANGELOG.md) for release history.
 
@@ -57,7 +57,7 @@ flowchart TD
     TRAY[walls-tray]
     CLI["walls CLI / TUI"]
     CORE[walls-core]
-    APPLY["COSMIC, GNOME, KDE, or feh"]
+    APPLY["COSMIC, GNOME, KDE, XFCE, or feh"]
 
     TIMER -->|walls next| CLI
     TRAY -->|subprocess| CLI
