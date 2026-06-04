@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 
 use tempfile::TempDir;
@@ -112,9 +113,9 @@ fn test_paths(temp: &TempDir) -> WallsPaths {
 
 fn display_mode_script(root: &std::path::Path, log: &std::path::Path) -> std::path::PathBuf {
     let script = root.join("display-mode.sh");
-    fs::write(
+    write_script(
         &script,
-        format!(
+        &format!(
             r#"#!/bin/sh
 input=$1
 last=
@@ -126,10 +127,18 @@ cp "$input" "$last"
 "#,
             log.display()
         ),
-    )
-    .unwrap();
-    make_executable(&script);
+    );
     script
+}
+
+fn write_script(path: &std::path::Path, contents: &str) {
+    let tmp = path.with_extension("tmp");
+    let mut file = fs::File::create(&tmp).unwrap();
+    file.write_all(contents.as_bytes()).unwrap();
+    file.sync_all().unwrap();
+    drop(file);
+    make_executable(&tmp);
+    fs::rename(tmp, path).unwrap();
 }
 
 fn make_executable(path: &std::path::Path) {

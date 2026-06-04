@@ -5,20 +5,7 @@ use std::time::Duration;
 
 use tracing_subscriber::EnvFilter;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-use walls_tray::{icon, tui};
-
-fn walls_bin() -> PathBuf {
-    if let Ok(p) = std::env::var("WALLS_BIN") {
-        return PathBuf::from(p);
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        let sibling = exe.parent().unwrap().join("walls");
-        if sibling.is_file() {
-            return sibling;
-        }
-    }
-    PathBuf::from("walls")
-}
+use walls_tray::{icon, resolve_walls_bin, tui};
 
 fn run_walls(walls: &PathBuf, args: &[&str]) -> anyhow::Result<()> {
     let status = Command::new(walls).args(args).status()?;
@@ -40,7 +27,7 @@ fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::from_default_env().add_directive("walls_tray=info".parse()?))
         .init();
 
-    let walls = walls_bin();
+    let walls = resolve_walls_bin();
     let menu = Menu::new();
     let next = MenuItem::new("Next wallpaper", true, None);
     let prev = MenuItem::new("Previous wallpaper", true, None);
