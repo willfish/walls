@@ -8,7 +8,7 @@ Personal wallpaper manager (Rust). JSON config under `~/.config/walls`, COSMIC +
 
 **walls is not:** a [Variety](https://github.com/varietywalls/variety) clone. There is no quotes/clock overlay pipeline and no broad multi-DE matrix beyond the tracked apply backend work ([v0.5 milestone](https://github.com/willfish/walls/milestone/4), [apply backend matrix](docs/apply-backends.md)). Image effects are opt-in and intentionally small while the [v0.6 pipeline](https://github.com/willfish/walls/milestone/5) lands. PRs welcome, but the 1.0 bar is “install and rotate on COSMIC/GNOME-family/KDE/XFCE/sway/Hyprland desktops (or feh fallback)”. [Roadmap issues](https://github.com/willfish/walls/issues?q=is%3Aopen+label%3Aepic).
 
-**MSRV:** `1.78` (workspace `rust-version`). **License:** MIT. See [CHANGELOG](CHANGELOG.md) for release history.
+**MSRV:** `1.86` (workspace `rust-version`). **License:** MIT. See [CHANGELOG](CHANGELOG.md) for release history.
 
 ## Install
 
@@ -147,6 +147,7 @@ walls-tray         # tray menu → walls prev/next/toggle-pause
 | `walls pause` / `walls resume` / `walls toggle-pause` | Works |
 | `walls next [--refresh <level>]` / `walls prev` | Works (local + Wallhaven cache queue; refresh levels: `all`, `filters-and-texts`, `texts`, `clock-only`) |
 | `walls tui` | Works — tabs: Status/Now/History/Browse/Search; `:` commands; `f`/`d` favorite/trash |
+| `walls tui` with `--features tui-preview` | Optional Now-tab image preview in terminals supporting Kitty graphics (Ghostty/Kitty) or iTerm2 inline images; metadata-only fallback otherwise; set `WALLS_TUI_PREVIEW=0` to force metadata-only |
 | `walls-tray` | Works (prev/next/pause, Open TUI, thumbnail icon) |
 
 Set `WALLS_TUI_CMD` to override the terminal launch command (`{walls}` is substituted). Defaults to `$TERMINAL -e walls tui` (terminal: `alacritty`).

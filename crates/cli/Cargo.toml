@@ -13,11 +13,14 @@ path = "src/main.rs"
 [features]
 default = ["tui"]
 tui = ["dep:ratatui"]
+tui-preview = ["tui", "dep:image", "dep:ratatui-image"]
 
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"], optional = true }
 ratatui = { version = "0.30", features = ["crossterm"], optional = true }
+ratatui-image = { version = "11", default-features = false, features = ["crossterm"], optional = true }
 serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
