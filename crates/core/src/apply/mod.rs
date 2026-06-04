@@ -2,11 +2,13 @@ mod cosmic;
 mod detect;
 mod feh_nitrogen;
 pub mod fill_mode;
+mod gnome;
 
 pub use cosmic::{patch_wallpaper_path, CosmicConfigApplier};
-pub use detect::{detect_desktop, Desktop};
+pub use detect::{detect_desktop, detect_desktop_from_env, Desktop};
 pub use feh_nitrogen::FehNitrogenApplier;
 pub use fill_mode::{ApplyTrigger, FillMode};
+pub use gnome::{gnome_gsettings_commands, GnomeApplier};
 
 use std::path::Path;
 use std::process::Command;
@@ -67,6 +69,7 @@ pub fn build_applier(apply: &ApplyConfig) -> anyhow::Result<Box<dyn Applier>> {
                 .ok_or_else(|| anyhow::anyhow!("apply.custom_script is not set"))?;
             Ok(Box::new(CustomScriptApplier::new(script)))
         }
+        ApplyBackendSetting::Gnome => Ok(Box::new(GnomeApplier)),
         ApplyBackendSetting::Feh => Ok(Box::new(FehNitrogenApplier)),
         ApplyBackendSetting::CosmicExtBgCtl => cosmic::build_cosmic_applier(&ApplyConfig {
             cosmic: crate::config::CosmicApplyConfig {
@@ -85,13 +88,11 @@ pub fn build_applier(apply: &ApplyConfig) -> anyhow::Result<Box<dyn Applier>> {
 
 fn resolve_backend(apply: &ApplyConfig) -> ApplyBackendSetting {
     match apply.backend {
-        ApplyBackendSetting::Auto => {
-            if detect_desktop() == Desktop::Cosmic {
-                ApplyBackendSetting::Cosmic
-            } else {
-                ApplyBackendSetting::Auto
-            }
-        }
+        ApplyBackendSetting::Auto => match detect_desktop() {
+            Desktop::Cosmic => ApplyBackendSetting::Cosmic,
+            Desktop::Gnome | Desktop::Unity | Desktop::Budgie => ApplyBackendSetting::Gnome,
+            _ => ApplyBackendSetting::Auto,
+        },
         other => other,
     }
 }
