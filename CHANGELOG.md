@@ -9,6 +9,10 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+### Added
+
+- Auto-detection now selects KDE, XFCE, Sway, and Hyprland native apply backends before feh/nitrogen fallback.
+
 ## [0.5.4] - 2026-06-04
 
 ### Added
