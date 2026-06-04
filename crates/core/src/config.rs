@@ -106,6 +106,25 @@ pub struct DisplayConfig {
     pub mode: String,
     #[serde(default)]
     pub auto_rotate: bool,
+    #[serde(default)]
+    pub filters: DisplayFiltersConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DisplayFiltersConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_imagemagick_command")]
+    pub command: String,
+    #[serde(default)]
+    pub filters: Vec<ImageMagickFilterConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ImageMagickFilterConfig {
+    pub name: String,
+    #[serde(default)]
+    pub args: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -238,6 +257,17 @@ impl Default for DisplayConfig {
         Self {
             mode: default_display_mode(),
             auto_rotate: false,
+            filters: DisplayFiltersConfig::default(),
+        }
+    }
+}
+
+impl Default for DisplayFiltersConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            command: default_imagemagick_command(),
+            filters: Vec::new(),
         }
     }
 }
@@ -314,6 +344,10 @@ fn default_cosmic_config_path() -> String {
 }
 fn default_display_mode() -> String {
     "os".into()
+}
+
+fn default_imagemagick_command() -> String {
+    "magick".into()
 }
 fn default_avoid_recent() -> usize {
     50

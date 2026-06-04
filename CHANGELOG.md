@@ -9,6 +9,10 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+### Added
+
+- `display.filters` can opt into random ImageMagick filter commands during wallpaper composition.
+
 ## [0.6.0] - 2026-06-04
 
 ### Added
