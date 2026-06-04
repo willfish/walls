@@ -9,6 +9,14 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+### Added
+
+- Optional `tui-preview` feature for terminal image previews in Ghostty/Kitty via Kitty graphics and iTerm2 via inline images, with metadata-only fallback in unsupported terminals.
+
+### Changed
+
+- Raised the workspace MSRV to Rust 1.86 for the maintained Ratatui image preview dependency.
+
 ## [0.6.3] - 2026-06-04
 
 ### Added
