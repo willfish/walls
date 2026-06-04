@@ -103,7 +103,7 @@
 
         wallsPkg = rustPlatform.buildRustPackage {
           pname = "walls";
-          version = "0.6.3";
+          version = "0.6.4";
           src = wallsSrc;
           cargoLock.lockFile = ./Cargo.lock;
           cargoBuildFlags = [

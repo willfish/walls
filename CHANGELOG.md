@@ -9,13 +9,21 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-06-04
+
 ### Added
 
-- Optional `tui-preview` feature for terminal image previews in Ghostty/Kitty via Kitty graphics and iTerm2 via inline images, with metadata-only fallback in unsupported terminals.
+- Optional `tui-preview` feature for terminal image previews in Ghostty/Kitty via Kitty graphics and iTerm2 via inline images, with metadata-only fallback in unsupported terminals ([#90](https://github.com/willfish/walls/pull/90)).
 
 ### Changed
 
 - Raised the workspace MSRV to Rust 1.86 for the maintained Ratatui image preview dependency.
+
+### Fixed
+
+- Wallhaven cache path lookup now probes standard filenames directly before falling back to legacy scans ([#116](https://github.com/willfish/walls/pull/116)).
+- `WallsCtx::load` now warns on non-fatal config validation issues instead of leaving them hidden until manual validation ([#117](https://github.com/willfish/walls/pull/117)).
+- `walls-tray` no longer unwraps executable parent paths while resolving the `walls` binary, and keeps sibling/WALLS_BIN/PATH fallback behavior covered by tests ([#118](https://github.com/willfish/walls/pull/118)).
 
 ## [0.6.3] - 2026-06-04
 
@@ -123,7 +131,8 @@ Initial share of the workspace (M1–M5 scaffold).
 - `systemd` user `walls.service` + `walls.timer`; Nix flake; CI (rustfmt, clippy, test, audit/deny, multi-arch Nix)
 - Example `config.json` / `secrets.json` and home-manager timer sketch
 
-[unreleased]: https://github.com/willfish/walls/compare/v0.6.3...HEAD
+[unreleased]: https://github.com/willfish/walls/compare/v0.6.4...HEAD
+[0.6.4]: https://github.com/willfish/walls/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/willfish/walls/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/willfish/walls/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/willfish/walls/compare/v0.6.0...v0.6.1
