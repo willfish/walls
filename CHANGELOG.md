@@ -9,9 +9,11 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-06-04
+
 ### Added
 
-- Sway, wlroots, and Hyprland apply backends via `swaymsg`, `swaybg`, and `hyprctl monitors`
+- Sway, wlroots, and Hyprland apply backends via `swaymsg`, `swaybg`, and `hyprctl monitors` ([#78](https://github.com/willfish/walls/pull/78))
 
 ## [0.5.3] - 2026-06-04
 
@@ -83,7 +85,8 @@ Initial share of the workspace (M1–M5 scaffold).
 - `systemd` user `walls.service` + `walls.timer`; Nix flake; CI (rustfmt, clippy, test, audit/deny, multi-arch Nix)
 - Example `config.json` / `secrets.json` and home-manager timer sketch
 
-[unreleased]: https://github.com/willfish/walls/compare/v0.5.3...HEAD
+[unreleased]: https://github.com/willfish/walls/compare/v0.5.4...HEAD
+[0.5.4]: https://github.com/willfish/walls/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/willfish/walls/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/willfish/walls/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/willfish/walls/compare/v0.5.0...v0.5.1
