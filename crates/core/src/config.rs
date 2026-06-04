@@ -73,6 +73,7 @@ pub enum ApplyBackendSetting {
     Auto,
     Cosmic,
     CosmicExtBgCtl,
+    Gnome,
     Feh,
     CustomScript,
 }
