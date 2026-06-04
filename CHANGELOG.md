@@ -9,9 +9,11 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-06-04
+
 ### Added
 
-- `display.mode` can compose configured target-size outputs for `zoom`, `fill-with-black`, and `fill-with-blur`.
+- `display.mode` can compose configured target-size outputs for `zoom`, `fill-with-black`, and `fill-with-blur` ([#86](https://github.com/willfish/walls/pull/86))
 
 ## [0.6.1] - 2026-06-04
 
@@ -107,7 +109,8 @@ Initial share of the workspace (M1–M5 scaffold).
 - `systemd` user `walls.service` + `walls.timer`; Nix flake; CI (rustfmt, clippy, test, audit/deny, multi-arch Nix)
 - Example `config.json` / `secrets.json` and home-manager timer sketch
 
-[unreleased]: https://github.com/willfish/walls/compare/v0.6.1...HEAD
+[unreleased]: https://github.com/willfish/walls/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/willfish/walls/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/willfish/walls/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/willfish/walls/compare/v0.5.5...v0.6.0
 [0.5.5]: https://github.com/willfish/walls/compare/v0.5.4...v0.5.5
