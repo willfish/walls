@@ -3592,6 +3592,7 @@ version = "0.5.1"
 dependencies = [
  "anyhow",
  "image",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
  "tray-icon",

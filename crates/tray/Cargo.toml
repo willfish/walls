@@ -17,3 +17,6 @@ tray-icon = { version = "0.24", default-features = false, features = ["gtk"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 walls-core = { path = "../core" }
+
+[dev-dependencies]
+tempfile = "3"

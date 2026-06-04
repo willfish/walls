@@ -1,6 +1,3 @@
-mod icon;
-mod tui;
-
 use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
@@ -8,6 +5,7 @@ use std::time::Duration;
 
 use tracing_subscriber::EnvFilter;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use walls_tray::{icon, tui};
 
 fn walls_bin() -> PathBuf {
     if let Ok(p) = std::env::var("WALLS_BIN") {
