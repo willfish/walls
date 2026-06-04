@@ -421,21 +421,7 @@ impl WallsCtx {
     }
 
     fn cached_wallhaven_path(&self, id: &str) -> Option<PathBuf> {
-        let prefix = format!("wallhaven-{id}");
-        let Ok(entries) = std::fs::read_dir(&self.paths.cache_dir) else {
-            return None;
-        };
-        for entry in entries.filter_map(|e| e.ok()) {
-            let path = entry.path();
-            if path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .is_some_and(|stem| stem == prefix)
-            {
-                return Some(path);
-            }
-        }
-        None
+        crate::wallhaven::cached_wallpaper_path(&self.paths.cache_dir, id)
     }
 
     pub fn advance_prev(&mut self) -> anyhow::Result<Option<PathBuf>> {
