@@ -9,6 +9,10 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+### Added
+
+- `walls next --refresh <level>` can reapply the current wallpaper at refresh levels `all`, `filters-and-texts`, `texts`, and `clock-only`.
+
 ## [0.6.2] - 2026-06-04
 
 ### Added

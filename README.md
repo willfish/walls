@@ -145,7 +145,7 @@ walls-tray         # tray menu → walls prev/next/toggle-pause
 | `walls trash` | Works |
 | `walls config validate` | Works |
 | `walls pause` / `walls resume` / `walls toggle-pause` | Works |
-| `walls next` / `walls prev` | Works (local + Wallhaven cache queue) |
+| `walls next [--refresh <level>]` / `walls prev` | Works (local + Wallhaven cache queue; refresh levels: `all`, `filters-and-texts`, `texts`, `clock-only`) |
 | `walls tui` | Works — tabs: Status/Now/History/Browse/Search; `:` commands; `f`/`d` favorite/trash |
 | `walls-tray` | Works (prev/next/pause, Open TUI, thumbnail icon) |
 
