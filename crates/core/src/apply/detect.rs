@@ -23,16 +23,28 @@ pub enum Desktop {
 }
 
 pub fn detect_desktop() -> Desktop {
-    if let Ok(xdg) = std::env::var("XDG_CURRENT_DESKTOP") {
+    detect_desktop_from_env(
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+        std::env::var("XDG_SESSION_DESKTOP").ok().as_deref(),
+        std::env::var("DESKTOP_STARTUP_ID").ok().as_deref(),
+    )
+}
+
+pub fn detect_desktop_from_env(
+    xdg_current_desktop: Option<&str>,
+    xdg_session_desktop: Option<&str>,
+    desktop_startup_id: Option<&str>,
+) -> Desktop {
+    if let Some(xdg) = xdg_current_desktop {
         let lower = xdg.to_lowercase();
-        if lower.contains("gnome") {
-            return Desktop::Gnome;
+        if lower.contains("budgie") {
+            return Desktop::Budgie;
         }
         if lower.contains("unity") {
             return Desktop::Unity;
         }
-        if lower.contains("budgie") {
-            return Desktop::Budgie;
+        if lower.contains("gnome") {
+            return Desktop::Gnome;
         }
         if lower.contains("kde") {
             return Desktop::Kde;
@@ -81,8 +93,8 @@ pub fn detect_desktop() -> Desktop {
 
     let session = format!(
         "{} {}",
-        std::env::var("XDG_SESSION_DESKTOP").unwrap_or_default(),
-        std::env::var("DESKTOP_STARTUP_ID").unwrap_or_default()
+        xdg_session_desktop.unwrap_or_default(),
+        desktop_startup_id.unwrap_or_default()
     );
     if session.to_lowercase().contains("awesome") {
         return Desktop::Awesome;
