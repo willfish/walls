@@ -1,6 +1,13 @@
 use crate::config::{ApplyBackendSetting, Config, Secrets};
 use crate::paths::{expand_home, WallsPaths};
 
+/// Log non-fatal config problems at load time (see also `walls config validate`).
+pub fn warn_validation_issues(config: &Config, secrets: &Secrets, paths: &WallsPaths) {
+    for issue in validate_config(config, secrets, paths) {
+        tracing::warn!(issue, "config validation");
+    }
+}
+
 pub fn validate_config(config: &Config, secrets: &Secrets, paths: &WallsPaths) -> Vec<String> {
     let mut errors = Vec::new();
 
