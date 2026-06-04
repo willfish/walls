@@ -5,6 +5,7 @@ mod file_uri;
 pub mod fill_mode;
 mod gnome;
 mod kde;
+mod xfce;
 
 pub use cosmic::{patch_wallpaper_path, CosmicConfigApplier};
 pub use detect::{detect_desktop, detect_desktop_from_env, Desktop};
@@ -12,6 +13,10 @@ pub use feh_nitrogen::FehNitrogenApplier;
 pub use fill_mode::{ApplyTrigger, FillMode};
 pub use gnome::{gnome_gsettings_commands, GnomeApplier};
 pub use kde::{kde_dbus_send_args, plasma_script, unsupported_plugins_from_dbus_reply, KdeApplier};
+pub use xfce::{
+    connected_xrandr_monitors, xfce_existing_backdrop_properties, xfce_existing_property_commands,
+    xfce_list_backdrop_args, xfce_new_monitor_commands, XfceApplier,
+};
 
 use std::path::Path;
 use std::process::Command;
@@ -74,6 +79,7 @@ pub fn build_applier(apply: &ApplyConfig) -> anyhow::Result<Box<dyn Applier>> {
         }
         ApplyBackendSetting::Gnome => Ok(Box::new(GnomeApplier)),
         ApplyBackendSetting::Kde => Ok(Box::new(KdeApplier)),
+        ApplyBackendSetting::Xfce => Ok(Box::new(XfceApplier)),
         ApplyBackendSetting::Feh => Ok(Box::new(FehNitrogenApplier)),
         ApplyBackendSetting::CosmicExtBgCtl => cosmic::build_cosmic_applier(&ApplyConfig {
             cosmic: crate::config::CosmicApplyConfig {
