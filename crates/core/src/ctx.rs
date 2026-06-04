@@ -177,7 +177,7 @@ impl WallsCtx {
         wallhaven_id: Option<String>,
         update_history: bool,
     ) -> anyhow::Result<()> {
-        let composed = pipeline::compose(&self.paths, original)?;
+        let composed = pipeline::compose(&self.paths, &self.config.display, original)?;
         crate::apply::apply_wallpaper(
             &self.config.apply,
             &composed,

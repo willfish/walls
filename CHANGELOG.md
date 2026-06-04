@@ -9,6 +9,10 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+### Added
+
+- `display.auto_rotate` now applies EXIF orientation into the composed wallpaper output before applying wallpapers.
+
 ## [0.5.5] - 2026-06-04
 
 ### Added
