@@ -9,9 +9,11 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-06-04
+
 ### Added
 
-- `display.filters` can opt into random ImageMagick filter commands during wallpaper composition.
+- `display.filters` can opt into random ImageMagick filter commands during wallpaper composition ([#84](https://github.com/willfish/walls/pull/84))
 
 ## [0.6.0] - 2026-06-04
 
@@ -101,7 +103,8 @@ Initial share of the workspace (M1–M5 scaffold).
 - `systemd` user `walls.service` + `walls.timer`; Nix flake; CI (rustfmt, clippy, test, audit/deny, multi-arch Nix)
 - Example `config.json` / `secrets.json` and home-manager timer sketch
 
-[unreleased]: https://github.com/willfish/walls/compare/v0.6.0...HEAD
+[unreleased]: https://github.com/willfish/walls/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/willfish/walls/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/willfish/walls/compare/v0.5.5...v0.6.0
 [0.5.5]: https://github.com/willfish/walls/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/willfish/walls/compare/v0.5.3...v0.5.4
