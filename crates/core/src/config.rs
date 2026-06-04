@@ -106,6 +106,12 @@ pub struct DisplayConfig {
     pub mode: String,
     #[serde(default)]
     pub auto_rotate: bool,
+    #[serde(default = "default_imagemagick_command")]
+    pub imagemagick_command: String,
+    #[serde(default)]
+    pub target_width: Option<u32>,
+    #[serde(default)]
+    pub target_height: Option<u32>,
     #[serde(default)]
     pub filters: DisplayFiltersConfig,
 }
@@ -257,6 +263,9 @@ impl Default for DisplayConfig {
         Self {
             mode: default_display_mode(),
             auto_rotate: false,
+            imagemagick_command: default_imagemagick_command(),
+            target_width: None,
+            target_height: None,
             filters: DisplayFiltersConfig::default(),
         }
     }

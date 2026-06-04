@@ -9,6 +9,10 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+### Added
+
+- `display.mode` can compose configured target-size outputs for `zoom`, `fill-with-black`, and `fill-with-blur`.
+
 ## [0.6.1] - 2026-06-04
 
 ### Added
