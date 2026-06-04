@@ -9,6 +9,12 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-06-04
+
+### Added
+
+- KDE Plasma apply backend via `dbus-send`, configurable with `"backend": "kde"` ([#74](https://github.com/willfish/walls/pull/74))
+
 ## [0.5.1] - 2026-06-04
 
 ### Added
@@ -67,7 +73,8 @@ Initial share of the workspace (M1–M5 scaffold).
 - `systemd` user `walls.service` + `walls.timer`; Nix flake; CI (rustfmt, clippy, test, audit/deny, multi-arch Nix)
 - Example `config.json` / `secrets.json` and home-manager timer sketch
 
-[unreleased]: https://github.com/willfish/walls/compare/v0.5.1...HEAD
+[unreleased]: https://github.com/willfish/walls/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/willfish/walls/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/willfish/walls/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/willfish/walls/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/willfish/walls/compare/v0.3.0...v0.4.0
