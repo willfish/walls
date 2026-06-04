@@ -9,9 +9,11 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-06-04
+
 ### Added
 
-- `walls next --refresh <level>` can reapply the current wallpaper at refresh levels `all`, `filters-and-texts`, `texts`, and `clock-only`.
+- `walls next --refresh <level>` can reapply the current wallpaper at refresh levels `all`, `filters-and-texts`, `texts`, and `clock-only` ([#88](https://github.com/willfish/walls/pull/88))
 
 ## [0.6.2] - 2026-06-04
 
@@ -113,7 +115,8 @@ Initial share of the workspace (M1–M5 scaffold).
 - `systemd` user `walls.service` + `walls.timer`; Nix flake; CI (rustfmt, clippy, test, audit/deny, multi-arch Nix)
 - Example `config.json` / `secrets.json` and home-manager timer sketch
 
-[unreleased]: https://github.com/willfish/walls/compare/v0.6.2...HEAD
+[unreleased]: https://github.com/willfish/walls/compare/v0.6.3...HEAD
+[0.6.3]: https://github.com/willfish/walls/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/willfish/walls/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/willfish/walls/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/willfish/walls/compare/v0.5.5...v0.6.0
