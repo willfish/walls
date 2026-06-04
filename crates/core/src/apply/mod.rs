@@ -106,12 +106,20 @@ pub fn build_applier(apply: &ApplyConfig) -> anyhow::Result<Box<dyn Applier>> {
 
 fn resolve_backend(apply: &ApplyConfig) -> ApplyBackendSetting {
     match apply.backend {
-        ApplyBackendSetting::Auto => match detect_desktop() {
-            Desktop::Cosmic => ApplyBackendSetting::Cosmic,
-            Desktop::Gnome | Desktop::Unity | Desktop::Budgie => ApplyBackendSetting::Gnome,
-            _ => ApplyBackendSetting::Auto,
-        },
+        ApplyBackendSetting::Auto => auto_backend_for_desktop(detect_desktop()),
         other => other,
+    }
+}
+
+pub fn auto_backend_for_desktop(desktop: Desktop) -> ApplyBackendSetting {
+    match desktop {
+        Desktop::Cosmic => ApplyBackendSetting::Cosmic,
+        Desktop::Gnome | Desktop::Unity | Desktop::Budgie => ApplyBackendSetting::Gnome,
+        Desktop::Kde => ApplyBackendSetting::Kde,
+        Desktop::Xfce => ApplyBackendSetting::Xfce,
+        Desktop::Sway => ApplyBackendSetting::Sway,
+        Desktop::Hyprland => ApplyBackendSetting::Hyprland,
+        _ => ApplyBackendSetting::Auto,
     }
 }
 
