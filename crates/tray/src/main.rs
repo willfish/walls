@@ -6,8 +6,8 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
-use muda::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tracing_subscriber::EnvFilter;
+use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 
 fn walls_bin() -> PathBuf {
     if let Ok(p) = std::env::var("WALLS_BIN") {
