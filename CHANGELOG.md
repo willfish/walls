@@ -9,10 +9,14 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-06-04
+
 ### Added
 
 - README install guide, scope statement, and MIT `LICENSE` ([#66](https://github.com/willfish/walls/pull/66))
 - README architecture (Mermaid) and TUI layout diagrams ([#65](https://github.com/willfish/walls/pull/65))
+- GNOME-family apply backend for GNOME, Unity, and Budgie via `gsettings` ([#71](https://github.com/willfish/walls/pull/71))
+- Apply backend manual test matrix ([#71](https://github.com/willfish/walls/pull/71))
 
 ## [0.5.0] - 2026-06-03
 
@@ -63,7 +67,8 @@ Initial share of the workspace (M1–M5 scaffold).
 - `systemd` user `walls.service` + `walls.timer`; Nix flake; CI (rustfmt, clippy, test, audit/deny, multi-arch Nix)
 - Example `config.json` / `secrets.json` and home-manager timer sketch
 
-[unreleased]: https://github.com/willfish/walls/compare/v0.5.0...HEAD
+[unreleased]: https://github.com/willfish/walls/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/willfish/walls/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/willfish/walls/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/willfish/walls/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/willfish/walls/compare/v0.1.0...v0.3.0
