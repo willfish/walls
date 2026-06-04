@@ -2,10 +2,10 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use anyhow::Context;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use tracing_subscriber::EnvFilter;
 use walls_core::apply::ApplyTrigger;
-use walls_core::WallsCtx;
+use walls_core::{RefreshLevel, WallsCtx};
 
 #[cfg(feature = "tui")]
 mod tui;
@@ -22,7 +22,11 @@ enum Command {
     /// Set a local image as the wallpaper
     Apply { path: PathBuf },
     /// Show next wallpaper from configured sources
-    Next,
+    Next {
+        /// Refresh current wallpaper instead of selecting a new one
+        #[arg(long, value_enum)]
+        refresh: Option<CliRefreshLevel>,
+    },
     /// Show previous wallpaper from history
     Prev,
     /// Print status
@@ -67,6 +71,25 @@ enum ConfigSub {
     Validate,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CliRefreshLevel {
+    All,
+    FiltersAndTexts,
+    Texts,
+    ClockOnly,
+}
+
+impl From<CliRefreshLevel> for RefreshLevel {
+    fn from(value: CliRefreshLevel) -> Self {
+        match value {
+            CliRefreshLevel::All => Self::All,
+            CliRefreshLevel::FiltersAndTexts => Self::FiltersAndTexts,
+            CliRefreshLevel::Texts => Self::Texts,
+            CliRefreshLevel::ClockOnly => Self::ClockOnly,
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -76,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Some(Command::Apply { path }) => cmd_apply(path)?,
-        Some(Command::Next) => cmd_next().await?,
+        Some(Command::Next { refresh }) => cmd_next(refresh).await?,
         Some(Command::Prev) => cmd_prev()?,
         Some(Command::Status { json }) => cmd_status(json)?,
         Some(Command::Pause) => cmd_pause(true)?,
@@ -141,8 +164,15 @@ fn cmd_status(json: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn cmd_next() -> anyhow::Result<()> {
+async fn cmd_next(refresh: Option<CliRefreshLevel>) -> anyhow::Result<()> {
     let mut ctx = WallsCtx::load()?;
+    if let Some(level) = refresh {
+        match ctx.refresh_current(level.into())? {
+            Some(p) => println!("{}", p.display()),
+            None => println!("no current wallpaper"),
+        }
+        return Ok(());
+    }
     match ctx.advance_next().await? {
         Some(p) => println!("{}", p.display()),
         None => println!("no change"),
