@@ -30,7 +30,16 @@
   },
   "display": {
     "mode": "os",
-    "auto_rotate": false
+    "auto_rotate": false,
+    "filters": {
+      "enabled": false,
+      "command": "magick",
+      "filters": [
+        { "name": "charcoal", "args": ["-charcoal", "1"] },
+        { "name": "edge", "args": ["-edge", "1"] },
+        { "name": "paint", "args": ["-paint", "4"] }
+      ]
+    }
   },
   "selection": {
     "use_landscape_enabled": true,
