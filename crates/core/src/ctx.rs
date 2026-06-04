@@ -82,12 +82,14 @@ impl WallsCtx {
         paths.apply_config_paths(&config.paths);
         paths.ensure_data_dirs()?;
         let state = State::load_or_default(&paths.state_file)?;
-        Ok(Self {
+        let ctx = Self {
             paths,
             config,
             secrets,
             state,
-        })
+        };
+        crate::validate::warn_validation_issues(&ctx.config, &ctx.secrets, &ctx.paths);
+        Ok(ctx)
     }
 
     pub fn save_state(&self) -> anyhow::Result<()> {
