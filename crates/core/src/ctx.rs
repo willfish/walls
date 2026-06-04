@@ -5,6 +5,46 @@ use crate::pipeline;
 use crate::selection::PickInput;
 use crate::state::State;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefreshLevel {
+    All,
+    FiltersAndTexts,
+    Texts,
+    ClockOnly,
+}
+
+impl RefreshLevel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::FiltersAndTexts => "filters-and-texts",
+            Self::Texts => "texts",
+            Self::ClockOnly => "clock-only",
+        }
+    }
+
+    fn recomposes_image(self) -> bool {
+        matches!(self, Self::All | Self::FiltersAndTexts)
+    }
+}
+
+impl FromStr for RefreshLevel {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "all" => Ok(Self::All),
+            "filters-and-texts" | "filters_and_texts" => Ok(Self::FiltersAndTexts),
+            "texts" => Ok(Self::Texts),
+            "clock-only" | "clock_only" => Ok(Self::ClockOnly),
+            _ => anyhow::bail!(
+                "unsupported refresh level '{value}' (expected all, filters-and-texts, texts, or clock-only)"
+            ),
+        }
+    }
+}
 
 pub struct WallsCtx {
     pub paths: WallsPaths,
@@ -170,6 +210,60 @@ impl WallsCtx {
         self.with_state_lock(|ctx| ctx.apply_file_inner(&original, trigger, None, true))
     }
 
+    pub fn refresh_current(&mut self, level: RefreshLevel) -> anyhow::Result<Option<PathBuf>> {
+        self.with_state_lock(|ctx| ctx.refresh_current_inner(level))
+    }
+
+    fn refresh_current_inner(&mut self, level: RefreshLevel) -> anyhow::Result<Option<PathBuf>> {
+        let Some(current) = self.state.current.clone() else {
+            return Ok(None);
+        };
+        let original = PathBuf::from(&current.original_path);
+        if !original.exists() {
+            anyhow::bail!(
+                "current original wallpaper does not exist: {}",
+                original.display()
+            );
+        }
+
+        if level.recomposes_image() {
+            self.apply_file_inner(
+                &original,
+                ApplyTrigger::Refresh,
+                current.wallhaven_id.clone(),
+                false,
+            )?;
+            return Ok(Some(PathBuf::from(
+                self.state
+                    .current
+                    .as_ref()
+                    .map(|cur| cur.composed_path.as_str())
+                    .unwrap_or(current.composed_path.as_str()),
+            )));
+        }
+
+        let composed = PathBuf::from(&current.composed_path);
+        if !composed.exists() {
+            anyhow::bail!(
+                "current composed wallpaper does not exist: {}",
+                composed.display()
+            );
+        }
+        crate::apply::apply_wallpaper(
+            &self.config.apply,
+            &composed,
+            &original,
+            self.fill_mode(),
+            ApplyTrigger::Refresh,
+        )?;
+        self.state.last_change_unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        self.save_state()?;
+        Ok(Some(composed))
+    }
+
     fn apply_file_inner(
         &mut self,
         original: &Path,
@@ -196,6 +290,7 @@ impl WallsCtx {
             wallhaven_id,
             original_path: history_id.clone(),
             composed_path: composed.display().to_string(),
+            post_filter_path: Some(composed.display().to_string()),
         });
         if update_history {
             if self.state.history.first().map(|s| s.as_str()) != Some(history_id.as_str()) {

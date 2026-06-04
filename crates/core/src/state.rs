@@ -31,6 +31,8 @@ pub struct CurrentWall {
     pub wallhaven_id: Option<String>,
     pub original_path: String,
     pub composed_path: String,
+    #[serde(default)]
+    pub post_filter_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

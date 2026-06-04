@@ -12,5 +12,5 @@ pub mod state;
 pub mod validate;
 pub mod wallhaven;
 
-pub use ctx::WallsCtx;
+pub use ctx::{RefreshLevel, WallsCtx};
 pub use paths::{expand_home, WallsPaths};
