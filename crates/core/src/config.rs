@@ -76,6 +76,9 @@ pub enum ApplyBackendSetting {
     Gnome,
     Kde,
     Xfce,
+    Sway,
+    Wlroots,
+    Hyprland,
     Feh,
     CustomScript,
 }

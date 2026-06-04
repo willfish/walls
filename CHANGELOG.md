@@ -9,6 +9,10 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+### Added
+
+- Sway, wlroots, and Hyprland apply backends via `swaymsg`, `swaybg`, and `hyprctl monitors`
+
 ## [0.5.3] - 2026-06-04
 
 ### Added

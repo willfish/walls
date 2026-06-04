@@ -5,6 +5,7 @@ mod file_uri;
 pub mod fill_mode;
 mod gnome;
 mod kde;
+mod wlroots;
 mod xfce;
 
 pub use cosmic::{patch_wallpaper_path, CosmicConfigApplier};
@@ -13,6 +14,10 @@ pub use feh_nitrogen::FehNitrogenApplier;
 pub use fill_mode::{ApplyTrigger, FillMode};
 pub use gnome::{gnome_gsettings_commands, GnomeApplier};
 pub use kde::{kde_dbus_send_args, plasma_script, unsupported_plugins_from_dbus_reply, KdeApplier};
+pub use wlroots::{
+    hyprctl_monitors_args, hyprland_monitor_names, sway_output_bg_args, wlroots_scale_mode,
+    wlroots_swaybg_commands, HyprlandApplier, SwayApplier, WlrootsApplier,
+};
 pub use xfce::{
     connected_xrandr_monitors, xfce_existing_backdrop_properties, xfce_existing_property_commands,
     xfce_list_backdrop_args, xfce_new_monitor_commands, XfceApplier,
@@ -80,6 +85,9 @@ pub fn build_applier(apply: &ApplyConfig) -> anyhow::Result<Box<dyn Applier>> {
         ApplyBackendSetting::Gnome => Ok(Box::new(GnomeApplier)),
         ApplyBackendSetting::Kde => Ok(Box::new(KdeApplier)),
         ApplyBackendSetting::Xfce => Ok(Box::new(XfceApplier)),
+        ApplyBackendSetting::Sway => Ok(Box::new(SwayApplier)),
+        ApplyBackendSetting::Wlroots => Ok(Box::new(WlrootsApplier)),
+        ApplyBackendSetting::Hyprland => Ok(Box::new(HyprlandApplier)),
         ApplyBackendSetting::Feh => Ok(Box::new(FehNitrogenApplier)),
         ApplyBackendSetting::CosmicExtBgCtl => cosmic::build_cosmic_applier(&ApplyConfig {
             cosmic: crate::config::CosmicApplyConfig {
