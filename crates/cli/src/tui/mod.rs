@@ -1,6 +1,7 @@
 mod app;
 #[cfg(feature = "tui-preview")]
 mod preview;
+mod style;
 
 use std::io::{stdout, IsTerminal};
 
@@ -13,7 +14,8 @@ use ratatui::crossterm::terminal::{
 };
 use ratatui::crossterm::ExecutableCommand;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Tabs};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{List, ListItem, Paragraph, Tabs};
 use walls_core::WallsCtx;
 
 pub fn run() -> anyhow::Result<()> {
@@ -73,131 +75,217 @@ impl Drop for TerminalRestore {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UiAction {
+    Quit,
+    EnterCommandMode,
+    CancelInput,
+    SubmitCommand,
+    CommandBackspace,
+    CommandChar(char),
+    SubmitSearch,
+    SearchBackspace,
+    SearchChar(char),
+    Next,
+    Prev,
+    Favorite,
+    Trash,
+    TogglePause,
+    SwitchTab(Tab),
+    EditSearch,
+    MoveDown,
+    MoveUp,
+    Enter,
+    Ignore,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UpdateEffect {
+    None,
+    Reload,
+    Quit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerminalSize {
+    Tiny,
+    Narrow,
+    Standard,
+    Wide,
+}
+
+fn terminal_size(area: Rect) -> TerminalSize {
+    if area.width < 10 || area.height < 6 {
+        TerminalSize::Tiny
+    } else if area.width < 50 || area.height < 12 {
+        TerminalSize::Narrow
+    } else if area.width >= 100 && area.height >= 18 {
+        TerminalSize::Wide
+    } else {
+        TerminalSize::Standard
+    }
+}
+
 fn handle_key(app: &mut App, key: KeyEvent, rt: &tokio::runtime::Handle) -> anyhow::Result<bool> {
+    let action = action_for_key(app, key);
+    let effect = update(app, action, rt)?;
+    apply_effect(app, effect)?;
+    Ok(effect == UpdateEffect::Quit)
+}
+
+fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
     match app.input_mode {
-        InputMode::Command => return handle_command_key(app, key, rt),
-        InputMode::SearchInput => return handle_search_input_key(app, key, rt),
+        InputMode::Command => {
+            return match key.code {
+                KeyCode::Esc => UiAction::CancelInput,
+                KeyCode::Enter => UiAction::SubmitCommand,
+                KeyCode::Backspace => UiAction::CommandBackspace,
+                KeyCode::Char(c) => UiAction::CommandChar(c),
+                _ => UiAction::Ignore,
+            };
+        }
+        InputMode::SearchInput => {
+            return match key.code {
+                KeyCode::Esc => UiAction::CancelInput,
+                KeyCode::Enter => UiAction::SubmitSearch,
+                KeyCode::Backspace => UiAction::SearchBackspace,
+                KeyCode::Char(c) => UiAction::SearchChar(c),
+                _ => UiAction::Ignore,
+            };
+        }
         InputMode::Normal => {}
     }
 
     match key.code {
-        KeyCode::Char('q') => return Ok(true),
-        KeyCode::Char(':') => {
+        KeyCode::Char('q') => UiAction::Quit,
+        KeyCode::Char(':') => UiAction::EnterCommandMode,
+        KeyCode::Char('n') => UiAction::Next,
+        KeyCode::Char('p') => UiAction::Prev,
+        KeyCode::Char('f') => UiAction::Favorite,
+        KeyCode::Char('d') => UiAction::Trash,
+        KeyCode::Char(' ') => UiAction::TogglePause,
+        KeyCode::Char(c @ '1'..='5') => {
+            let index = c
+                .to_digit(10)
+                .expect("key guard only allows ASCII digits 1-5") as usize
+                - 1;
+            UiAction::SwitchTab(Tab::from_index(index))
+        }
+        KeyCode::Char('i') if app.tab == Tab::Search => UiAction::EditSearch,
+        KeyCode::Down | KeyCode::Char('j') => UiAction::MoveDown,
+        KeyCode::Up | KeyCode::Char('k') => UiAction::MoveUp,
+        KeyCode::Enter => UiAction::Enter,
+        _ => UiAction::Ignore,
+    }
+}
+
+fn update(
+    app: &mut App,
+    action: UiAction,
+    rt: &tokio::runtime::Handle,
+) -> anyhow::Result<UpdateEffect> {
+    match action {
+        UiAction::Quit => return Ok(UpdateEffect::Quit),
+        UiAction::EnterCommandMode => {
             app.input_mode = InputMode::Command;
             app.cmd_line.clear();
         }
-        KeyCode::Char('n') => {
-            app.message = match rt.block_on(app.ctx.advance_next()) {
-                Ok(Some(p)) => format!("next: {}", p.display()),
-                Ok(None) => "next: no change".into(),
-                Err(e) => format!("next error: {e}"),
-            };
-            app.reload_ctx()?;
-        }
-        KeyCode::Char('p') => {
-            app.message = match app.ctx.advance_prev() {
-                Ok(Some(p)) => format!("prev: {}", p.display()),
-                Ok(None) => "prev: none".into(),
-                Err(e) => format!("prev error: {e}"),
-            };
-            app.reload_ctx()?;
-        }
-        KeyCode::Char('f') => match app.favorite_current() {
-            Ok(msg) => {
-                app.message = msg;
-                app.reload_ctx()?;
-            }
-            Err(e) => app.message = format!("favorite error: {e}"),
-        },
-        KeyCode::Char('d') => match app.trash_current() {
-            Ok(msg) => {
-                app.message = msg;
-                app.reload_ctx()?;
-            }
-            Err(e) => app.message = format!("trash error: {e}"),
-        },
-        KeyCode::Char(' ') => match app.ctx.toggle_pause() {
-            Ok(()) => app.message = format!("paused: {}", app.ctx.state.paused),
-            Err(e) => app.message = format!("pause error: {e}"),
-        },
-        KeyCode::Char(c @ '1'..='5') => {
-            app.tab = Tab::from_index(c as usize - 1);
-            app.cursor = 0;
-        }
-        KeyCode::Char('i') if app.tab == Tab::Search => {
-            app.input_mode = InputMode::SearchInput;
-        }
-        KeyCode::Down | KeyCode::Char('j') => app.move_down(),
-        KeyCode::Up | KeyCode::Char('k') => app.move_up(),
-        KeyCode::Enter => handle_enter(app, rt)?,
-        _ => {}
-    }
-    Ok(false)
-}
-
-fn handle_command_key(
-    app: &mut App,
-    key: KeyEvent,
-    rt: &tokio::runtime::Handle,
-) -> anyhow::Result<bool> {
-    match key.code {
-        KeyCode::Esc => {
+        UiAction::CancelInput => {
             app.input_mode = InputMode::Normal;
             app.cmd_line.clear();
         }
-        KeyCode::Enter => {
+        UiAction::SubmitCommand => {
             match app.run_command(rt)? {
-                None => return Ok(true),
+                None => return Ok(UpdateEffect::Quit),
                 Some(msg) => app.message = msg,
             }
             app.input_mode = InputMode::Normal;
             app.cmd_line.clear();
-            app.reload_ctx()?;
+            return Ok(UpdateEffect::Reload);
         }
-        KeyCode::Backspace => {
+        UiAction::CommandBackspace => {
             app.cmd_line.pop();
         }
-        KeyCode::Char(c) => app.cmd_line.push(c),
-        _ => {}
-    }
-    Ok(false)
-}
-
-fn handle_search_input_key(
-    app: &mut App,
-    key: KeyEvent,
-    rt: &tokio::runtime::Handle,
-) -> anyhow::Result<bool> {
-    match key.code {
-        KeyCode::Esc => app.input_mode = InputMode::Normal,
-        KeyCode::Enter => {
+        UiAction::CommandChar(c) => app.cmd_line.push(c),
+        UiAction::SubmitSearch => {
             app.input_mode = InputMode::Normal;
             app.message = match rt.block_on(app.run_search()) {
                 Ok(()) => format!("search: {} results", app.search_results.len()),
                 Err(e) => format!("search error: {e}"),
             };
         }
-        KeyCode::Backspace => {
+        UiAction::SearchBackspace => {
             app.search_query.pop();
         }
-        KeyCode::Char(c) => app.search_query.push(c),
-        _ => {}
+        UiAction::SearchChar(c) => app.search_query.push(c),
+        UiAction::Next => {
+            app.message = match rt.block_on(app.ctx.advance_next()) {
+                Ok(Some(p)) => format!("next: {}", p.display()),
+                Ok(None) => "next: no change".into(),
+                Err(e) => format!("next error: {e}"),
+            };
+            return Ok(UpdateEffect::Reload);
+        }
+        UiAction::Prev => {
+            app.message = match app.ctx.advance_prev() {
+                Ok(Some(p)) => format!("prev: {}", p.display()),
+                Ok(None) => "prev: none".into(),
+                Err(e) => format!("prev error: {e}"),
+            };
+            return Ok(UpdateEffect::Reload);
+        }
+        UiAction::Favorite => match app.favorite_current() {
+            Ok(msg) => {
+                app.message = msg;
+                return Ok(UpdateEffect::Reload);
+            }
+            Err(e) => app.message = format!("favorite error: {e}"),
+        },
+        UiAction::Trash => match app.trash_current() {
+            Ok(msg) => {
+                app.message = msg;
+                return Ok(UpdateEffect::Reload);
+            }
+            Err(e) => app.message = format!("trash error: {e}"),
+        },
+        UiAction::TogglePause => match app.ctx.toggle_pause() {
+            Ok(()) => app.message = format!("paused: {}", app.ctx.state.paused),
+            Err(e) => app.message = format!("pause error: {e}"),
+        },
+        UiAction::SwitchTab(tab) => {
+            app.tab = tab;
+            app.cursor = 0;
+        }
+        UiAction::EditSearch => {
+            app.input_mode = InputMode::SearchInput;
+        }
+        UiAction::MoveDown => app.move_down(),
+        UiAction::MoveUp => app.move_up(),
+        UiAction::Enter => return handle_enter(app, rt),
+        UiAction::Ignore => {}
     }
-    Ok(false)
+    Ok(UpdateEffect::None)
 }
 
-fn handle_enter(app: &mut App, rt: &tokio::runtime::Handle) -> anyhow::Result<()> {
+fn apply_effect(app: &mut App, effect: UpdateEffect) -> anyhow::Result<()> {
+    if effect == UpdateEffect::Reload {
+        app.reload_ctx()?;
+    }
+    Ok(())
+}
+
+fn handle_enter(app: &mut App, rt: &tokio::runtime::Handle) -> anyhow::Result<UpdateEffect> {
     match app.tab {
         Tab::History => {
             if let Some(path) = app.apply_history_selection() {
                 app.message = format!("applied: {}", path.display());
-                app.reload_ctx()?;
+                return Ok(UpdateEffect::Reload);
             }
         }
         Tab::Browse => {
             if let Some(msg) = rt.block_on(app.apply_browse_selection())? {
                 app.message = msg;
-                app.reload_ctx()?;
+                return Ok(UpdateEffect::Reload);
             }
         }
         Tab::Search => {
@@ -205,12 +293,12 @@ fn handle_enter(app: &mut App, rt: &tokio::runtime::Handle) -> anyhow::Result<()
                 app.input_mode = InputMode::SearchInput;
             } else if let Some(msg) = rt.block_on(app.apply_search_selection())? {
                 app.message = msg;
-                app.reload_ctx()?;
+                return Ok(UpdateEffect::Reload);
             }
         }
         _ => {}
     }
-    Ok(())
+    Ok(UpdateEffect::None)
 }
 
 #[cfg(feature = "tui-preview")]
@@ -226,58 +314,62 @@ fn draw(f: &mut Frame, app: &App) {
 #[cfg(not(feature = "tui-preview"))]
 fn draw_inner(f: &mut Frame, app: &App) {
     let area = f.area();
-    if area.height < 6 || area.width < 10 {
+    if terminal_size(area) == TerminalSize::Tiny {
         return;
     }
+    let theme = style::Theme::new(app.color_mode);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
             Constraint::Min(0),
-            Constraint::Length(3),
+            Constraint::Length(4),
         ])
         .split(area);
 
     let titles = vec!["Status", "Now", "History", "Browse", "Search"];
     let tabs = Tabs::new(titles)
-        .block(Block::default().borders(Borders::ALL).title("walls"))
+        .block(theme.chrome_block("walls"))
+        .style(theme.normal())
+        .highlight_style(theme.selected())
         .select(app.tab.index());
     f.render_widget(tabs, chunks[0]);
 
-    render_tab_body(f, chunks[1], app, None);
+    render_tab_body(f, chunks[1], app, None, theme);
 
-    let help = Paragraph::new(app.footer_help())
-        .block(Block::default().borders(Borders::ALL).title("keys"));
+    let help = footer_paragraph(app, chunks[2].width, theme);
     f.render_widget(help, chunks[2]);
 }
 
 #[cfg(feature = "tui-preview")]
 fn draw_inner(f: &mut Frame, app: &App, preview: Option<&mut preview::ImagePreview>) {
     let area = f.area();
-    if area.height < 6 || area.width < 10 {
+    if terminal_size(area) == TerminalSize::Tiny {
         return;
     }
+    let theme = style::Theme::new(app.color_mode);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
             Constraint::Min(0),
-            Constraint::Length(3),
+            Constraint::Length(4),
         ])
         .split(area);
 
     let titles = vec!["Status", "Now", "History", "Browse", "Search"];
     let tabs = Tabs::new(titles)
-        .block(Block::default().borders(Borders::ALL).title("walls"))
+        .block(theme.chrome_block("walls"))
+        .style(theme.normal())
+        .highlight_style(theme.selected())
         .select(app.tab.index());
     f.render_widget(tabs, chunks[0]);
 
-    render_tab_body(f, chunks[1], app, preview);
+    render_tab_body(f, chunks[1], app, preview, theme);
 
-    let help = Paragraph::new(app.footer_help())
-        .block(Block::default().borders(Borders::ALL).title("keys"));
+    let help = footer_paragraph(app, chunks[2].width, theme);
     f.render_widget(help, chunks[2]);
 }
 
@@ -287,13 +379,14 @@ fn render_tab_body(
     area: Rect,
     app: &App,
     preview: Option<&mut preview::ImagePreview>,
+    theme: style::Theme,
 ) {
-    if app.tab == Tab::Now && area.width >= 80 && area.height >= 12 {
+    if app.tab == Tab::Now && terminal_size(area) == TerminalSize::Wide {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
             .split(area);
-        render_lines(f, chunks[0], app.tab.title(), now_lines(app));
+        render_lines(f, chunks[0], app.tab.title(), now_lines(app), theme);
         let path = app
             .ctx
             .state
@@ -301,19 +394,31 @@ fn render_tab_body(
             .as_ref()
             .map(|current| current.composed_path.as_str());
         if let Some(preview) = preview {
-            preview.render(f, chunks[1], path);
+            preview.render(f, chunks[1], path, theme);
         } else {
-            render_lines(f, chunks[1], "preview", vec!["preview unavailable".into()]);
+            render_lines(
+                f,
+                chunks[1],
+                "preview",
+                vec!["preview unavailable".into()],
+                theme,
+            );
         }
         return;
     }
 
-    render_lines(f, area, app.tab.title(), tab_lines(app));
+    render_lines(f, area, app.tab.title(), tab_lines(app), theme);
 }
 
 #[cfg(not(feature = "tui-preview"))]
-fn render_tab_body(f: &mut Frame, area: Rect, app: &App, _preview: Option<()>) {
-    render_lines(f, area, app.tab.title(), tab_lines(app));
+fn render_tab_body(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    _preview: Option<()>,
+    theme: style::Theme,
+) {
+    render_lines(f, area, app.tab.title(), tab_lines(app), theme);
 }
 
 fn tab_lines(app: &App) -> Vec<String> {
@@ -326,10 +431,73 @@ fn tab_lines(app: &App) -> Vec<String> {
     }
 }
 
-fn render_lines(f: &mut Frame, area: Rect, title: &str, body: Vec<String>) {
-    let items: Vec<ListItem> = body.iter().map(|l| ListItem::new(l.as_str())).collect();
-    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
+fn render_lines(f: &mut Frame, area: Rect, title: &str, body: Vec<String>, theme: style::Theme) {
+    let items: Vec<ListItem> = body
+        .iter()
+        .map(|line| {
+            let item_style = line_style(line, theme);
+            ListItem::new(line.as_str()).style(item_style)
+        })
+        .collect();
+    let list = List::new(items)
+        .block(theme.content_block(title))
+        .style(theme.normal());
     f.render_widget(list, area);
+}
+
+fn footer_paragraph(app: &App, width: u16, theme: style::Theme) -> Paragraph<'_> {
+    let mode = match app.input_mode {
+        InputMode::Normal => "normal",
+        InputMode::Command => "command",
+        InputMode::SearchInput => "search",
+    };
+    let status = if app.message.is_empty() {
+        "ready"
+    } else {
+        app.message.as_str()
+    };
+    let status_kind = style::status_kind(status);
+
+    Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled(format!("{mode} "), theme.accent()),
+            Span::styled(status.to_string(), theme.status(status_kind)),
+        ]),
+        Line::from(vec![Span::styled(
+            footer_keys(app, width),
+            theme.key_hint(),
+        )]),
+    ])
+    .block(theme.chrome_block("keys"))
+}
+
+fn footer_keys(app: &App, width: u16) -> String {
+    if width < 50 {
+        return match app.input_mode {
+            InputMode::Command => format!(":{}_ | Enter | Esc | q", app.cmd_line),
+            InputMode::SearchInput => "type | Enter search | Esc | q".into(),
+            InputMode::Normal => match app.tab {
+                Tab::Search => "i edit | Enter | j/k | : | q".into(),
+                _ => "1-5 | n/p | f/d | sp | : | q".into(),
+            },
+        };
+    }
+
+    app.footer_keys()
+}
+
+fn line_style(line: &str, theme: style::Theme) -> Style {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with('>') {
+        return theme.selected();
+    }
+    if trimmed.starts_with("--") {
+        return theme.muted();
+    }
+    if trimmed.starts_with('(') || trimmed.contains("preview unavailable") {
+        return theme.muted();
+    }
+    theme.status(style::status_kind(line))
 }
 
 fn status_lines(app: &App) -> Vec<String> {
@@ -356,5 +524,255 @@ fn now_lines(app: &App) -> Vec<String> {
             app.message.clone(),
         ],
         None => vec!["(no current wallpaper)".into(), app.message.clone()],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use ratatui::backend::TestBackend;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    use ratatui::layout::Rect;
+    use ratatui::Terminal;
+    use walls_core::WallsCtx;
+
+    use super::{
+        action_for_key, app::App, draw_inner, handle_key, style, update, InputMode, Tab,
+        TerminalSize, UiAction, UpdateEffect,
+    };
+
+    fn test_app() -> App {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let image_dir = tmp.path().join("images");
+        fs::create_dir_all(&image_dir).expect("images dir");
+        fs::write(image_dir.join("a.jpg"), b"x").expect("image");
+
+        let noop = tmp.path().join("noop.sh");
+        fs::write(&noop, "#!/bin/sh\nexit 0\n").expect("noop");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&noop, fs::Permissions::from_mode(0o755)).expect("chmod");
+        }
+
+        let config = serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": false },
+            "paths": {
+                "cache_dir": tmp.path().join("cache").display().to_string(),
+                "download_dir": tmp.path().join("downloaded").display().to_string(),
+                "favorites_dir": tmp.path().join("favorites").display().to_string(),
+                "fetched_dir": tmp.path().join("fetched").display().to_string(),
+                "compose_dir": tmp.path().join("wallpaper").display().to_string(),
+            },
+            "apply": { "backend": "custom-script", "custom_script": noop.display().to_string() },
+            "display": { "mode": "os" },
+            "sources": [{ "enabled": true, "type": "folder", "path": image_dir.display().to_string() }],
+        });
+        fs::write(
+            tmp.path().join("config.json"),
+            serde_json::to_string_pretty(&config).expect("config json"),
+        )
+        .expect("write config");
+        fs::write(tmp.path().join("secrets.json"), "{}").expect("write secrets");
+
+        App::new(WallsCtx::load_from(tmp.path()).expect("ctx")).expect("app")
+    }
+
+    fn render_text(app: &App, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| {
+                #[cfg(feature = "tui-preview")]
+                draw_inner(frame, app, None);
+                #[cfg(not(feature = "tui-preview"))]
+                draw_inner(frame, app);
+            })
+            .expect("draw");
+
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        text
+    }
+
+    #[test]
+    fn default_status_screen_renders_semantic_chrome_and_ready_status() {
+        let app = test_app();
+        let text = render_text(&app, 80, 24);
+
+        assert!(text.contains("walls"), "{text}");
+        assert!(text.contains("Status"), "{text}");
+        assert!(text.contains("local candidates: 1 paths"), "{text}");
+        assert!(text.contains("normal"), "{text}");
+        assert!(text.contains("ready"), "{text}");
+    }
+
+    #[test]
+    fn command_mode_footer_shows_mode_command_and_cancel_path() {
+        let mut app = test_app();
+        app.input_mode = InputMode::Command;
+        app.cmd_line = "next".into();
+        app.message = "applied: /tmp/wall.jpg".into();
+
+        let text = render_text(&app, 80, 12);
+
+        assert!(text.contains("command"), "{text}");
+        assert!(text.contains(":next_"), "{text}");
+        assert!(text.contains("Esc cancel"), "{text}");
+        assert!(text.contains("applied: /tmp/wall.jpg"), "{text}");
+    }
+
+    #[test]
+    fn narrow_search_screen_keeps_mode_query_and_actions_visible() {
+        let mut app = test_app();
+        app.tab = Tab::Search;
+        app.search_query = "mountains".into();
+
+        let text = render_text(&app, 42, 10);
+
+        assert!(text.contains("Search"), "{text}");
+        assert!(text.contains("query: mountains"), "{text}");
+        assert!(text.contains("normal"), "{text}");
+        assert!(text.contains("i edit | Enter | j/k | : | q"), "{text}");
+    }
+
+    #[test]
+    fn terminal_size_contracts_cover_tiny_narrow_standard_and_wide() {
+        assert_eq!(
+            super::terminal_size(Rect::new(0, 0, 9, 24)),
+            TerminalSize::Tiny
+        );
+        assert_eq!(
+            super::terminal_size(Rect::new(0, 0, 42, 10)),
+            TerminalSize::Narrow
+        );
+        assert_eq!(
+            super::terminal_size(Rect::new(0, 0, 80, 24)),
+            TerminalSize::Standard
+        );
+        assert_eq!(
+            super::terminal_size(Rect::new(0, 0, 120, 32)),
+            TerminalSize::Wide
+        );
+    }
+
+    #[test]
+    fn standard_layout_keeps_full_key_row_visible() {
+        let app = test_app();
+        let text = render_text(&app, 80, 24);
+
+        assert!(text.contains("space pause"), "{text}");
+        assert!(text.contains("q quit"), "{text}");
+    }
+
+    #[cfg(feature = "tui-preview")]
+    #[test]
+    fn wide_now_layout_keeps_metadata_and_preview_regions_stable() {
+        let mut app = test_app();
+        app.tab = Tab::Now;
+
+        let text = render_text(&app, 120, 32);
+
+        assert!(text.contains("Now"), "{text}");
+        assert!(text.contains("preview"), "{text}");
+        assert!(text.contains("(no current wallpaper)"), "{text}");
+    }
+
+    #[test]
+    fn status_kind_maps_messages_to_redundant_state_roles() {
+        assert_eq!(
+            style::status_kind("applied: /tmp/a.jpg"),
+            style::StatusKind::Success
+        );
+        assert_eq!(
+            style::status_kind("preview unsupported; showing metadata"),
+            style::StatusKind::Error
+        );
+        assert_eq!(
+            style::status_kind("preview disabled; showing metadata"),
+            style::StatusKind::Warning
+        );
+        assert_eq!(style::status_kind("ready"), style::StatusKind::Neutral);
+    }
+
+    #[test]
+    fn number_keys_select_visible_tabs_by_digit() {
+        let mut app = test_app();
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+
+        assert!(
+            !handle_key(&mut app, KeyEvent::from(KeyCode::Char('5')), rt.handle())
+                .expect("handle key")
+        );
+        assert_eq!(app.tab, Tab::Search);
+
+        assert!(
+            !handle_key(&mut app, KeyEvent::from(KeyCode::Char('2')), rt.handle())
+                .expect("handle key")
+        );
+        assert_eq!(app.tab, Tab::Now);
+    }
+
+    #[test]
+    fn key_mapping_separates_normal_command_and_search_input_modes() {
+        let mut app = test_app();
+
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char(':'))),
+            UiAction::EnterCommandMode
+        );
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('q'))),
+            UiAction::Quit
+        );
+
+        app.input_mode = InputMode::Command;
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('q'))),
+            UiAction::CommandChar('q')
+        );
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Esc)),
+            UiAction::CancelInput
+        );
+
+        app.input_mode = InputMode::SearchInput;
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('q'))),
+            UiAction::SearchChar('q')
+        );
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Enter)),
+            UiAction::SubmitSearch
+        );
+    }
+
+    #[test]
+    fn update_returns_reload_effect_for_domain_actions() {
+        let mut app = test_app();
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+
+        assert_eq!(
+            update(&mut app, UiAction::TogglePause, rt.handle()).expect("toggle"),
+            UpdateEffect::None
+        );
+        assert!(app.message.starts_with("paused:"));
+
+        assert_eq!(
+            update(&mut app, UiAction::Next, rt.handle()).expect("next"),
+            UpdateEffect::Reload
+        );
+        assert!(
+            app.message.starts_with("next:") || app.message.starts_with("next error:"),
+            "{}",
+            app.message
+        );
     }
 }

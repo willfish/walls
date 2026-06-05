@@ -78,7 +78,7 @@ flowchart TD
 
 ### TUI layout (`walls tui`)
 
-Terminal screen regions (not a second runtime — same `walls` binary as the CLI):
+Terminal screen regions (not a second runtime — same `walls` binary as the CLI). See [`docs/tui.md`](docs/tui.md) for the TUI architecture, style, layout, preview, and verification contracts.
 
 ```
 ┌ walls ────────────────────────────────────────────────┐
