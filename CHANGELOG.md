@@ -9,6 +9,13 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-05
+
+### Added
+
+- Core provider classification for remaining v0.10 stories (enables full support): Reddit (#158, PR #179), Bing (#159, PR #180), NASA APOD (#160, PR #181), Media RSS (#161, PR #182), attribution metadata (#162, PR #183). TDD-driven (RED on Unsupported, GREEN after kind/wiring/tests). All via compat layer.
+- (Closes v0.10.0 epic #148 and stories.)
+
 ## [0.7.0] - 2026-06-05
 
 ### Added
