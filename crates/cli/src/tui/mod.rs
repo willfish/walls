@@ -484,6 +484,7 @@ fn footer_keys(app: &App, width: u16) -> String {
             InputMode::SearchInput => "type | Enter search | Esc | q".into(),
             InputMode::Normal => match app.tab {
                 Tab::Search => "i edit | Enter | j/k | : | q".into(),
+                Tab::Config => "j/k blocks | n/p | sp | : | q".into(),
                 _ => "1-5 | n/p | f/d | sp | : | q".into(),
             },
         };
@@ -511,7 +512,7 @@ fn config_lines(app: &App) -> Vec<String> {
     push_config_block(
         &mut lines,
         0,
-        app.cursor,
+        app.config_cursor,
         "Rotation",
         app.ctx.config.change.enabled,
         format!(
@@ -535,7 +536,7 @@ fn config_lines(app: &App) -> Vec<String> {
     push_config_block(
         &mut lines,
         1,
-        app.cursor,
+        app.config_cursor,
         "Local sources",
         app.ctx.config.sources.iter().any(|source| source.enabled),
         format!(
@@ -548,7 +549,7 @@ fn config_lines(app: &App) -> Vec<String> {
     push_config_block(
         &mut lines,
         2,
-        app.cursor,
+        app.config_cursor,
         "Wallhaven",
         app.ctx.config.change.internet_enabled,
         wallhaven_summary(app),
@@ -557,7 +558,7 @@ fn config_lines(app: &App) -> Vec<String> {
     push_config_block(
         &mut lines,
         3,
-        app.cursor,
+        app.config_cursor,
         "Library",
         app.ctx.config.quota.enabled,
         format!(
@@ -574,7 +575,7 @@ fn config_lines(app: &App) -> Vec<String> {
     push_config_block(
         &mut lines,
         4,
-        app.cursor,
+        app.config_cursor,
         "Apply/display",
         true,
         format!(
@@ -783,7 +784,7 @@ mod tests {
     #[test]
     fn focused_config_block_expands_concrete_settings() {
         let mut app = test_app();
-        app.cursor = 1;
+        app.config_cursor = 1;
 
         let text = render_text(&app, 80, 24);
 
@@ -792,6 +793,37 @@ mod tests {
         assert!(text.contains("disabled sources: 0"), "{text}");
         assert!(text.contains("first path:"), "{text}");
         assert!(!text.contains("on start: false"), "{text}");
+    }
+
+    #[test]
+    fn narrow_config_screen_keeps_focused_block_and_navigation_visible() {
+        let mut app = test_app();
+        app.config_cursor = 2;
+
+        let text = render_text(&app, 42, 14);
+
+        assert!(text.contains("Config"), "{text}");
+        assert!(text.contains("> [off] Wallhaven"), "{text}");
+        assert!(text.contains("categories: 111"), "{text}");
+        assert!(text.contains("j/k blocks"), "{text}");
+    }
+
+    #[test]
+    fn config_focus_does_not_share_list_cursor_state() {
+        let mut app = test_app();
+        app.cursor = 7;
+
+        app.move_down();
+        app.move_down();
+
+        assert_eq!(app.config_cursor, 2);
+        assert_eq!(app.cursor, 7);
+
+        app.tab = Tab::History;
+        app.move_up();
+
+        assert_eq!(app.config_cursor, 2);
+        assert_eq!(app.cursor, 6);
     }
 
     #[test]
