@@ -165,6 +165,8 @@ enum UiAction {
     TogglePause,
     ToggleConfigValue,
     CycleConfigValue,
+    EditConfigItem,
+    CancelEdit,
     SwitchTab(Tab),
     EditSearch,
     MoveDown,
@@ -239,7 +241,15 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
         KeyCode::Char('d') => UiAction::Trash,
         KeyCode::Char(' ') => UiAction::TogglePause,
         KeyCode::Char('t') if app.tab == Tab::Config => UiAction::ToggleConfigValue,
-        KeyCode::Char('e') if app.tab == Tab::Config => UiAction::CycleConfigValue,
+        KeyCode::Char('e') if app.tab == Tab::Config => {
+            if app.is_editing() {
+                // in edit: treat 'e' as cycle field or ignore for now; later field action
+                UiAction::CycleConfigValue // placeholder; real will be field cycle or edit specific
+            } else {
+                UiAction::EditConfigItem
+            }
+        }
+        KeyCode::Esc if app.is_editing() => UiAction::CancelEdit,
         KeyCode::Char(c @ '1'..='6') => {
             let index = c
                 .to_digit(10)
@@ -345,6 +355,12 @@ fn update(
             Ok(None) => app.message = "config: no cycle for focused block".into(),
             Err(e) => app.message = format!("config save error: {e}"),
         },
+        UiAction::EditConfigItem => {
+            app.start_edit_for_current();
+        }
+        UiAction::CancelEdit => {
+            app.cancel_edit();
+        }
         UiAction::SwitchTab(tab) => {
             app.tab = tab;
             app.cursor = 0;
@@ -1683,5 +1699,36 @@ mod tests {
         assert!(app.editing.is_none());
         // no side effects
         assert!(app.ctx.config.change.enabled);
+    }
+
+    #[test]
+    fn e_on_config_block_enters_edit_popup_state() {
+        use crate::tui::app::EditTarget;
+        use ratatui::crossterm::event::KeyModifiers;
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [ { "enabled": true, "type": "folder", "path": "/tmp" } ]
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 0;
+        // Drive via key path (action_for_key + update) - before wiring 'e' -> EditConfigItem this will not enter edit
+        // (test will fail assert until Task 2 wire)
+        let key = KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE);
+        let action = action_for_key(&app, key);
+        // simulate update (in real handle_key calls update)
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+        let _ = update(&mut app, action, rt.handle());
+        assert!(
+            app.is_editing(),
+            "after 'e' on config should have entered edit state"
+        );
+        assert!(matches!(
+            app.editing.as_ref().unwrap().target,
+            EditTarget::Block(0)
+        ));
     }
 }
