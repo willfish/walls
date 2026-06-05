@@ -2,7 +2,7 @@
 #![warn(clippy::pedantic)]
 #![allow(
     clippy::missing_errors_doc,
-    reason = "walls-core still uses anyhow at public boundaries; detailed error contracts are deferred to the typed-error cleanup."
+    reason = "some lower-level public helpers still return anyhow; the main context API now exposes typed errors."
 )]
 #![allow(
     clippy::missing_panics_doc,
@@ -16,6 +16,7 @@
 pub mod apply;
 pub mod config;
 pub mod ctx;
+pub mod error;
 pub mod library;
 pub mod lock;
 pub mod paths;
@@ -28,4 +29,5 @@ pub mod validate;
 pub mod wallhaven;
 
 pub use ctx::{RefreshLevel, WallsCtx};
+pub use error::{Result, WallsError};
 pub use paths::{expand_home, WallsPaths};
