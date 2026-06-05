@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::path::Path;
 
 pub(crate) fn file_uri(path: &Path) -> String {
@@ -21,9 +22,9 @@ fn percent_encode_bytes(bytes: &[u8]) -> String {
     for &byte in bytes {
         match byte {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
-                out.push(byte as char)
+                out.push(byte as char);
             }
-            _ => out.push_str(&format!("%{byte:02X}")),
+            _ => write!(out, "%{byte:02X}").expect("writing to string"),
         }
     }
     out

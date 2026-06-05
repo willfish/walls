@@ -74,6 +74,10 @@ pub fn secrets_file_permission_warnings(paths: &WallsPaths) -> Vec<String> {
         return Vec::new();
     };
     let mode = metadata.permissions().mode();
+    #[allow(
+        clippy::verbose_bit_mask,
+        reason = "the secrets permission warning intentionally checks all group/other permission bits in one mode mask."
+    )]
     if mode & 0o077 == 0 {
         return Vec::new();
     }

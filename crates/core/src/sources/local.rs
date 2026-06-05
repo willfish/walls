@@ -15,7 +15,7 @@ pub struct SourceImage {
 
 pub fn list_images(entry: &SourceEntry) -> anyhow::Result<Vec<SourceImage>> {
     let path = resolve_path(entry)?;
-    collect_from_path(&path)
+    Ok(collect_from_path(&path))
 }
 
 pub fn list_images_with_paths(
@@ -50,18 +50,18 @@ fn resolve_path(entry: &SourceEntry) -> anyhow::Result<PathBuf> {
     }
 }
 
-fn collect_from_path(path: &Path) -> anyhow::Result<Vec<SourceImage>> {
+fn collect_from_path(path: &Path) -> Vec<SourceImage> {
     if path.is_file() {
         if is_image(path) {
-            return Ok(vec![make_source_image(path)]);
+            return vec![make_source_image(path)];
         }
-        return Ok(vec![]);
+        return vec![];
     }
     if !path.is_dir() {
-        return Ok(vec![]);
+        return vec![];
     }
     let mut out = Vec::new();
-    for dent in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+    for dent in WalkDir::new(path).into_iter().filter_map(Result::ok) {
         if !dent.file_type().is_file() {
             continue;
         }
@@ -71,7 +71,7 @@ fn collect_from_path(path: &Path) -> anyhow::Result<Vec<SourceImage>> {
         }
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(out)
+    out
 }
 
 fn make_source_image(p: &Path) -> SourceImage {
@@ -88,6 +88,5 @@ fn make_source_image(p: &Path) -> SourceImage {
 fn is_image(p: &Path) -> bool {
     p.extension()
         .and_then(|e| e.to_str())
-        .map(|e| IMAGE_EXT.contains(&e.to_lowercase().as_str()))
-        .unwrap_or(false)
+        .is_some_and(|e| IMAGE_EXT.contains(&e.to_lowercase().as_str()))
 }

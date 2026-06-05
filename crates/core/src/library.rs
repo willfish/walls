@@ -35,8 +35,8 @@ fn unique_path(dir: &Path, name: &OsStr) -> PathBuf {
     if !dest.exists() {
         return dest;
     }
-    let stem = Path::new(name).file_stem().map(|s| s.to_os_string());
-    let ext = Path::new(name).extension().map(|s| s.to_os_string());
+    let stem = Path::new(name).file_stem().map(OsStr::to_os_string);
+    let ext = Path::new(name).extension().map(OsStr::to_os_string);
     for n in 1..10_000 {
         let candidate = match (&stem, &ext) {
             (Some(stem), Some(ext)) => dir.join(format!(
