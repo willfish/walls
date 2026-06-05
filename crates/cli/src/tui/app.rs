@@ -4,6 +4,7 @@ use walls_core::apply::ApplyTrigger;
 use walls_core::config::SourceEntry;
 use walls_core::expand_home;
 use walls_core::sources::list_images_with_paths;
+use walls_core::validate::validate_config;
 use walls_core::WallsCtx;
 
 use super::style::ColorMode;
@@ -104,6 +105,7 @@ pub struct App {
     pub(crate) local_candidates: Vec<PathBuf>,
     pub(crate) local_source_summaries: Vec<LocalSourceSummary>,
     pub(crate) wallhaven_summary: WallhavenProviderSummary,
+    pub(crate) config_warnings: Vec<String>,
     pub color_mode: ColorMode,
 }
 
@@ -136,6 +138,7 @@ impl App {
     pub fn new(ctx: WallsCtx) -> anyhow::Result<Self> {
         let search_query = ctx.config.wallhaven.search.q.clone();
         let wallhaven_summary = summarize_wallhaven_provider(&ctx);
+        let config_warnings = summarize_config_warnings(&ctx);
         let mut app = Self {
             ctx,
             tab: Tab::Config,
@@ -149,6 +152,7 @@ impl App {
             local_candidates: Vec::new(),
             local_source_summaries: Vec::new(),
             wallhaven_summary,
+            config_warnings,
             color_mode: ColorMode::from_env(),
         };
         app.refresh_local_candidates()?;
@@ -173,6 +177,7 @@ impl App {
             .map(|source| summarize_local_source(&self.ctx, source))
             .collect();
         self.wallhaven_summary = summarize_wallhaven_provider(&self.ctx);
+        self.config_warnings = summarize_config_warnings(&self.ctx);
         Ok(())
     }
 
@@ -506,6 +511,13 @@ fn summarize_wallhaven_provider(ctx: &WallsCtx) -> WallhavenProviderSummary {
         atleast: search.atleast.clone(),
         warnings,
     }
+}
+
+fn summarize_config_warnings(ctx: &WallsCtx) -> Vec<String> {
+    validate_config(&ctx.config, &ctx.secrets, &ctx.paths)
+        .into_iter()
+        .map(|warning| format!("warning: {warning}"))
+        .collect()
 }
 
 #[cfg(test)]
