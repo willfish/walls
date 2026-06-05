@@ -5,6 +5,7 @@ pub enum ProviderKind {
     Local,
     Wallhaven,
     Unsplash,
+    Reddit,
     Unsupported,
 }
 
@@ -113,6 +114,7 @@ fn source_kind(source_type: &str) -> ProviderKind {
     match source_type {
         "folder" | "favorites" | "fetched" | "image" => ProviderKind::Local,
         "unsplash" => ProviderKind::Unsplash,
+        "reddit" => ProviderKind::Reddit,
         _ => ProviderKind::Unsupported,
     }
 }
@@ -120,7 +122,7 @@ fn source_kind(source_type: &str) -> ProviderKind {
 fn capabilities_for_kind(kind: ProviderKind) -> Vec<ProviderCapability> {
     match kind {
         ProviderKind::Local => vec![ProviderCapability::ConfigValidation],
-        ProviderKind::Wallhaven | ProviderKind::Unsplash => vec![
+        ProviderKind::Wallhaven | ProviderKind::Unsplash | ProviderKind::Reddit => vec![
             ProviderCapability::ConfigValidation,
             ProviderCapability::QueueRefill,
             ProviderCapability::Download,
