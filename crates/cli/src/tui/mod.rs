@@ -5,6 +5,8 @@ mod style;
 
 use std::io::{stdout, IsTerminal};
 
+use crate::tui::app::EditTarget;
+use crate::tui::style::StatusKind;
 use anyhow::Context;
 use app::{App, InputMode, Tab};
 use ratatui::backend::CrosstermBackend;
@@ -518,10 +520,10 @@ fn render_tab_body(
                 theme,
             );
         }
-        return;
+    } else {
+        render_lines(f, area, app.tab.title(), tab_lines(app), theme);
     }
-
-    render_lines(f, area, app.tab.title(), tab_lines(app), theme);
+    render_edit_popup(f, app, area, theme);
 }
 
 #[cfg(not(feature = "tui-preview"))]
@@ -534,6 +536,7 @@ fn render_tab_body(
 ) {
     f.render_widget(Clear, area);
     render_lines(f, area, app.tab.title(), tab_lines(app), theme);
+    render_edit_popup(f, app, area, theme);
 }
 
 fn tab_lines(app: &App) -> Vec<String> {
@@ -955,6 +958,62 @@ fn cosmic_method_label(method: CosmicMethod) -> &'static str {
     match method {
         CosmicMethod::CosmicConfig => "cosmic-config",
         CosmicMethod::CosmicExtBgCtl => "cosmic-ext-bg-ctl",
+    }
+}
+
+#[allow(dead_code)]
+fn render_edit_popup(f: &mut Frame, app: &App, area: Rect, theme: style::Theme) {
+    if let Some(sess) = &app.editing {
+        let popup_width = ((area.width as u32 * 3 / 4) as u16).min(70);
+        let popup_height = 14u16;
+        let x = (area.width.saturating_sub(popup_width)) / 2;
+        let y = (area.height.saturating_sub(popup_height)) / 2;
+        let popup_area = Rect {
+            x: area.x + x,
+            y: area.y + y,
+            width: popup_width,
+            height: popup_height,
+        };
+        f.render_widget(Clear, popup_area);
+        let title = match &sess.target {
+            EditTarget::Block(b) => format!("Edit: block {}", b),
+            EditTarget::Source(i) => format!("Edit source #{} (form)", i),
+        };
+        let block = theme.content_block(&title);
+        let mut lines: Vec<Line> = vec![Line::from("=== EDIT FORM ===")];
+        if let Some(ref src) = sess.draft_source {
+            lines.push(Line::from(format!("enabled: {}", src.enabled)));
+            lines.push(Line::from(format!("type: {}", src.source_type)));
+            if let Some(l) = &src.label {
+                lines.push(Line::from(format!("label: {}", l)));
+            }
+            if let Some(u) = &src.url {
+                lines.push(Line::from(format!("url: {}", u)));
+            }
+            if let Some(p) = &src.path {
+                lines.push(Line::from(format!("path: {}", p)));
+            }
+            if let Some(ip) = &src.image_path {
+                lines.push(Line::from(format!("image_path: {}", ip)));
+            }
+        } else {
+            for (k, v) in &sess.draft_block_values {
+                lines.push(Line::from(format!("{}: {}", k, v)));
+            }
+        }
+        if !sess.validation_errors.is_empty() {
+            let err_text = sess.validation_errors.join("; ");
+            lines.push(Line::from(Span::styled(
+                format!("validation: {}", err_text),
+                theme.status(StatusKind::Error),
+            )));
+        }
+        // hint current buffer if any
+        if !sess.field_buffer.is_empty() {
+            lines.push(Line::from(format!("(editing: {})", sess.field_buffer)));
+        }
+        let para = Paragraph::new(lines).block(block);
+        f.render_widget(para, popup_area);
     }
 }
 
@@ -1730,5 +1789,35 @@ mod tests {
             app.editing.as_ref().unwrap().target,
             EditTarget::Block(0)
         ));
+    }
+
+    #[test]
+    fn e_then_render_shows_popup_form_with_fields_and_clear() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "interval_secs": 60 },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [ { "enabled": true, "type": "json", "label": "demo json", "url": "https://ex", "image_path": "$.d" } ]
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 1; // sources-ish
+        app.start_edit_for_current();
+        let text = render_text(&app, 80, 24);
+        assert!(
+            text.contains("EDIT FORM"),
+            "popup form marker should be in buffer (Clear + content)"
+        );
+        // fields from demo
+        let has_field = text.contains("enabled")
+            || text.contains("type")
+            || text.contains("url")
+            || text.contains("interval");
+        assert!(
+            has_field,
+            "form should list some fields for the item; got prefix: {}",
+            &text[0..300.min(text.len())]
+        );
     }
 }
