@@ -9,6 +9,18 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-05
+
+### Added
+
+- TUI: Config tab is now the first page, with provider/configuration blocks (Rotation, Local sources, Wallhaven, Library, Apply/display). Focused block expands with details; others remain scannable. Toggle ('t') and cycle ('e') for safe edits on supported fields. Pause/status not duplicated in body. (Stories #150–#155; PRs #169–#176)
+- Provider compatibility layer: `SourceEntry` + `ProviderKind`/`Descriptor` + `Unsupported` handling allows new `type` values in config.json without schema breaks or load failures. (Story #156; PR #177)
+- Unsplash as configurable per-source provider (`type: "unsplash"` in sources list, with query/collection/user/topic/orientation/url shorthand, dedicated client/refill/cache, metadata/attribution). (Story #157; PR #178)
+
+### Changed
+
+- GitHub milestones (v0.9+) now track remaining roadmap; crate versions follow semver independently (as noted in prior changelog).
+
 ## [0.6.5] - 2026-06-05
 
 ### Fixed
