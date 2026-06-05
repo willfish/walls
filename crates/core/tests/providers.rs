@@ -390,3 +390,29 @@ fn immich_source_is_classified_with_full_capabilities_not_unsupported() {
         .capabilities
         .contains(&ProviderCapability::Metadata));
 }
+
+#[test]
+fn spotlight_source_is_classified_with_full_capabilities_not_unsupported() {
+    // RED for #166 Windows Spotlight evaluate (will fail until Spotlight kind).
+    let sources: Vec<SourceEntry> = serde_json::from_value(serde_json::json!([
+        { "enabled": true, "type": "spotlight", "url": "https://example.com" }
+    ]))
+    .expect("sources");
+
+    let providers = configured_source_providers(&sources);
+
+    assert_ne!(
+        providers[0].kind,
+        ProviderKind::Unsupported,
+        "spotlight must not be Unsupported"
+    );
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::Download));
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::QueueRefill));
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::Metadata));
+}
