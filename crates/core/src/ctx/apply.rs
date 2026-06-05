@@ -1,5 +1,6 @@
 use super::{RefreshLevel, WallsCtx};
 use crate::apply::{ApplyTrigger, FillMode};
+use crate::error::{Result, WallsError};
 use crate::pipeline;
 use std::path::{Path, PathBuf};
 
@@ -8,25 +9,28 @@ impl WallsCtx {
         FillMode::from_display_mode(&self.config.display.mode)
     }
 
-    pub fn apply_file(&mut self, original: &Path, trigger: ApplyTrigger) -> anyhow::Result<()> {
+    pub fn apply_file(&mut self, original: &Path, trigger: ApplyTrigger) -> Result<()> {
         let original = original.to_path_buf();
-        self.with_state_lock(|ctx| ctx.apply_file_inner(&original, trigger, None, true))
+        self.with_typed_state_lock(|ctx| {
+            ctx.apply_file_inner(&original, trigger, None, true)
+                .map_err(|source| WallsError::ApplyFile {
+                    original: original.clone(),
+                    source,
+                })
+        })
     }
 
-    pub fn refresh_current(&mut self, level: RefreshLevel) -> anyhow::Result<Option<PathBuf>> {
-        self.with_state_lock(|ctx| ctx.refresh_current_inner(level))
+    pub fn refresh_current(&mut self, level: RefreshLevel) -> Result<Option<PathBuf>> {
+        self.with_typed_state_lock(|ctx| ctx.refresh_current_inner(level))
     }
 
-    fn refresh_current_inner(&mut self, level: RefreshLevel) -> anyhow::Result<Option<PathBuf>> {
+    fn refresh_current_inner(&mut self, level: RefreshLevel) -> Result<Option<PathBuf>> {
         let Some(current) = self.state.current.clone() else {
             return Ok(None);
         };
         let original = PathBuf::from(&current.original_path);
         if !original.exists() {
-            anyhow::bail!(
-                "current original wallpaper does not exist: {}",
-                original.display()
-            );
+            return Err(WallsError::CurrentOriginalMissing { path: original });
         }
 
         if level.recomposes_image() {
@@ -35,7 +39,8 @@ impl WallsCtx {
                 ApplyTrigger::Refresh,
                 current.wallhaven_id.clone(),
                 false,
-            )?;
+            )
+            .map_err(|source| WallsError::RefreshCurrent { source })?;
             return Ok(Some(PathBuf::from(
                 self.state
                     .current
@@ -48,10 +53,7 @@ impl WallsCtx {
 
         let composed = PathBuf::from(&current.composed_path);
         if !composed.exists() {
-            anyhow::bail!(
-                "current composed wallpaper does not exist: {}",
-                composed.display()
-            );
+            return Err(WallsError::CurrentComposedMissing { path: composed });
         }
         crate::apply::apply_wallpaper(
             &self.config.apply,
@@ -59,11 +61,13 @@ impl WallsCtx {
             &original,
             self.fill_mode(),
             ApplyTrigger::Refresh,
-        )?;
+        )
+        .map_err(|source| WallsError::RefreshCurrent { source })?;
         self.state.last_change_unix = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
-        self.save_state()?;
+        self.save_state()
+            .map_err(|source| WallsError::RefreshCurrent { source })?;
         Ok(Some(composed))
     }
 
