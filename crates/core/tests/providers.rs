@@ -259,3 +259,29 @@ fn apod_source_is_classified_with_full_capabilities_not_unsupported() {
         .capabilities
         .contains(&ProviderCapability::Metadata));
 }
+
+#[test]
+fn mediarss_source_is_classified_with_full_capabilities_not_unsupported() {
+    // RED for #161 (will fail until MediaRss kind added).
+    let sources: Vec<SourceEntry> = serde_json::from_value(serde_json::json!([
+        { "enabled": true, "type": "mediarss", "url": "https://example.com/feed.xml" }
+    ]))
+    .expect("sources");
+
+    let providers = configured_source_providers(&sources);
+
+    assert_ne!(
+        providers[0].kind,
+        ProviderKind::Unsupported,
+        "mediarss must not be Unsupported"
+    );
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::Download));
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::QueueRefill));
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::Metadata));
+}
