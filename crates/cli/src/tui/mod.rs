@@ -92,6 +92,8 @@ enum UiAction {
     Favorite,
     Trash,
     TogglePause,
+    ToggleConfigValue,
+    CycleConfigValue,
     SwitchTab(Tab),
     EditSearch,
     MoveDown,
@@ -165,6 +167,8 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
         KeyCode::Char('f') => UiAction::Favorite,
         KeyCode::Char('d') => UiAction::Trash,
         KeyCode::Char(' ') => UiAction::TogglePause,
+        KeyCode::Char('t') if app.tab == Tab::Config => UiAction::ToggleConfigValue,
+        KeyCode::Char('e') if app.tab == Tab::Config => UiAction::CycleConfigValue,
         KeyCode::Char(c @ '1'..='5') => {
             let index = c
                 .to_digit(10)
@@ -252,6 +256,22 @@ fn update(
         UiAction::TogglePause => match app.ctx.toggle_pause() {
             Ok(()) => app.message = format!("paused: {}", app.ctx.state.paused),
             Err(e) => app.message = format!("pause error: {e}"),
+        },
+        UiAction::ToggleConfigValue => match app.toggle_focused_config_value() {
+            Ok(Some(msg)) => {
+                app.message = msg;
+                return Ok(UpdateEffect::Reload);
+            }
+            Ok(None) => app.message = "config: no toggle for focused block".into(),
+            Err(e) => app.message = format!("config save error: {e}"),
+        },
+        UiAction::CycleConfigValue => match app.cycle_focused_config_value() {
+            Ok(Some(msg)) => {
+                app.message = msg;
+                return Ok(UpdateEffect::Reload);
+            }
+            Ok(None) => app.message = "config: no cycle for focused block".into(),
+            Err(e) => app.message = format!("config save error: {e}"),
         },
         UiAction::SwitchTab(tab) => {
             app.tab = tab;
@@ -485,7 +505,7 @@ fn footer_keys(app: &App, width: u16) -> String {
             InputMode::SearchInput => "type | Enter search | Esc | q".into(),
             InputMode::Normal => match app.tab {
                 Tab::Search => "i edit | Enter | j/k | : | q".into(),
-                Tab::Config => "j/k blocks | n/p | sp | : | q".into(),
+                Tab::Config => "j/k | t/e | n/p | sp | : | q".into(),
                 _ => "1-5 | n/p | f/d | sp | : | q".into(),
             },
         };
@@ -867,8 +887,8 @@ mod tests {
     use walls_core::WallsCtx;
 
     use super::{
-        action_for_key, app::App, draw_inner, handle_key, style, update, InputMode, Tab,
-        TerminalSize, UiAction, UpdateEffect,
+        action_for_key, app::App, apply_effect, draw_inner, handle_key, style, update, InputMode,
+        Tab, TerminalSize, UiAction, UpdateEffect,
     };
 
     fn test_app() -> App {
@@ -1258,7 +1278,7 @@ mod tests {
         assert!(text.contains("Config"), "{text}");
         assert!(text.contains("> [off] Wallhaven"), "{text}");
         assert!(text.contains("api key: missing"), "{text}");
-        assert!(text.contains("j/k blocks"), "{text}");
+        assert!(text.contains("j/k | t/e"), "{text}");
     }
 
     #[test]
@@ -1515,5 +1535,44 @@ mod tests {
             "{}",
             app.message
         );
+    }
+
+    #[test]
+    fn config_toggle_persists_boolean_and_reloads_context() {
+        let mut app = test_app();
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        app.config_cursor = 0;
+        app.tab = Tab::Config;
+
+        assert!(app.ctx.config.change.enabled);
+        assert_eq!(
+            update(&mut app, UiAction::ToggleConfigValue, rt.handle()).expect("toggle config"),
+            UpdateEffect::Reload
+        );
+        apply_effect(&mut app, UpdateEffect::Reload).expect("reload");
+
+        assert!(!app.ctx.config.change.enabled);
+        assert!(app.message.contains("config saved: rotation enabled=false"));
+        let text = std::fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
+        assert!(text.contains("\"enabled\": false"), "{text}");
+    }
+
+    #[test]
+    fn config_cycle_persists_enum_like_value_and_reloads_context() {
+        let mut app = test_app();
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        app.config_cursor = 3;
+        app.tab = Tab::Config;
+
+        assert_eq!(
+            update(&mut app, UiAction::CycleConfigValue, rt.handle()).expect("cycle config"),
+            UpdateEffect::Reload
+        );
+        apply_effect(&mut app, UpdateEffect::Reload).expect("reload");
+
+        assert!(app.message.contains("config saved: selection=Sequential"));
+        let text = std::fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
+        assert!(text.contains("\"strategy\": \"sequential\""), "{text}");
+        assert!(render_text(&app, 120, 32).contains("selection: Sequential"));
     }
 }

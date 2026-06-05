@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use walls_core::apply::ApplyTrigger;
-use walls_core::config::SourceEntry;
+use walls_core::config::{save_config_atomic, SelectionStrategy, SourceEntry};
 use walls_core::expand_home;
 use walls_core::sources::list_images_with_paths;
 use walls_core::validate::validate_config;
@@ -367,6 +367,45 @@ impl App {
         Ok("trashed current wallpaper".into())
     }
 
+    pub fn toggle_focused_config_value(&mut self) -> anyhow::Result<Option<String>> {
+        let mut config = self.ctx.config.clone();
+        let message = match self.config_cursor {
+            0 => {
+                config.change.enabled = !config.change.enabled;
+                format!("config saved: rotation enabled={}", config.change.enabled)
+            }
+            3 => {
+                config.quota.enabled = !config.quota.enabled;
+                format!("config saved: quota enabled={}", config.quota.enabled)
+            }
+            4 => {
+                config.display.auto_rotate = !config.display.auto_rotate;
+                format!("config saved: auto rotate={}", config.display.auto_rotate)
+            }
+            _ => return Ok(None),
+        };
+
+        save_config_atomic(&self.ctx.paths.config_file, &config)?;
+        Ok(Some(message))
+    }
+
+    pub fn cycle_focused_config_value(&mut self) -> anyhow::Result<Option<String>> {
+        let mut config = self.ctx.config.clone();
+        let message = match self.config_cursor {
+            3 => {
+                config.selection.strategy = match config.selection.strategy {
+                    SelectionStrategy::Random => SelectionStrategy::Sequential,
+                    SelectionStrategy::Sequential => SelectionStrategy::Random,
+                };
+                format!("config saved: selection={:?}", config.selection.strategy)
+            }
+            _ => return Ok(None),
+        };
+
+        save_config_atomic(&self.ctx.paths.config_file, &config)?;
+        Ok(Some(message))
+    }
+
     pub fn run_command(&mut self, rt: &tokio::runtime::Handle) -> anyhow::Result<Option<String>> {
         let msg = match ParsedCommand::parse(&self.cmd_line) {
             ParsedCommand::Next => match rt.block_on(self.ctx.advance_next()) {
@@ -409,7 +448,7 @@ impl App {
                     "5 Search | i edit query Enter search | j/k | Enter apply | : cmd".into()
                 }
                 Tab::Config => {
-                    "1 Config | j/k focus block | n/p next/prev | space pause | : cmd".into()
+                    "1 Config | j/k blocks | t toggle e cycle | n/p | space pause | : cmd".into()
                 }
                 _ => "1-5 tabs | n/p next/prev | f favorite d trash | space pause | : cmd".into(),
             },

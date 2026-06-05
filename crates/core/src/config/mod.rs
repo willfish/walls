@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -148,6 +149,22 @@ pub fn load_config(path: &Path) -> anyhow::Result<Config> {
     Ok(serde_json::from_str(&data)?)
 }
 
+pub fn save_config_atomic(path: &Path, config: &Config) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(config)?;
+    let tmp = path.with_extension("json.tmp");
+    {
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(json.as_bytes())?;
+        f.write_all(b"\n")?;
+        f.sync_all()?;
+    }
+    fs::rename(tmp, path)?;
+    Ok(())
+}
+
 pub fn load_secrets(path: &Path) -> anyhow::Result<Secrets> {
     if !path.exists() {
         return Ok(Secrets {
@@ -178,4 +195,62 @@ fn default_refetch_below() -> usize {
 }
 fn default_strategy() -> SelectionStrategy {
     SelectionStrategy::Random
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{load_config, save_config_atomic, Config, SelectionStrategy};
+
+    fn test_config() -> Config {
+        serde_json::from_value(serde_json::json!({
+            "paths": {
+                "cache_dir": "cache",
+                "download_dir": "downloaded",
+                "favorites_dir": "favorites",
+                "fetched_dir": "fetched",
+                "compose_dir": "wallpaper"
+            }
+        }))
+        .expect("config")
+    }
+
+    #[test]
+    fn save_config_atomic_writes_pretty_json() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("config.json");
+        let mut config = test_config();
+        config.change.enabled = false;
+        config.selection.strategy = SelectionStrategy::Sequential;
+
+        save_config_atomic(&path, &config).expect("save config");
+
+        let text = std::fs::read_to_string(&path).expect("read config");
+        assert!(text.ends_with('\n'), "{text}");
+        assert!(text.contains("\"enabled\": false"), "{text}");
+        assert!(text.contains("\"strategy\": \"sequential\""), "{text}");
+        let loaded = load_config(&path).expect("load config");
+        assert!(!loaded.change.enabled);
+        assert_eq!(loaded.selection.strategy, SelectionStrategy::Sequential);
+    }
+
+    #[test]
+    fn failed_atomic_save_does_not_replace_existing_config() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("config.json");
+        std::fs::write(&path, "original").expect("write original");
+        std::fs::create_dir(path.with_extension("json.tmp")).expect("tmp dir");
+
+        let config = test_config();
+
+        let err = save_config_atomic(&path, &config).expect_err("save should fail");
+        assert!(
+            err.to_string().contains("Is a directory")
+                || err.to_string().contains("is a directory"),
+            "{err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read original"),
+            "original"
+        );
+    }
 }
