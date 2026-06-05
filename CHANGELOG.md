@@ -9,6 +9,13 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-05
+
+### Added
+
+- Provider classification support for v0.10 stories (TDD-driven skeletons for config compatibility): Reddit (#158), Bing (#159), NASA APOD (#160), Media RSS (#161), attribution metadata (#162). Merged after rebase, fmt fixes, and CI babysitting (PRs #180-#183).
+- Closes epic #148 and stories.
+
 ## [0.7.0] - 2026-06-05
 
 ### Added
