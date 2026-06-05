@@ -6,10 +6,12 @@ use serde::{Deserialize, Serialize};
 
 mod apply;
 mod display;
+mod unsplash;
 mod wallhaven;
 
 pub use apply::{ApplyBackendSetting, ApplyConfig, CosmicApplyConfig, CosmicMethod};
 pub use display::{DisplayConfig, DisplayFiltersConfig, ImageMagickFilterConfig};
+pub use unsplash::UnsplashSourceConfig;
 pub use wallhaven::{WallhavenCollection, WallhavenConfig, WallhavenPrefer, WallhavenSearch};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -102,12 +104,22 @@ pub struct SourceEntry {
     pub query: Option<String>,
     #[serde(default)]
     pub url: Option<String>,
+    #[serde(default)]
+    pub collection: Option<String>,
+    #[serde(default)]
+    pub user: Option<String>,
+    #[serde(default)]
+    pub topic: Option<String>,
+    #[serde(default)]
+    pub orientation: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Secrets {
     #[serde(default)]
     pub wallhaven_api_key: String,
+    #[serde(default)]
+    pub unsplash_access_key: String,
 }
 
 impl Default for ChangeConfig {
@@ -169,6 +181,7 @@ pub fn load_secrets(path: &Path) -> anyhow::Result<Secrets> {
     if !path.exists() {
         return Ok(Secrets {
             wallhaven_api_key: String::new(),
+            unsplash_access_key: String::new(),
         });
     }
     let data = fs::read_to_string(path)?;

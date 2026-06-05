@@ -4,6 +4,7 @@ use crate::config::{Config, Secrets, SourceEntry};
 pub enum ProviderKind {
     Local,
     Wallhaven,
+    Unsplash,
     Unsupported,
 }
 
@@ -94,9 +95,24 @@ pub fn wallhaven_provider(config: &Config, secrets: &Secrets) -> ProviderDescrip
     }
 }
 
+pub fn unsplash_provider(config: &Config, secrets: &Secrets) -> ProviderDescriptor {
+    ProviderDescriptor {
+        id: "unsplash".into(),
+        kind: ProviderKind::Unsplash,
+        enabled: config.change.internet_enabled
+            && !secrets.unsplash_access_key.is_empty()
+            && config
+                .sources
+                .iter()
+                .any(|source| source.enabled && source.source_type == "unsplash"),
+        capabilities: capabilities_for_kind(ProviderKind::Unsplash),
+    }
+}
+
 fn source_kind(source_type: &str) -> ProviderKind {
     match source_type {
         "folder" | "favorites" | "fetched" | "image" => ProviderKind::Local,
+        "unsplash" => ProviderKind::Unsplash,
         _ => ProviderKind::Unsupported,
     }
 }
@@ -104,7 +120,7 @@ fn source_kind(source_type: &str) -> ProviderKind {
 fn capabilities_for_kind(kind: ProviderKind) -> Vec<ProviderCapability> {
     match kind {
         ProviderKind::Local => vec![ProviderCapability::ConfigValidation],
-        ProviderKind::Wallhaven => vec![
+        ProviderKind::Wallhaven | ProviderKind::Unsplash => vec![
             ProviderCapability::ConfigValidation,
             ProviderCapability::QueueRefill,
             ProviderCapability::Download,

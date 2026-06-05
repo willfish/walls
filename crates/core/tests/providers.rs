@@ -1,7 +1,7 @@
 use walls_core::config::{Config, SourceEntry};
 use walls_core::providers::{
-    configured_providers, configured_source_providers, enabled_local_sources, wallhaven_provider,
-    ProviderCapability, ProviderKind,
+    configured_providers, configured_source_providers, enabled_local_sources, unsplash_provider,
+    wallhaven_provider, ProviderCapability, ProviderKind,
 };
 
 fn test_config(internet_enabled: bool) -> Config {
@@ -31,6 +31,7 @@ fn classifies_existing_source_entries_without_schema_changes() {
         { "enabled": true, "type": "folder", "label": "Wallpapers", "path": "/tmp/walls" },
         { "enabled": true, "type": "favorites" },
         { "enabled": false, "type": "image", "path": "/tmp/wall.jpg" },
+        { "enabled": true, "type": "unsplash", "query": "forest" },
         { "enabled": true, "type": "future-provider", "url": "https://example.com/feed.json" }
     ]))
     .expect("sources");
@@ -50,8 +51,12 @@ fn classifies_existing_source_entries_without_schema_changes() {
     assert_eq!(providers[1].kind, ProviderKind::Local);
     assert_eq!(providers[2].kind, ProviderKind::Local);
     assert!(!providers[2].enabled);
-    assert_eq!(providers[3].kind, ProviderKind::Unsupported);
-    assert!(!providers[3]
+    assert_eq!(providers[3].kind, ProviderKind::Unsplash);
+    assert!(providers[3]
+        .capabilities
+        .contains(&ProviderCapability::Download));
+    assert_eq!(providers[4].kind, ProviderKind::Unsupported);
+    assert!(!providers[4]
         .capabilities
         .contains(&ProviderCapability::ConfigValidation));
 }
@@ -121,6 +126,38 @@ fn wallhaven_descriptor_preserves_existing_enablement_rules() {
 }
 
 #[test]
+fn unsplash_descriptor_preserves_enablement_rules() {
+    let config = test_config_with_sources(
+        true,
+        serde_json::json!([
+            { "enabled": true, "type": "unsplash", "query": "forest" }
+        ]),
+    );
+    let secrets = serde_json::from_value::<walls_core::config::Secrets>(serde_json::json!({
+        "unsplash_access_key": "key"
+    }))
+    .expect("secrets");
+
+    let provider = unsplash_provider(&config, &secrets);
+
+    assert_eq!(provider.kind, ProviderKind::Unsplash);
+    assert!(provider.enabled);
+    assert!(provider
+        .capabilities
+        .contains(&ProviderCapability::QueueRefill));
+    assert!(provider
+        .capabilities
+        .contains(&ProviderCapability::Download));
+    assert!(
+        !unsplash_provider(
+            &test_config_with_sources(false, serde_json::json!([])),
+            &secrets
+        )
+        .enabled
+    );
+}
+
+#[test]
 fn failure_scope_names_provider_and_operation() {
     let provider = configured_source_providers(&[SourceEntry {
         enabled: true,
@@ -129,6 +166,10 @@ fn failure_scope_names_provider_and_operation() {
         path: Some("/tmp/walls".into()),
         query: None,
         url: None,
+        collection: None,
+        user: None,
+        topic: None,
+        orientation: None,
     }])
     .remove(0);
 

@@ -79,6 +79,10 @@ fn refresh_current_reports_missing_original_as_typed_error() {
         current: Some(CurrentWall {
             source_id: "test".to_string(),
             wallhaven_id: None,
+            provider: None,
+            source_url: None,
+            author: None,
+            description: None,
             original_path: missing.display().to_string(),
             composed_path: missing.display().to_string(),
             post_filter_path: None,
