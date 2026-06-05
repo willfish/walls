@@ -233,3 +233,29 @@ fn bing_source_is_classified_with_full_capabilities_not_unsupported() {
         .capabilities
         .contains(&ProviderCapability::Metadata));
 }
+
+#[test]
+fn apod_source_is_classified_with_full_capabilities_not_unsupported() {
+    // RED for #160 (will fail until Apod kind added).
+    let sources: Vec<SourceEntry> = serde_json::from_value(serde_json::json!([
+        { "enabled": true, "type": "apod", "query": "daily" }
+    ]))
+    .expect("sources");
+
+    let providers = configured_source_providers(&sources);
+
+    assert_ne!(
+        providers[0].kind,
+        ProviderKind::Unsupported,
+        "apod must not be Unsupported"
+    );
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::Download));
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::QueueRefill));
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::Metadata));
+}
