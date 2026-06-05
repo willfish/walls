@@ -79,6 +79,10 @@ impl<'ctx> AdvanceNext<'ctx> {
             return Ok(Some(path));
         }
 
+        if let Some(path) = self.apply_unsplash_queue().await? {
+            return Ok(Some(path));
+        }
+
         if let Some(path) = self.apply_wallhaven_queue().await? {
             return Ok(Some(path));
         }
@@ -131,6 +135,9 @@ impl<'ctx> AdvanceNext<'ctx> {
         let Some(id) = self.ctx.state.cache_queue.first().cloned() else {
             return Ok(None);
         };
+        if crate::unsplash::queue_photo_id(&id).is_some() {
+            return Ok(None);
+        }
         let path = if let Some(p) = self.cached_wallhaven_path(&id) {
             p
         } else {
@@ -155,10 +162,100 @@ impl<'ctx> AdvanceNext<'ctx> {
         Ok(Some(path))
     }
 
+    async fn apply_unsplash_queue(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        use anyhow::Context;
+
+        if !self.unsplash_enabled() {
+            return Ok(None);
+        }
+
+        let client = self.unsplash_client()?;
+        if let Some(path) = self.apply_unsplash_queue_head(&client).await? {
+            return Ok(Some(path));
+        }
+
+        let provider = crate::providers::unsplash_provider(&self.ctx.config, &self.ctx.secrets);
+        crate::unsplash::refill_unsplash_cache(&client, &self.ctx.config, &mut self.ctx.state)
+            .await
+            .with_context(|| provider.failure_scope("queue refill").to_string())?;
+        self.ctx.save_state()?;
+        self.apply_unsplash_queue_head(&client).await
+    }
+
+    fn unsplash_enabled(&self) -> bool {
+        self.ctx.config.change.internet_enabled
+            && !self.ctx.secrets.unsplash_access_key.is_empty()
+            && crate::unsplash::enabled_unsplash_sources(&self.ctx.config.sources)
+                .next()
+                .is_some()
+    }
+
+    fn unsplash_client(&self) -> anyhow::Result<crate::unsplash::UnsplashClient> {
+        crate::unsplash::UnsplashClient::new(
+            crate::unsplash::client::api_base(),
+            &self.ctx.secrets.unsplash_access_key,
+        )
+    }
+
+    async fn apply_unsplash_queue_head(
+        &mut self,
+        client: &crate::unsplash::UnsplashClient,
+    ) -> anyhow::Result<Option<PathBuf>> {
+        use anyhow::Context;
+
+        let Some(queue_item) = self.ctx.state.cache_queue.first().cloned() else {
+            return Ok(None);
+        };
+        let Some(photo_id) = crate::unsplash::queue_photo_id(&queue_item) else {
+            return Ok(None);
+        };
+        let provider = crate::providers::unsplash_provider(&self.ctx.config, &self.ctx.secrets);
+
+        let photo = client
+            .fetch_photo(photo_id)
+            .await
+            .with_context(|| provider.failure_scope("metadata fetch").to_string())?;
+        let path = if let Some(path) =
+            crate::unsplash::cached_photo_path(&self.ctx.paths.cache_dir, photo_id)
+        {
+            path
+        } else {
+            client
+                .download_to_cache_with_quota(
+                    &photo,
+                    &self.ctx.paths.cache_dir,
+                    &self.ctx.paths.download_dir,
+                    self.ctx.config.quota.size_mb,
+                    self.ctx.config.quota.enabled,
+                )
+                .await
+                .with_context(|| provider.failure_scope("download").to_string())?
+        };
+
+        self.ctx.state.cache_queue.remove(0);
+        let description = photo.best_description().map(str::to_string);
+        self.ctx.apply_file_inner_with_metadata(
+            &path,
+            ApplyTrigger::Auto,
+            None,
+            crate::state::CurrentWallMetadata {
+                provider: Some("unsplash".into()),
+                source_url: Some(photo.links.html),
+                author: Some(photo.user.name),
+                description,
+            },
+            true,
+        )?;
+        Ok(Some(path))
+    }
+
     fn apply_cached_queue_head(&mut self) -> anyhow::Result<Option<PathBuf>> {
         let Some(id) = self.ctx.state.cache_queue.first().cloned() else {
             return Ok(None);
         };
+        if crate::unsplash::queue_photo_id(&id).is_some() {
+            return Ok(None);
+        }
         let Some(path) = self.cached_wallhaven_path(&id) else {
             return Ok(None);
         };

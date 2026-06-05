@@ -29,10 +29,26 @@ pub struct CurrentWall {
     pub source_id: String,
     #[serde(default)]
     pub wallhaven_id: Option<String>,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub source_url: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
     pub original_path: String,
     pub composed_path: String,
     #[serde(default)]
     pub post_filter_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CurrentWallMetadata {
+    pub provider: Option<String>,
+    pub source_url: Option<String>,
+    pub author: Option<String>,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

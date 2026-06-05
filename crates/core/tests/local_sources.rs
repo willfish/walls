@@ -17,6 +17,10 @@ fn lists_images_in_folder() {
         path: Some(dir.path().display().to_string()),
         query: None,
         url: None,
+        collection: None,
+        user: None,
+        topic: None,
+        orientation: None,
     };
     let images = list_images(&src).unwrap();
     assert_eq!(images.len(), 2);

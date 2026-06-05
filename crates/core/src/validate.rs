@@ -1,3 +1,4 @@
+use crate::config::UnsplashSourceConfig;
 use crate::config::{ApplyBackendSetting, Config, Secrets};
 use crate::paths::{expand_home, WallsPaths};
 
@@ -48,6 +49,16 @@ pub fn validate_config(config: &Config, secrets: &Secrets, paths: &WallsPaths) -
             {
                 errors
                     .push("wallhaven source enabled but secrets.wallhaven_api_key is empty".into());
+            }
+            "unsplash" => {
+                if config.change.internet_enabled && secrets.unsplash_access_key.is_empty() {
+                    errors.push(
+                        "unsplash source enabled but secrets.unsplash_access_key is empty".into(),
+                    );
+                }
+                if let Err(error) = UnsplashSourceConfig::from_source(src) {
+                    errors.push(format!("source {:?}: {error}", src.label));
+                }
             }
             _ => {}
         }

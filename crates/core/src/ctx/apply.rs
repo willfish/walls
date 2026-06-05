@@ -2,6 +2,7 @@ use super::{RefreshLevel, WallsCtx};
 use crate::apply::{ApplyTrigger, FillMode};
 use crate::error::{Result, WallsError};
 use crate::pipeline;
+use crate::state::CurrentWallMetadata;
 use std::path::{Path, PathBuf};
 
 impl WallsCtx {
@@ -78,6 +79,23 @@ impl WallsCtx {
         wallhaven_id: Option<String>,
         update_history: bool,
     ) -> anyhow::Result<()> {
+        self.apply_file_inner_with_metadata(
+            original,
+            trigger,
+            wallhaven_id,
+            CurrentWallMetadata::default(),
+            update_history,
+        )
+    }
+
+    pub(super) fn apply_file_inner_with_metadata(
+        &mut self,
+        original: &Path,
+        trigger: ApplyTrigger,
+        wallhaven_id: Option<String>,
+        metadata: CurrentWallMetadata,
+        update_history: bool,
+    ) -> anyhow::Result<()> {
         let composed = pipeline::compose(&self.paths, &self.config.display, original)?;
         crate::apply::apply_wallpaper(
             &self.config.apply,
@@ -95,6 +113,10 @@ impl WallsCtx {
         self.state.current = Some(crate::state::CurrentWall {
             source_id,
             wallhaven_id,
+            provider: metadata.provider,
+            source_url: metadata.source_url,
+            author: metadata.author,
+            description: metadata.description,
             original_path: history_id.clone(),
             composed_path: composed.display().to_string(),
             post_filter_path: Some(composed.display().to_string()),
