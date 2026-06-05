@@ -7,7 +7,7 @@ use super::style::ColorMode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
-    Status,
+    Config,
     Now,
     History,
     Browse,
@@ -17,7 +17,7 @@ pub enum Tab {
 impl Tab {
     pub fn index(self) -> usize {
         match self {
-            Tab::Status => 0,
+            Tab::Config => 0,
             Tab::Now => 1,
             Tab::History => 2,
             Tab::Browse => 3,
@@ -27,7 +27,7 @@ impl Tab {
 
     pub fn title(self) -> &'static str {
         match self {
-            Tab::Status => "Status",
+            Tab::Config => "Config",
             Tab::Now => "Now",
             Tab::History => "History",
             Tab::Browse => "Browse",
@@ -37,12 +37,12 @@ impl Tab {
 
     pub fn from_index(i: usize) -> Self {
         match i {
-            0 => Tab::Status,
+            0 => Tab::Config,
             1 => Tab::Now,
             2 => Tab::History,
             3 => Tab::Browse,
             4 => Tab::Search,
-            _ => Tab::Status,
+            _ => Tab::Config,
         }
     }
 }
@@ -102,7 +102,7 @@ impl App {
         let search_query = ctx.config.wallhaven.search.q.clone();
         let mut app = Self {
             ctx,
-            tab: Tab::Status,
+            tab: Tab::Config,
             cursor: 0,
             message: String::new(),
             input_mode: InputMode::Normal,
@@ -141,6 +141,7 @@ impl App {
 
     pub fn list_len(&self) -> usize {
         match self.tab {
+            Tab::Config => 5,
             Tab::History => self.ctx.state.history.len(),
             Tab::Browse => self.browse_items().len(),
             Tab::Search => self.search_results.len(),
@@ -341,6 +342,9 @@ impl App {
                 Tab::Search => {
                     "5 Search | i edit query Enter search | j/k | Enter apply | : cmd".into()
                 }
+                Tab::Config => {
+                    "1 Config | j/k focus block | n/p next/prev | space pause | : cmd".into()
+                }
                 _ => "1-5 tabs | n/p next/prev | f favorite d trash | space pause | : cmd".into(),
             },
         };
@@ -355,7 +359,7 @@ mod tests {
     #[test]
     fn tab_indices_round_trip_through_visible_order() {
         let tabs = [
-            Tab::Status,
+            Tab::Config,
             Tab::Now,
             Tab::History,
             Tab::Browse,
@@ -369,8 +373,8 @@ mod tests {
     }
 
     #[test]
-    fn unknown_tab_index_falls_back_to_status() {
-        assert_eq!(Tab::from_index(usize::MAX), Tab::Status);
+    fn unknown_tab_index_falls_back_to_config() {
+        assert_eq!(Tab::from_index(usize::MAX), Tab::Config);
     }
 
     #[test]
