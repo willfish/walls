@@ -89,14 +89,14 @@ pub fn build_applier(apply: &ApplyConfig) -> anyhow::Result<Box<dyn Applier>> {
         ApplyBackendSetting::Wlroots => Ok(Box::new(WlrootsApplier)),
         ApplyBackendSetting::Hyprland => Ok(Box::new(HyprlandApplier)),
         ApplyBackendSetting::Feh => Ok(Box::new(FehNitrogenApplier)),
-        ApplyBackendSetting::CosmicExtBgCtl => cosmic::build_cosmic_applier(&ApplyConfig {
+        ApplyBackendSetting::CosmicExtBgCtl => Ok(cosmic::build_cosmic_applier(&ApplyConfig {
             cosmic: crate::config::CosmicApplyConfig {
                 method: CosmicMethod::CosmicExtBgCtl,
                 ..apply.cosmic.clone()
             },
             ..apply.clone()
-        }),
-        ApplyBackendSetting::Cosmic => cosmic::build_cosmic_applier(apply),
+        })),
+        ApplyBackendSetting::Cosmic => Ok(cosmic::build_cosmic_applier(apply)),
         ApplyBackendSetting::Auto => {
             tracing::warn!(desktop = ?detect_desktop(), "falling back to feh/nitrogen");
             Ok(Box::new(FehNitrogenApplier))

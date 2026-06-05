@@ -18,11 +18,10 @@ impl FillMode {
     pub fn from_display_mode(mode: &str) -> Self {
         match mode {
             "zoom" | "smart" | "fill-with-black" | "fill-with-blur" => FillMode::Zoom,
-            "spanned" => FillMode::Spanned,
+            "spanned" | "gnome-spanned" | "gnome-wallpaper" | "wallpaper" => FillMode::Spanned,
             "gnome-centered" | "centered" => FillMode::Centered,
             "gnome-scaled" | "scaled" => FillMode::Scaled,
             "gnome-stretched" | "stretched" => FillMode::Stretched,
-            "gnome-spanned" | "gnome-wallpaper" | "wallpaper" => FillMode::Spanned,
             _ => FillMode::Os,
         }
     }

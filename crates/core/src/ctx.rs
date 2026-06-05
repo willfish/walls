@@ -161,7 +161,7 @@ impl WallsCtx {
 
     /// Delete the current wallpaper file and clear it from state/history.
     pub fn trash_current(&mut self) -> anyhow::Result<()> {
-        self.with_state_lock(|ctx| ctx.trash_current_inner())
+        self.with_state_lock(WallsCtx::trash_current_inner)
     }
 
     fn trash_current_inner(&mut self) -> anyhow::Result<()> {
@@ -177,14 +177,14 @@ impl WallsCtx {
         if self.state.history_index >= self.state.history.len() && !self.state.history.is_empty() {
             self.state.history_index = self.state.history.len() - 1;
         }
-        self.remove_file_if_exists(&original)?;
+        Self::remove_file_if_exists(&original)?;
         if composed != original {
-            self.remove_file_if_exists(&composed)?;
+            Self::remove_file_if_exists(&composed)?;
         }
         self.save_state()
     }
 
-    fn remove_file_if_exists(&self, path: &str) -> anyhow::Result<()> {
+    fn remove_file_if_exists(path: &str) -> anyhow::Result<()> {
         let p = Path::new(path);
         if p.is_file() {
             std::fs::remove_file(p)?;
@@ -239,8 +239,9 @@ impl WallsCtx {
                 self.state
                     .current
                     .as_ref()
-                    .map(|cur| cur.composed_path.as_str())
-                    .unwrap_or(current.composed_path.as_str()),
+                    .map_or(current.composed_path.as_str(), |cur| {
+                        cur.composed_path.as_str()
+                    }),
             )));
         }
 
@@ -260,8 +261,7 @@ impl WallsCtx {
         )?;
         self.state.last_change_unix = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_secs());
         self.save_state()?;
         Ok(Some(composed))
     }
@@ -295,7 +295,7 @@ impl WallsCtx {
             post_filter_path: Some(composed.display().to_string()),
         });
         if update_history {
-            if self.state.history.first().map(|s| s.as_str()) != Some(history_id.as_str()) {
+            if self.state.history.first().map(String::as_str) != Some(history_id.as_str()) {
                 self.state.history.insert(0, history_id);
                 if self.state.history.len() > 1000 {
                     self.state.history.truncate(1000);
@@ -305,8 +305,7 @@ impl WallsCtx {
         }
         self.state.last_change_unix = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_secs());
         self.save_state()
     }
 
@@ -427,7 +426,7 @@ impl WallsCtx {
     }
 
     pub fn advance_prev(&mut self) -> anyhow::Result<Option<PathBuf>> {
-        self.with_state_lock(|ctx| ctx.advance_prev_inner())
+        self.with_state_lock(WallsCtx::advance_prev_inner)
     }
 
     fn advance_prev_inner(&mut self) -> anyhow::Result<Option<PathBuf>> {
