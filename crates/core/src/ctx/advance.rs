@@ -1,13 +1,26 @@
 use super::WallsCtx;
 use crate::apply::ApplyTrigger;
-use crate::selection::PickInput;
 use crate::state::State;
+use rand::RngExt;
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 impl WallsCtx {
     pub fn collect_local_candidates(&self) -> anyhow::Result<Vec<PathBuf>> {
-        use crate::sources::{enabled_sources, list_images_with_paths};
         let mut paths = Vec::new();
+        self.for_each_local_candidate(|path| {
+            paths.push(path);
+            Ok(())
+        })?;
+        Ok(paths)
+    }
+
+    fn for_each_local_candidate(
+        &self,
+        mut visit: impl FnMut(PathBuf) -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
+        use crate::sources::{enabled_sources, list_images_with_paths};
+
         for src in enabled_sources(&self.config.sources) {
             if !matches!(
                 src.source_type.as_str(),
@@ -18,10 +31,10 @@ impl WallsCtx {
             for img in
                 list_images_with_paths(src, &self.paths.favorites_dir, &self.paths.fetched_dir)?
             {
-                paths.push(img.path);
+                visit(img.path)?;
             }
         }
-        Ok(paths)
+        Ok(())
     }
 
     pub async fn advance_next(&mut self) -> anyhow::Result<Option<PathBuf>> {
@@ -147,21 +160,16 @@ impl<'ctx> AdvanceNext<'ctx> {
     }
 
     fn apply_local_candidate(&mut self) -> anyhow::Result<Option<PathBuf>> {
-        let paths = self.ctx.collect_local_candidates()?;
-        if paths.is_empty() {
+        let mut picker = LocalCandidatePicker::new(
+            &self.ctx.state.history,
+            self.ctx.config.selection.avoid_recent,
+        );
+        self.ctx
+            .for_each_local_candidate(|path| picker.consider(path))?;
+        let Some(path) = picker.finish() else {
             tracing::info!("no wallpaper candidates");
             return Ok(None);
-        }
-        let ids: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
-        let id = crate::selection::pick_next(&PickInput {
-            candidates: &ids,
-            recent: &self.ctx.state.history,
-            avoid_recent: self.ctx.config.selection.avoid_recent,
-        })?;
-        let path = paths
-            .into_iter()
-            .find(|p| p.display().to_string() == id)
-            .ok_or_else(|| anyhow::anyhow!("picked path vanished"))?;
+        };
         self.ctx
             .apply_file_inner(&path, ApplyTrigger::Auto, None, true)?;
         Ok(Some(path))
@@ -170,4 +178,55 @@ impl<'ctx> AdvanceNext<'ctx> {
     fn cached_wallhaven_path(&self, id: &str) -> Option<PathBuf> {
         crate::wallhaven::cached_wallpaper_path(&self.ctx.paths.cache_dir, id)
     }
+}
+
+struct LocalCandidatePicker<'recent> {
+    recent: HashSet<&'recent str>,
+    seen_available: usize,
+    selected_available: Option<PathBuf>,
+    seen_any: usize,
+    selected_any: Option<PathBuf>,
+}
+
+impl<'recent> LocalCandidatePicker<'recent> {
+    fn new(recent: &'recent [String], avoid_recent: usize) -> Self {
+        Self {
+            recent: recent
+                .iter()
+                .take(avoid_recent)
+                .map(String::as_str)
+                .collect(),
+            seen_available: 0,
+            selected_available: None,
+            seen_any: 0,
+            selected_any: None,
+        }
+    }
+
+    fn consider(&mut self, path: PathBuf) -> anyhow::Result<()> {
+        self.seen_any += 1;
+        if should_replace_reservoir(self.seen_any)? {
+            self.selected_any = Some(path.clone());
+        }
+
+        let id = path.display().to_string();
+        if self.recent.contains(id.as_str()) {
+            return Ok(());
+        }
+
+        self.seen_available += 1;
+        if should_replace_reservoir(self.seen_available)? {
+            self.selected_available = Some(path);
+        }
+        Ok(())
+    }
+
+    fn finish(self) -> Option<PathBuf> {
+        self.selected_available.or(self.selected_any)
+    }
+}
+
+fn should_replace_reservoir(seen: usize) -> anyhow::Result<bool> {
+    let upper = u64::try_from(seen)?;
+    Ok(rand::rng().random_range(0..upper) == 0)
 }
