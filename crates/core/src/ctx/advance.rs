@@ -24,101 +24,10 @@ impl WallsCtx {
         Ok(paths)
     }
 
-    fn wallhaven_client(&self) -> anyhow::Result<crate::wallhaven::WallhavenClient> {
-        crate::wallhaven::WallhavenClient::new(
-            crate::wallhaven::client::api_base(),
-            &self.secrets.wallhaven_api_key,
-        )
-    }
-
-    async fn try_apply_cache_head(
-        &mut self,
-        client: &crate::wallhaven::WallhavenClient,
-    ) -> anyhow::Result<Option<PathBuf>> {
-        let Some(id) = self.state.cache_queue.first().cloned() else {
-            return Ok(None);
-        };
-        let path = if let Some(p) = self.cached_wallhaven_path(&id) {
-            p
-        } else {
-            let wp = client.fetch_wallpaper(&id).await?;
-            client
-                .download_to_cache_with_quota(
-                    &wp,
-                    &self.paths.cache_dir,
-                    &self.paths.download_dir,
-                    self.config.quota.size_mb,
-                    self.config.quota.enabled,
-                )
-                .await?
-        };
-        self.state.cache_queue.remove(0);
-        self.apply_file_inner(&path, ApplyTrigger::Auto, Some(id.clone()), true)?;
-        Ok(Some(path))
-    }
-
-    fn try_apply_cached_only(&mut self) -> anyhow::Result<Option<PathBuf>> {
-        let Some(id) = self.state.cache_queue.first().cloned() else {
-            return Ok(None);
-        };
-        let Some(path) = self.cached_wallhaven_path(&id) else {
-            return Ok(None);
-        };
-        self.state.cache_queue.remove(0);
-        self.apply_file_inner(&path, ApplyTrigger::Auto, Some(id), true)?;
-        Ok(Some(path))
-    }
-
     pub async fn advance_next(&mut self) -> anyhow::Result<Option<PathBuf>> {
         let _lock = crate::lock::StateLock::acquire(&self.paths.state_file)?;
         self.state = State::load_or_default(&self.paths.state_file)?;
-        self.advance_next_inner().await
-    }
-
-    async fn advance_next_inner(&mut self) -> anyhow::Result<Option<PathBuf>> {
-        if self.state.paused || !self.config.change.enabled {
-            tracing::info!("skipped: paused or change disabled");
-            return Ok(None);
-        }
-
-        if let Some(path) = self.try_apply_cached_only()? {
-            return Ok(Some(path));
-        }
-
-        if self.config.change.internet_enabled && !self.secrets.wallhaven_api_key.is_empty() {
-            let client = self.wallhaven_client()?;
-            if let Some(path) = self.try_apply_cache_head(&client).await? {
-                return Ok(Some(path));
-            }
-            crate::wallhaven::refill_wallhaven_cache(&client, &self.config, &mut self.state)
-                .await?;
-            self.save_state()?;
-            if let Some(path) = self.try_apply_cache_head(&client).await? {
-                return Ok(Some(path));
-            }
-        }
-
-        let paths = self.collect_local_candidates()?;
-        if paths.is_empty() {
-            tracing::info!("no wallpaper candidates");
-            return Ok(None);
-        }
-        let ids: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
-        let id = crate::selection::pick_next(&PickInput {
-            candidates: &ids,
-            recent: &self.state.history,
-            avoid_recent: self.config.selection.avoid_recent,
-        })?;
-        let path = paths
-            .into_iter()
-            .find(|p| p.display().to_string() == id)
-            .ok_or_else(|| anyhow::anyhow!("picked path vanished"))?;
-        self.apply_file_inner(&path, ApplyTrigger::Auto, None, true)?;
-        Ok(Some(path))
-    }
-
-    fn cached_wallhaven_path(&self, id: &str) -> Option<PathBuf> {
-        crate::wallhaven::cached_wallpaper_path(&self.paths.cache_dir, id)
+        AdvanceNext::new(self).run().await
     }
 
     pub fn advance_prev(&mut self) -> anyhow::Result<Option<PathBuf>> {
@@ -137,5 +46,128 @@ impl WallsCtx {
             return Ok(Some(path));
         }
         Ok(None)
+    }
+}
+
+struct AdvanceNext<'ctx> {
+    ctx: &'ctx mut WallsCtx,
+}
+
+impl<'ctx> AdvanceNext<'ctx> {
+    fn new(ctx: &'ctx mut WallsCtx) -> Self {
+        Self { ctx }
+    }
+
+    async fn run(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        if self.should_skip() {
+            tracing::info!("skipped: paused or change disabled");
+            return Ok(None);
+        }
+
+        if let Some(path) = self.apply_cached_queue_head()? {
+            return Ok(Some(path));
+        }
+
+        if let Some(path) = self.apply_wallhaven_queue().await? {
+            return Ok(Some(path));
+        }
+
+        self.apply_local_candidate()
+    }
+
+    fn should_skip(&self) -> bool {
+        self.ctx.state.paused || !self.ctx.config.change.enabled
+    }
+
+    async fn apply_wallhaven_queue(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        if !self.wallhaven_enabled() {
+            return Ok(None);
+        }
+
+        let client = self.wallhaven_client()?;
+        if let Some(path) = self.apply_wallhaven_queue_head(&client).await? {
+            return Ok(Some(path));
+        }
+
+        crate::wallhaven::refill_wallhaven_cache(&client, &self.ctx.config, &mut self.ctx.state)
+            .await?;
+        self.ctx.save_state()?;
+        self.apply_wallhaven_queue_head(&client).await
+    }
+
+    fn wallhaven_enabled(&self) -> bool {
+        self.ctx.config.change.internet_enabled && !self.ctx.secrets.wallhaven_api_key.is_empty()
+    }
+
+    fn wallhaven_client(&self) -> anyhow::Result<crate::wallhaven::WallhavenClient> {
+        crate::wallhaven::WallhavenClient::new(
+            crate::wallhaven::client::api_base(),
+            &self.ctx.secrets.wallhaven_api_key,
+        )
+    }
+
+    async fn apply_wallhaven_queue_head(
+        &mut self,
+        client: &crate::wallhaven::WallhavenClient,
+    ) -> anyhow::Result<Option<PathBuf>> {
+        let Some(id) = self.ctx.state.cache_queue.first().cloned() else {
+            return Ok(None);
+        };
+        let path = if let Some(p) = self.cached_wallhaven_path(&id) {
+            p
+        } else {
+            let wp = client.fetch_wallpaper(&id).await?;
+            client
+                .download_to_cache_with_quota(
+                    &wp,
+                    &self.ctx.paths.cache_dir,
+                    &self.ctx.paths.download_dir,
+                    self.ctx.config.quota.size_mb,
+                    self.ctx.config.quota.enabled,
+                )
+                .await?
+        };
+        self.ctx.state.cache_queue.remove(0);
+        self.ctx
+            .apply_file_inner(&path, ApplyTrigger::Auto, Some(id.clone()), true)?;
+        Ok(Some(path))
+    }
+
+    fn apply_cached_queue_head(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        let Some(id) = self.ctx.state.cache_queue.first().cloned() else {
+            return Ok(None);
+        };
+        let Some(path) = self.cached_wallhaven_path(&id) else {
+            return Ok(None);
+        };
+        self.ctx.state.cache_queue.remove(0);
+        self.ctx
+            .apply_file_inner(&path, ApplyTrigger::Auto, Some(id), true)?;
+        Ok(Some(path))
+    }
+
+    fn apply_local_candidate(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        let paths = self.ctx.collect_local_candidates()?;
+        if paths.is_empty() {
+            tracing::info!("no wallpaper candidates");
+            return Ok(None);
+        }
+        let ids: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
+        let id = crate::selection::pick_next(&PickInput {
+            candidates: &ids,
+            recent: &self.ctx.state.history,
+            avoid_recent: self.ctx.config.selection.avoid_recent,
+        })?;
+        let path = paths
+            .into_iter()
+            .find(|p| p.display().to_string() == id)
+            .ok_or_else(|| anyhow::anyhow!("picked path vanished"))?;
+        self.ctx
+            .apply_file_inner(&path, ApplyTrigger::Auto, None, true)?;
+        Ok(Some(path))
+    }
+
+    fn cached_wallhaven_path(&self, id: &str) -> Option<PathBuf> {
+        crate::wallhaven::cached_wallpaper_path(&self.ctx.paths.cache_dir, id)
     }
 }
