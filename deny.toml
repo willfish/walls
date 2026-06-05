@@ -18,11 +18,30 @@ unmaintained = "workspace"
 ignore = []
 
 [bans]
-multiple-versions = "warn"
+multiple-versions = "deny"
 wildcards = "allow"
 deny = [
   { crate = "openssl", use-instead = "rustls" },
   { crate = "openssl-sys", use-instead = "rustls" },
+]
+
+# Duplicate dependency exceptions are intentionally exact-versioned. New
+# duplicate versions should fail CI unless they are reviewed and documented here.
+skip = [
+  { crate = "getrandom@0.2.17", reason = "Retained by ring/rustls and ratatui-image rand 0.8; workspace code uses getrandom 0.4 via rand 0.10/tempfile." },
+  { crate = "hashbrown@0.16.1", reason = "Retained by the ratatui 0.30 dependency stack; the newer hashbrown comes through reqwest/hyper indexmap." },
+  { crate = "heck@0.4.1", reason = "Retained by gtk/glib macro crates; workspace CLI derives already use heck 0.5 through clap." },
+  { crate = "linux-raw-sys@0.4.15", reason = "Retained by rustix 0.38 in ratatui-image; crossterm/tempfile use rustix 1.x." },
+  { crate = "proc-macro-crate@1.3.1", reason = "Retained by gtk3-macros; glib-macros uses proc-macro-crate 2.x." },
+  { crate = "rand@0.8.6", reason = "Retained by ratatui-image; workspace code uses rand 0.10." },
+  { crate = "rand@0.9.4", reason = "Retained by icy_sixel/quantette in the image preview stack; workspace code uses rand 0.10." },
+  { crate = "rand_core@0.6.4", reason = "Retained by rand 0.8 in ratatui-image; workspace code uses rand_core 0.10 through rand 0.10." },
+  { crate = "rand_core@0.9.5", reason = "Retained by rand 0.9/quantette in the image preview stack; workspace code uses rand_core 0.10 through rand 0.10." },
+  { crate = "rustix@0.38.44", reason = "Retained by ratatui-image; crossterm/tempfile use rustix 1.x." },
+  { crate = "syn@1.0.109", reason = "Retained by gtk/glib proc-macro-error; the broader macro ecosystem in this workspace uses syn 2." },
+  { crate = "thiserror@1.0.69", reason = "Retained by GTK/portable-pty/ratatui-image dependencies; workspace crates use thiserror 2." },
+  { crate = "thiserror-impl@1.0.69", reason = "Retained with thiserror 1.x by GTK/portable-pty/ratatui-image dependencies." },
+  { crate = "toml_edit@0.19.15", reason = "Retained by proc-macro-crate 1.x via gtk3-macros; glib/system-deps use newer toml_edit." },
 ]
 
 [sources]
