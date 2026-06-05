@@ -62,6 +62,7 @@ pub struct SearchHit {
 pub struct App {
     pub ctx: WallsCtx,
     pub tab: Tab,
+    pub config_cursor: usize,
     pub cursor: usize,
     pub message: String,
     pub input_mode: InputMode,
@@ -103,6 +104,7 @@ impl App {
         let mut app = Self {
             ctx,
             tab: Tab::Config,
+            config_cursor: 0,
             cursor: 0,
             message: String::new(),
             input_mode: InputMode::Normal,
@@ -131,21 +133,34 @@ impl App {
     pub fn move_down(&mut self) {
         let len = self.list_len();
         if len > 0 {
-            self.cursor = (self.cursor + 1).min(len - 1);
+            let cursor = self.active_cursor_mut();
+            *cursor = (*cursor + 1).min(len - 1);
         }
     }
 
     pub fn move_up(&mut self) {
-        self.cursor = self.cursor.saturating_sub(1);
+        let cursor = self.active_cursor_mut();
+        *cursor = (*cursor).saturating_sub(1);
     }
 
     pub fn list_len(&self) -> usize {
         match self.tab {
-            Tab::Config => 5,
+            Tab::Config => Self::config_block_count(),
             Tab::History => self.ctx.state.history.len(),
             Tab::Browse => self.browse_items().len(),
             Tab::Search => self.search_results.len(),
             _ => 0,
+        }
+    }
+
+    pub fn config_block_count() -> usize {
+        5
+    }
+
+    fn active_cursor_mut(&mut self) -> &mut usize {
+        match self.tab {
+            Tab::Config => &mut self.config_cursor,
+            _ => &mut self.cursor,
         }
     }
 
