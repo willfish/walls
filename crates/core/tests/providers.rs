@@ -1,0 +1,140 @@
+use walls_core::config::{Config, SourceEntry};
+use walls_core::providers::{
+    configured_providers, configured_source_providers, enabled_local_sources, wallhaven_provider,
+    ProviderCapability, ProviderKind,
+};
+
+fn test_config(internet_enabled: bool) -> Config {
+    serde_json::from_value(serde_json::json!({
+        "change": { "internet_enabled": internet_enabled },
+        "paths": {
+            "cache_dir": "cache",
+            "download_dir": "downloaded",
+            "favorites_dir": "favorites",
+            "fetched_dir": "fetched",
+            "compose_dir": "wallpaper"
+        },
+        "sources": []
+    }))
+    .expect("config")
+}
+
+fn test_config_with_sources(internet_enabled: bool, sources: serde_json::Value) -> Config {
+    let mut config = test_config(internet_enabled);
+    config.sources = serde_json::from_value(sources).expect("sources");
+    config
+}
+
+#[test]
+fn classifies_existing_source_entries_without_schema_changes() {
+    let sources: Vec<SourceEntry> = serde_json::from_value(serde_json::json!([
+        { "enabled": true, "type": "folder", "label": "Wallpapers", "path": "/tmp/walls" },
+        { "enabled": true, "type": "favorites" },
+        { "enabled": false, "type": "image", "path": "/tmp/wall.jpg" },
+        { "enabled": true, "type": "future-provider", "url": "https://example.com/feed.json" }
+    ]))
+    .expect("sources");
+
+    let providers = configured_source_providers(&sources);
+
+    assert_eq!(providers[0].id, "Wallpapers");
+    assert_eq!(providers[0].kind, ProviderKind::Local);
+    assert!(providers[0].enabled);
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::ConfigValidation));
+    assert!(!providers[0]
+        .capabilities
+        .contains(&ProviderCapability::Download));
+    assert_eq!(providers[1].id, "favorites");
+    assert_eq!(providers[1].kind, ProviderKind::Local);
+    assert_eq!(providers[2].kind, ProviderKind::Local);
+    assert!(!providers[2].enabled);
+    assert_eq!(providers[3].kind, ProviderKind::Unsupported);
+    assert!(!providers[3]
+        .capabilities
+        .contains(&ProviderCapability::ConfigValidation));
+}
+
+#[test]
+fn configured_providers_include_sources_and_wallhaven_adapter() {
+    let config = test_config_with_sources(
+        true,
+        serde_json::json!([
+            { "enabled": true, "type": "folder", "label": "Local", "path": "/tmp/walls" }
+        ]),
+    );
+    let secrets = serde_json::from_value::<walls_core::config::Secrets>(serde_json::json!({
+        "wallhaven_api_key": "key"
+    }))
+    .expect("secrets");
+
+    let providers = configured_providers(&config, &secrets);
+
+    assert_eq!(providers.len(), 2);
+    assert_eq!(providers[0].id, "Local");
+    assert_eq!(providers[0].kind, ProviderKind::Local);
+    assert_eq!(providers[1].id, "wallhaven");
+    assert_eq!(providers[1].kind, ProviderKind::Wallhaven);
+    assert!(providers[1].enabled);
+}
+
+#[test]
+fn enabled_local_sources_dispatch_excludes_disabled_and_unsupported_sources() {
+    let sources: Vec<SourceEntry> = serde_json::from_value(serde_json::json!([
+        { "enabled": true, "type": "folder", "path": "/tmp/walls" },
+        { "enabled": false, "type": "favorites" },
+        { "enabled": true, "type": "future-provider", "url": "https://example.com/feed.json" },
+        { "enabled": true, "type": "fetched" }
+    ]))
+    .expect("sources");
+
+    let dispatched: Vec<&str> = enabled_local_sources(&sources)
+        .map(|source| source.source_type.as_str())
+        .collect();
+
+    assert_eq!(dispatched, vec!["folder", "fetched"]);
+}
+
+#[test]
+fn wallhaven_descriptor_preserves_existing_enablement_rules() {
+    let mut secrets = serde_json::from_value::<walls_core::config::Secrets>(serde_json::json!({
+        "wallhaven_api_key": "key"
+    }))
+    .expect("secrets");
+
+    let provider = wallhaven_provider(&test_config(true), &secrets);
+    assert!(provider.enabled);
+    assert!(provider
+        .capabilities
+        .contains(&ProviderCapability::QueueRefill));
+    assert!(provider
+        .capabilities
+        .contains(&ProviderCapability::Download));
+    assert!(provider
+        .capabilities
+        .contains(&ProviderCapability::Metadata));
+    assert!(!wallhaven_provider(&test_config(false), &secrets).enabled);
+
+    secrets.wallhaven_api_key.clear();
+    assert!(!wallhaven_provider(&test_config(true), &secrets).enabled);
+}
+
+#[test]
+fn failure_scope_names_provider_and_operation() {
+    let provider = configured_source_providers(&[SourceEntry {
+        enabled: true,
+        source_type: "folder".into(),
+        label: Some("Local library".into()),
+        path: Some("/tmp/walls".into()),
+        query: None,
+        url: None,
+    }])
+    .remove(0);
+
+    let scope = provider.failure_scope("local source listing").to_string();
+
+    assert!(scope.contains("Local library"), "{scope}");
+    assert!(scope.contains("Local"), "{scope}");
+    assert!(scope.contains("local source listing"), "{scope}");
+}
