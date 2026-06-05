@@ -16,6 +16,7 @@ use ratatui::crossterm::ExecutableCommand;
 use ratatui::prelude::*;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Paragraph, Tabs};
+use walls_core::config::{ApplyBackendSetting, CosmicMethod};
 use walls_core::WallsCtx;
 
 pub fn run() -> anyhow::Result<()> {
@@ -516,22 +517,16 @@ fn config_lines(app: &App) -> Vec<String> {
         "Rotation",
         app.ctx.config.change.enabled,
         format!(
-            "every {}s, {}",
+            "every {}s, {}, {:.0}% online",
             app.ctx.config.change.interval_secs,
             if app.ctx.config.change.internet_enabled {
-                "online sources allowed"
+                "online"
             } else {
-                "local sources only"
-            }
+                "local only"
+            },
+            app.ctx.config.change.download_preference_ratio * 100.0
         ),
-        [
-            format!("on start: {}", app.ctx.config.change.on_start),
-            format!("safe mode: {}", app.ctx.config.change.safe_mode),
-            format!(
-                "download preference: {:.0}% online",
-                app.ctx.config.change.download_preference_ratio * 100.0
-            ),
-        ],
+        rotation_details(app),
     );
     push_config_block(
         &mut lines,
@@ -564,15 +559,12 @@ fn config_lines(app: &App) -> Vec<String> {
         "Library",
         app.ctx.config.quota.enabled,
         format!(
-            "{} queued, {} history entries",
+            "{} queued, {} history, quota {}",
             app.ctx.state.cache_queue.len(),
-            app.ctx.state.history.len()
+            app.ctx.state.history.len(),
+            quota_summary(app)
         ),
-        [
-            format!("cache: {}", app.ctx.paths.cache_dir.display()),
-            format!("downloaded: {}", app.ctx.paths.download_dir.display()),
-            format!("quota: {} MB", app.ctx.config.quota.size_mb),
-        ],
+        library_details(app),
     );
     push_config_block(
         &mut lines,
@@ -581,8 +573,10 @@ fn config_lines(app: &App) -> Vec<String> {
         "Apply/display",
         true,
         format!(
-            "{:?} backend, {} mode",
-            app.ctx.config.apply.backend, app.ctx.config.display.mode
+            "{} backend, {} mode, {}",
+            apply_backend_label(app.ctx.config.apply.backend),
+            app.ctx.config.display.mode,
+            display_target_summary(app)
         ),
         apply_display_details(app),
     );
@@ -634,6 +628,21 @@ fn local_source_details(app: &App) -> Vec<String> {
             )
         })
         .collect()
+}
+
+fn rotation_details(app: &App) -> Vec<String> {
+    vec![
+        format!("enabled: {}", app.ctx.config.change.enabled),
+        format!("on start: {}", app.ctx.config.change.on_start),
+        format!("interval: {}s", app.ctx.config.change.interval_secs),
+        format!("internet: {}", app.ctx.config.change.internet_enabled),
+        format!("safe mode: {}", app.ctx.config.change.safe_mode),
+        format!("lock screen: {}", app.ctx.config.change.change_lock_screen),
+        format!(
+            "download preference: {:.0}% online",
+            app.ctx.config.change.download_preference_ratio * 100.0
+        ),
+    ]
 }
 
 fn wallhaven_summary(app: &App) -> String {
@@ -718,24 +727,120 @@ fn wallhaven_details(app: &App) -> Vec<String> {
     details
 }
 
-fn apply_display_details(app: &App) -> [String; 3] {
-    let target = match (
-        app.ctx.config.display.target_width,
-        app.ctx.config.display.target_height,
-    ) {
-        (Some(width), Some(height)) => format!("{width}x{height}"),
-        _ => "automatic target".into(),
-    };
+fn library_details(app: &App) -> Vec<String> {
+    let mut details = vec![
+        format!("cache: {}", app.ctx.paths.cache_dir.display()),
+        format!("downloaded: {}", app.ctx.paths.download_dir.display()),
+        format!("favorites: {}", app.ctx.paths.favorites_dir.display()),
+        format!("fetched: {}", app.ctx.paths.fetched_dir.display()),
+        format!("compose: {}", app.ctx.paths.compose_dir.display()),
+        format!("quota: {}", quota_summary(app)),
+        format!("queue: {} items", app.ctx.state.cache_queue.len()),
+        format!("history: {} entries", app.ctx.state.history.len()),
+        format!("selection: {:?}", app.ctx.config.selection.strategy),
+        format!("avoid recent: {}", app.ctx.config.selection.avoid_recent),
+        format!(
+            "refetch below: {} cached",
+            app.ctx.config.selection.refetch_when_cache_below
+        ),
+    ];
+    details.extend(config_warning_lines(app, &["quota."]));
+    details
+}
 
-    [
+fn apply_display_details(app: &App) -> Vec<String> {
+    let custom_script = app
+        .ctx
+        .config
+        .apply
+        .custom_script
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())
+        .unwrap_or("(not set)");
+    let mut details = vec![
+        format!(
+            "backend: {}",
+            apply_backend_label(app.ctx.config.apply.backend)
+        ),
+        format!("custom script: {custom_script}"),
+        format!(
+            "cosmic: {}",
+            cosmic_method_label(app.ctx.config.apply.cosmic.method)
+        ),
+        format!("cosmic config: {}", app.ctx.config.apply.cosmic.config_path),
+        format!(
+            "cosmic uses original: {}",
+            app.ctx.config.apply.cosmic.use_original_path
+        ),
+        format!("display mode: {}", app.ctx.config.display.mode),
         format!("auto rotate: {}", app.ctx.config.display.auto_rotate),
-        format!("target: {target}"),
+        format!("target: {}", display_target_summary(app)),
+        format!(
+            "imagemagick: {}",
+            app.ctx.config.display.imagemagick_command
+        ),
         format!(
             "filters: {} configured, enabled={}",
             app.ctx.config.display.filters.filters.len(),
             app.ctx.config.display.filters.enabled
         ),
-    ]
+        format!("filter command: {}", app.ctx.config.display.filters.command),
+    ];
+    details.extend(config_warning_lines(app, &["apply."]));
+    details
+}
+
+fn quota_summary(app: &App) -> String {
+    if app.ctx.config.quota.enabled {
+        format!("{} MB", app.ctx.config.quota.size_mb)
+    } else {
+        "disabled".into()
+    }
+}
+
+fn display_target_summary(app: &App) -> String {
+    match (
+        app.ctx.config.display.target_width,
+        app.ctx.config.display.target_height,
+    ) {
+        (Some(width), Some(height)) => format!("{width}x{height} target"),
+        _ => "automatic target".into(),
+    }
+}
+
+fn config_warning_lines(app: &App, prefixes: &[&str]) -> Vec<String> {
+    app.config_warnings
+        .iter()
+        .filter(|warning| {
+            prefixes
+                .iter()
+                .any(|prefix| warning.trim_start_matches("warning: ").starts_with(prefix))
+        })
+        .cloned()
+        .collect()
+}
+
+fn apply_backend_label(backend: ApplyBackendSetting) -> &'static str {
+    match backend {
+        ApplyBackendSetting::Auto => "auto",
+        ApplyBackendSetting::Cosmic => "cosmic",
+        ApplyBackendSetting::CosmicExtBgCtl => "cosmic-ext-bg-ctl",
+        ApplyBackendSetting::Gnome => "gnome",
+        ApplyBackendSetting::Kde => "kde",
+        ApplyBackendSetting::Xfce => "xfce",
+        ApplyBackendSetting::Sway => "sway",
+        ApplyBackendSetting::Wlroots => "wlroots",
+        ApplyBackendSetting::Hyprland => "hyprland",
+        ApplyBackendSetting::Feh => "feh",
+        ApplyBackendSetting::CustomScript => "custom-script",
+    }
+}
+
+fn cosmic_method_label(method: CosmicMethod) -> &'static str {
+    match method {
+        CosmicMethod::CosmicConfig => "cosmic-config",
+        CosmicMethod::CosmicExtBgCtl => "cosmic-ext-bg-ctl",
+    }
 }
 
 fn now_lines(app: &App) -> Vec<String> {
@@ -811,6 +916,24 @@ mod tests {
         )
         .expect("write config");
         fs::write(tmp.path().join("secrets.json"), "{}").expect("write secrets");
+
+        App::new(WallsCtx::load_from(tmp.path()).expect("ctx")).expect("app")
+    }
+
+    fn test_app_with_config(config: serde_json::Value, secrets: serde_json::Value) -> App {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(tmp.path().join("favorites")).expect("favorites dir");
+        fs::create_dir_all(tmp.path().join("fetched")).expect("fetched dir");
+        fs::write(
+            tmp.path().join("config.json"),
+            serde_json::to_string_pretty(&config).expect("config json"),
+        )
+        .expect("write config");
+        fs::write(
+            tmp.path().join("secrets.json"),
+            serde_json::to_string_pretty(&secrets).expect("secrets json"),
+        )
+        .expect("write secrets");
 
         App::new(WallsCtx::load_from(tmp.path()).expect("ctx")).expect("app")
     }
@@ -896,7 +1019,7 @@ mod tests {
         assert!(text.contains("  [on] Library"), "{text}");
         assert!(text.contains("  [on] Apply/display"), "{text}");
         assert!(text.contains("on start: false"), "{text}");
-        assert!(text.contains("local sources only"), "{text}");
+        assert!(text.contains("local only"), "{text}");
         assert!(!text.contains("paused:"), "{text}");
         assert!(text.contains("normal"), "{text}");
         assert!(
@@ -968,6 +1091,159 @@ mod tests {
         );
         assert!(
             text.contains("6. [on] Missing (folder) - missing path - 0 candidates"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn rotation_block_renders_full_change_settings_without_pause_duplication() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": {
+                    "enabled": true,
+                    "on_start": true,
+                    "interval_secs": 42,
+                    "internet_enabled": true,
+                    "safe_mode": true,
+                    "change_lock_screen": true,
+                    "download_preference_ratio": 0.35
+                },
+                "paths": {
+                    "cache_dir": "/tmp/walls-cache",
+                    "download_dir": "/tmp/walls-downloaded",
+                    "favorites_dir": "/tmp/walls-favorites",
+                    "fetched_dir": "/tmp/walls-fetched",
+                    "compose_dir": "/tmp/walls-compose"
+                },
+                "apply": { "backend": "auto" },
+                "display": { "mode": "os" },
+                "sources": []
+            }),
+            serde_json::json!({}),
+        );
+        app.config_cursor = 0;
+
+        let text = render_text(&app, 100, 28);
+
+        assert!(
+            text.contains("> [on] Rotation - every 42s, online, 35% online"),
+            "{text}"
+        );
+        assert!(text.contains("enabled: true"), "{text}");
+        assert!(text.contains("on start: true"), "{text}");
+        assert!(text.contains("interval: 42s"), "{text}");
+        assert!(text.contains("internet: true"), "{text}");
+        assert!(text.contains("safe mode: true"), "{text}");
+        assert!(text.contains("lock screen: true"), "{text}");
+        assert!(text.contains("download preference: 35% online"), "{text}");
+        assert!(!text.contains("paused:"), "{text}");
+    }
+
+    #[test]
+    fn library_block_renders_paths_counts_quota_and_validation_warnings() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "internet_enabled": false },
+                "paths": {
+                    "cache_dir": "/tmp/walls-cache",
+                    "download_dir": "/tmp/walls-downloaded",
+                    "favorites_dir": "/tmp/walls-favorites",
+                    "fetched_dir": "/tmp/walls-fetched",
+                    "compose_dir": "/tmp/walls-compose"
+                },
+                "quota": { "enabled": true, "size_mb": 0 },
+                "apply": { "backend": "auto" },
+                "display": { "mode": "os" },
+                "sources": []
+            }),
+            serde_json::json!({}),
+        );
+        app.config_cursor = 3;
+
+        let text = render_text(&app, 120, 32);
+
+        assert!(
+            text.contains("> [on] Library - 0 queued, 0 history, quota 0 MB"),
+            "{text}"
+        );
+        assert!(text.contains("cache: /tmp/walls-cache"), "{text}");
+        assert!(text.contains("downloaded: /tmp/walls-downloaded"), "{text}");
+        assert!(text.contains("favorites: /tmp/walls-favorites"), "{text}");
+        assert!(text.contains("fetched: /tmp/walls-fetched"), "{text}");
+        assert!(text.contains("compose: /tmp/walls-compose"), "{text}");
+        assert!(text.contains("selection: Random"), "{text}");
+        assert!(text.contains("avoid recent: 50"), "{text}");
+        assert!(
+            text.contains("warning: quota.size_mb must be greater than zero"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn apply_display_block_renders_backend_display_and_validation_warnings() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "internet_enabled": false },
+                "paths": {
+                    "cache_dir": "/tmp/walls-cache",
+                    "download_dir": "/tmp/walls-downloaded",
+                    "favorites_dir": "/tmp/walls-favorites",
+                    "fetched_dir": "/tmp/walls-fetched",
+                    "compose_dir": "/tmp/walls-compose"
+                },
+                "apply": {
+                    "backend": "custom-script",
+                    "cosmic": {
+                        "method": "cosmic-ext-bg-ctl",
+                        "config_path": "/tmp/missing-cosmic-config",
+                        "use_original_path": true
+                    }
+                },
+                "display": {
+                    "mode": "fill",
+                    "auto_rotate": true,
+                    "target_width": 3840,
+                    "target_height": 2160,
+                    "imagemagick_command": "magick",
+                    "filters": {
+                        "enabled": true,
+                        "command": "magick",
+                        "filters": [{ "name": "soften", "args": ["-blur", "0x1"] }]
+                    }
+                },
+                "sources": []
+            }),
+            serde_json::json!({}),
+        );
+        app.config_cursor = 4;
+
+        let text = render_text(&app, 120, 34);
+
+        assert!(
+            text.contains(
+                "> [on] Apply/display - custom-script backend, fill mode, 3840x2160 target"
+            ),
+            "{text}"
+        );
+        assert!(text.contains("backend: custom-script"), "{text}");
+        assert!(text.contains("custom script: (not set)"), "{text}");
+        assert!(text.contains("cosmic: cosmic-ext-bg-ctl"), "{text}");
+        assert!(
+            text.contains("cosmic config: /tmp/missing-cosmic-config"),
+            "{text}"
+        );
+        assert!(text.contains("cosmic uses original: true"), "{text}");
+        assert!(text.contains("display mode: fill"), "{text}");
+        assert!(text.contains("auto rotate: true"), "{text}");
+        assert!(text.contains("target: 3840x2160 target"), "{text}");
+        assert!(
+            text.contains("filters: 1 configured, enabled=true"),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "warning: apply.custom_script is required when apply.backend is custom-script"
+            ),
             "{text}"
         );
     }
