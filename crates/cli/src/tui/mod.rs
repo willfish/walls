@@ -166,9 +166,16 @@ enum UiAction {
     Trash,
     TogglePause,
     ToggleConfigValue,
+    #[allow(dead_code)]
     CycleConfigValue,
     EditConfigItem,
     CancelEdit,
+    EditFieldChar(char),
+    EditFieldBackspace,
+    EditFieldCommit,
+    EditFieldUp,
+    EditFieldDown,
+    SaveEditItem,
     SwitchTab(Tab),
     EditSearch,
     MoveDown,
@@ -234,6 +241,20 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
         InputMode::Normal => {}
     }
 
+    // Editing popup steals keys for j/k field nav + live typing into buffer (no sub-mode)
+    if app.is_editing() {
+        return match key.code {
+            KeyCode::Up | KeyCode::Char('k') => UiAction::EditFieldUp,
+            KeyCode::Down | KeyCode::Char('j') => UiAction::EditFieldDown,
+            KeyCode::Esc => UiAction::CancelEdit,
+            KeyCode::Char('s') | KeyCode::Char('S') => UiAction::SaveEditItem,
+            KeyCode::Backspace => UiAction::EditFieldBackspace,
+            KeyCode::Enter => UiAction::EditFieldCommit,
+            KeyCode::Char(c) => UiAction::EditFieldChar(c),
+            _ => UiAction::Ignore,
+        };
+    }
+
     match key.code {
         KeyCode::Char('q') => UiAction::Quit,
         KeyCode::Char(':') => UiAction::EnterCommandMode,
@@ -243,15 +264,7 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
         KeyCode::Char('d') => UiAction::Trash,
         KeyCode::Char(' ') => UiAction::TogglePause,
         KeyCode::Char('t') if app.tab == Tab::Config => UiAction::ToggleConfigValue,
-        KeyCode::Char('e') if app.tab == Tab::Config => {
-            if app.is_editing() {
-                // in edit: treat 'e' as cycle field or ignore for now; later field action
-                UiAction::CycleConfigValue // placeholder; real will be field cycle or edit specific
-            } else {
-                UiAction::EditConfigItem
-            }
-        }
-        KeyCode::Esc if app.is_editing() => UiAction::CancelEdit,
+        KeyCode::Char('e') if app.tab == Tab::Config => UiAction::EditConfigItem,
         KeyCode::Char(c @ '1'..='6') => {
             let index = c
                 .to_digit(10)
@@ -362,6 +375,41 @@ fn update(
         }
         UiAction::CancelEdit => {
             app.cancel_edit();
+        }
+        UiAction::EditFieldChar(c) => {
+            if let Some(sess) = &mut app.editing {
+                sess.field_buffer.push(c);
+                app.refresh_edit_validation();
+            }
+        }
+        UiAction::EditFieldBackspace => {
+            if let Some(sess) = &mut app.editing {
+                sess.field_buffer.pop();
+                app.refresh_edit_validation();
+            }
+        }
+        UiAction::EditFieldCommit => {
+            if app.editing.is_some() {
+                app.commit_edit_field_buffer();
+            }
+        }
+        UiAction::EditFieldUp => {
+            if let Some(sess) = &mut app.editing {
+                if sess.field_cursor > 0 {
+                    sess.field_cursor -= 1;
+                }
+                sess.field_buffer.clear();
+            }
+        }
+        UiAction::EditFieldDown => {
+            if let Some(sess) = &mut app.editing {
+                sess.field_cursor += 1;
+                sess.field_buffer.clear();
+            }
+        }
+        UiAction::SaveEditItem => {
+            let _ = app.save_edit_item();
+            // save_edit_item will set message and clear editing on success, or errors
         }
         UiAction::SwitchTab(tab) => {
             app.tab = tab;
@@ -980,25 +1028,33 @@ fn render_edit_popup(f: &mut Frame, app: &App, area: Rect, theme: style::Theme) 
             EditTarget::Source(i) => format!("Edit source #{} (form)", i),
         };
         let block = theme.content_block(&title);
-        let mut lines: Vec<Line> = vec![Line::from("=== EDIT FORM ===")];
+        let mut lines: Vec<Line> = vec![Line::from(
+            "=== EDIT FORM (j/k, type, Enter=commit field, s=save, Esc) ===",
+        )];
+        // dynamic fields list with cursor + live buffer on current
+        let mut fields: Vec<(String, String)> = vec![];
         if let Some(ref src) = sess.draft_source {
-            lines.push(Line::from(format!("enabled: {}", src.enabled)));
-            lines.push(Line::from(format!("type: {}", src.source_type)));
-            if let Some(l) = &src.label {
-                lines.push(Line::from(format!("label: {}", l)));
-            }
-            if let Some(u) = &src.url {
-                lines.push(Line::from(format!("url: {}", u)));
-            }
-            if let Some(p) = &src.path {
-                lines.push(Line::from(format!("path: {}", p)));
-            }
-            if let Some(ip) = &src.image_path {
-                lines.push(Line::from(format!("image_path: {}", ip)));
-            }
+            fields.push(("enabled".into(), src.enabled.to_string()));
+            fields.push(("type".into(), src.source_type.clone()));
+            fields.push(("label".into(), src.label.clone().unwrap_or_default()));
+            fields.push(("url".into(), src.url.clone().unwrap_or_default()));
+            fields.push(("path".into(), src.path.clone().unwrap_or_default()));
+            fields.push((
+                "image_path".into(),
+                src.image_path.clone().unwrap_or_default(),
+            ));
         } else {
             for (k, v) in &sess.draft_block_values {
-                lines.push(Line::from(format!("{}: {}", k, v)));
+                fields.push((k.clone(), v.clone()));
+            }
+        }
+        for (i, (k, v)) in fields.iter().enumerate() {
+            let mut val = v.clone();
+            if i == sess.field_cursor {
+                val = format!("{}|{}", val, sess.field_buffer);
+                lines.push(Line::from(format!("> {}: {}", k, val)));
+            } else {
+                lines.push(Line::from(format!("  {}: {}", k, val)));
             }
         }
         if !sess.validation_errors.is_empty() {
@@ -1007,10 +1063,6 @@ fn render_edit_popup(f: &mut Frame, app: &App, area: Rect, theme: style::Theme) 
                 format!("validation: {}", err_text),
                 theme.status(StatusKind::Error),
             )));
-        }
-        // hint current buffer if any
-        if !sess.field_buffer.is_empty() {
-            lines.push(Line::from(format!("(editing: {})", sess.field_buffer)));
         }
         let para = Paragraph::new(lines).block(block);
         f.render_widget(para, popup_area);
@@ -1818,6 +1870,40 @@ mod tests {
             has_field,
             "form should list some fields for the item; got prefix: {}",
             &text[0..300.min(text.len())]
+        );
+    }
+
+    #[test]
+    fn edit_form_live_buffer_and_commit_updates_draft() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [ { "enabled": true, "type": "json", "url": "https://old", "image_path": "$.old" } ]
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        app.start_edit_for_current();
+        assert!(app.is_editing());
+        // type into current (assume starts at 0 or 3 for url-ish)
+        // for demo, force cursor to a string field and type
+        if let Some(s) = &mut app.editing {
+            s.field_cursor = 3; // url in our list
+        }
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+        update(&mut app, UiAction::EditFieldChar('h'), rt.handle()).ok();
+        update(&mut app, UiAction::EditFieldChar('i'), rt.handle()).ok();
+        // buffer should have "hi"
+        let buf = app.editing.as_ref().unwrap().field_buffer.clone();
+        assert_eq!(buf, "hi");
+        // commit field
+        update(&mut app, UiAction::EditFieldCommit, rt.handle()).ok();
+        // draft should be updated (url now has hi appended or set)
+        let draft = app.editing.as_ref().unwrap().draft_source.as_ref().unwrap();
+        assert!(
+            draft.url.as_deref().unwrap_or("").contains("hi") || draft.url.as_deref() == Some("hi")
         );
     }
 }

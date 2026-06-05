@@ -506,6 +506,160 @@ impl App {
         self.editing.is_some()
     }
 
+    #[allow(dead_code)]
+    pub fn refresh_edit_validation(&mut self) {
+        if let Some(sess) = &mut self.editing {
+            // Build a temp view of the item and validate relevant parts
+            // For simplicity, clone full config, patch, run validate, filter
+            let mut temp = self.ctx.config.clone();
+            match &sess.target {
+                EditTarget::Source(i) if *i < temp.sources.len() => {
+                    if let Some(d) = &sess.draft_source {
+                        // apply buffer if any to the draft for live
+                        // (in practice commit does full, here just use current draft + buffer for current field is complex; simple: use draft)
+                        temp.sources[*i] = d.clone();
+                    }
+                }
+                _ => {}
+            }
+            let issues =
+                walls_core::validate::validate_config(&temp, &self.ctx.secrets, &self.ctx.paths);
+            // keep only issues mentioning the target roughly
+            sess.validation_errors = issues
+                .into_iter()
+                .filter(|e| match &sess.target {
+                    EditTarget::Source(_) => {
+                        e.contains("source")
+                            || e.contains("path")
+                            || e.contains("url")
+                            || e.contains("key")
+                    }
+                    _ => true,
+                })
+                .collect();
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn commit_edit_field_buffer(&mut self) {
+        if let Some(sess) = &mut self.editing {
+            let buf = std::mem::take(&mut sess.field_buffer);
+            let field_idx = sess.field_cursor;
+            match &mut sess.target {
+                EditTarget::Source(i) if *i < self.ctx.config.sources.len() => {
+                    if let Some(draft) = &mut sess.draft_source {
+                        // map cursor to field (simplified order matching render)
+                        match field_idx {
+                            0 => draft.enabled = buf.trim().parse().unwrap_or(draft.enabled),
+                            1 if !buf.trim().is_empty() => {
+                                draft.source_type = buf.trim().to_string();
+                            }
+                            2 => {
+                                draft.label = if buf.trim().is_empty() {
+                                    None
+                                } else {
+                                    Some(buf.trim().to_string())
+                                }
+                            }
+                            3 => {
+                                draft.url = if buf.trim().is_empty() {
+                                    None
+                                } else {
+                                    Some(buf.trim().to_string())
+                                }
+                            }
+                            4 => {
+                                draft.path = if buf.trim().is_empty() {
+                                    None
+                                } else {
+                                    Some(buf.trim().to_string())
+                                }
+                            }
+                            5 => {
+                                draft.image_path = if buf.trim().is_empty() {
+                                    None
+                                } else {
+                                    Some(buf.trim().to_string())
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                EditTarget::Block(0) => {
+                    // rotation scalars
+                    match field_idx {
+                        0 => {
+                            sess.draft_block_values
+                                .insert("enabled".into(), buf.trim().to_string());
+                        }
+                        1 => {
+                            sess.draft_block_values
+                                .insert("interval".into(), buf.trim().to_string());
+                        }
+                        2 => {
+                            sess.draft_block_values
+                                .insert("internet".into(), buf.trim().to_string());
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+            self.refresh_edit_validation();
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn save_edit_item(&mut self) -> anyhow::Result<()> {
+        let sess = match &self.editing {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+        let mut config = self.ctx.config.clone();
+        let mut success_msg = "config saved via edit".to_string();
+        match &sess.target {
+            EditTarget::Source(i) if *i < config.sources.len() => {
+                if let Some(d) = &sess.draft_source {
+                    config.sources[*i] = d.clone();
+                    success_msg = format!("config saved: source #{} type={}", i, d.source_type);
+                }
+            }
+            EditTarget::Block(0) => {
+                // apply rotation values (simplified)
+                if let Some(v) = sess.draft_block_values.get("enabled") {
+                    config.change.enabled = v == "true";
+                }
+                if let Some(v) = sess.draft_block_values.get("interval") {
+                    if let Ok(n) = v.parse() {
+                        config.change.interval_secs = n;
+                    }
+                }
+                if let Some(v) = sess.draft_block_values.get("internet") {
+                    config.change.internet_enabled = v == "true";
+                }
+                success_msg = "config saved: rotation".into();
+            }
+            _ => {}
+        }
+        // strict validate
+        let issues =
+            walls_core::validate::validate_config(&config, &self.ctx.secrets, &self.ctx.paths);
+        if !issues.is_empty() {
+            if let Some(s) = &mut self.editing {
+                s.validation_errors = issues.clone();
+            }
+            self.message = format!("config validation failed: {}", issues.join("; "));
+            return Ok(());
+        }
+        save_config_atomic(&self.ctx.paths.config_file, &config)?;
+        self.message = success_msg;
+        // reload will happen via effect if we return it, but for simplicity here reload
+        self.reload_ctx()?;
+        self.editing = None;
+        Ok(())
+    }
+
     pub fn run_command(&mut self, rt: &tokio::runtime::Handle) -> anyhow::Result<Option<String>> {
         let msg = match ParsedCommand::parse(&self.cmd_line) {
             ParsedCommand::Next => {
