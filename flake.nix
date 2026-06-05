@@ -165,8 +165,10 @@
                 rust-analyzer
                 cargo-audit
                 cargo-deny
+                cargo-llvm-cov
                 pkg-config
                 openssl
+                llvm
                 imagemagick
                 feh
                 nitrogen
@@ -178,6 +180,8 @@
 
           RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
           RUST_BACKTRACE = "1";
+          LLVM_COV = "${pkgs.llvm}/bin/llvm-cov";
+          LLVM_PROFDATA = "${pkgs.llvm}/bin/llvm-profdata";
 
           shellHook = pre-commit.shellHook + ''
             echo "walls dev shell"
