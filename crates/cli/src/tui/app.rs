@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use walls_core::apply::ApplyTrigger;
 use walls_core::WallsCtx;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Status,
     Now,
@@ -67,6 +67,31 @@ pub struct App {
     pub search_query: String,
     pub search_results: Vec<SearchHit>,
     pub(crate) local_candidates: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParsedCommand<'a> {
+    Next,
+    Prev,
+    TogglePause,
+    Status,
+    Quit,
+    Empty,
+    Unknown(&'a str),
+}
+
+impl<'a> ParsedCommand<'a> {
+    fn parse(line: &'a str) -> Self {
+        match line.trim() {
+            "next" | "n" => Self::Next,
+            "prev" | "p" => Self::Prev,
+            "pause" | "toggle-pause" => Self::TogglePause,
+            "status" => Self::Status,
+            "quit" | "q" => Self::Quit,
+            "" => Self::Empty,
+            other => Self::Unknown(other),
+        }
+    }
 }
 
 impl App {
@@ -272,31 +297,32 @@ impl App {
     }
 
     pub fn run_command(&mut self, rt: &tokio::runtime::Handle) -> anyhow::Result<Option<String>> {
-        let line = self.cmd_line.trim();
-        let msg = match line {
-            "next" | "n" => match rt.block_on(self.ctx.advance_next()) {
+        let msg = match ParsedCommand::parse(&self.cmd_line) {
+            ParsedCommand::Next => match rt.block_on(self.ctx.advance_next()) {
                 Ok(Some(p)) => format!("next: {}", p.display()),
                 Ok(None) => "next: no change".into(),
                 Err(e) => format!("next error: {e}"),
             },
-            "prev" | "p" => match self.ctx.advance_prev() {
+            ParsedCommand::Prev => match self.ctx.advance_prev() {
                 Ok(Some(p)) => format!("prev: {}", p.display()),
                 Ok(None) => "prev: none".into(),
                 Err(e) => format!("prev error: {e}"),
             },
-            "pause" | "toggle-pause" => {
+            ParsedCommand::TogglePause => {
                 self.ctx.toggle_pause()?;
                 format!("paused: {}", self.ctx.state.paused)
             }
-            "status" => format!(
+            ParsedCommand::Status => format!(
                 "paused={} history={} queue={}",
                 self.ctx.state.paused,
                 self.ctx.state.history.len(),
                 self.ctx.state.cache_queue.len()
             ),
-            "quit" | "q" => return Ok(None),
-            "" => "(empty command)".into(),
-            other => format!("unknown command: {other} (try :next :prev :pause :status :quit)"),
+            ParsedCommand::Quit => return Ok(None),
+            ParsedCommand::Empty => "(empty command)".into(),
+            ParsedCommand::Unknown(other) => {
+                format!("unknown command: {other} (try :next :prev :pause :status :quit)")
+            }
         };
         Ok(Some(msg))
     }
@@ -315,5 +341,53 @@ impl App {
             },
         };
         format!("{keys} | q quit | {}", self.message)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ParsedCommand, Tab};
+
+    #[test]
+    fn tab_indices_round_trip_through_visible_order() {
+        let tabs = [
+            Tab::Status,
+            Tab::Now,
+            Tab::History,
+            Tab::Browse,
+            Tab::Search,
+        ];
+
+        for (index, tab) in tabs.into_iter().enumerate() {
+            assert_eq!(tab.index(), index);
+            assert_eq!(Tab::from_index(index), tab);
+        }
+    }
+
+    #[test]
+    fn unknown_tab_index_falls_back_to_status() {
+        assert_eq!(Tab::from_index(usize::MAX), Tab::Status);
+    }
+
+    #[test]
+    fn command_parser_trims_and_maps_dispatch_aliases() {
+        assert_eq!(ParsedCommand::parse(" next "), ParsedCommand::Next);
+        assert_eq!(ParsedCommand::parse("n"), ParsedCommand::Next);
+        assert_eq!(ParsedCommand::parse("prev"), ParsedCommand::Prev);
+        assert_eq!(ParsedCommand::parse("p"), ParsedCommand::Prev);
+        assert_eq!(ParsedCommand::parse("pause"), ParsedCommand::TogglePause);
+        assert_eq!(
+            ParsedCommand::parse("toggle-pause"),
+            ParsedCommand::TogglePause
+        );
+        assert_eq!(ParsedCommand::parse("status"), ParsedCommand::Status);
+        assert_eq!(ParsedCommand::parse("quit"), ParsedCommand::Quit);
+        assert_eq!(ParsedCommand::parse("q"), ParsedCommand::Quit);
+    }
+
+    #[test]
+    fn command_parser_distinguishes_empty_and_unknown_commands() {
+        assert_eq!(ParsedCommand::parse("  "), ParsedCommand::Empty);
+        assert_eq!(ParsedCommand::parse("wat"), ParsedCommand::Unknown("wat"));
     }
 }
