@@ -71,6 +71,26 @@ pub struct LocalSourceSummary {
     pub candidates: usize,
 }
 
+pub struct WallhavenProviderSummary {
+    pub internet_enabled: bool,
+    pub api_key_present: bool,
+    pub prefer: String,
+    pub collections: Vec<String>,
+    pub query: String,
+    pub categories: String,
+    pub purity: String,
+    pub sorting: String,
+    pub order: String,
+    pub atleast: String,
+    pub warnings: Vec<String>,
+}
+
+impl WallhavenProviderSummary {
+    pub fn usable(&self) -> bool {
+        self.internet_enabled && self.api_key_present
+    }
+}
+
 pub struct App {
     pub ctx: WallsCtx,
     pub tab: Tab,
@@ -83,6 +103,7 @@ pub struct App {
     pub search_results: Vec<SearchHit>,
     pub(crate) local_candidates: Vec<PathBuf>,
     pub(crate) local_source_summaries: Vec<LocalSourceSummary>,
+    pub(crate) wallhaven_summary: WallhavenProviderSummary,
     pub color_mode: ColorMode,
 }
 
@@ -114,6 +135,7 @@ impl<'a> ParsedCommand<'a> {
 impl App {
     pub fn new(ctx: WallsCtx) -> anyhow::Result<Self> {
         let search_query = ctx.config.wallhaven.search.q.clone();
+        let wallhaven_summary = summarize_wallhaven_provider(&ctx);
         let mut app = Self {
             ctx,
             tab: Tab::Config,
@@ -126,6 +148,7 @@ impl App {
             search_results: Vec::new(),
             local_candidates: Vec::new(),
             local_source_summaries: Vec::new(),
+            wallhaven_summary,
             color_mode: ColorMode::from_env(),
         };
         app.refresh_local_candidates()?;
@@ -149,6 +172,7 @@ impl App {
             .filter(|source| is_local_source(source))
             .map(|source| summarize_local_source(&self.ctx, source))
             .collect();
+        self.wallhaven_summary = summarize_wallhaven_provider(&self.ctx);
         Ok(())
     }
 
@@ -436,6 +460,51 @@ fn summarize_local_source(ctx: &WallsCtx, source: &SourceEntry) -> LocalSourceSu
         path: path.display().to_string(),
         status: format!("{enabled_status}{path_status}"),
         candidates,
+    }
+}
+
+fn summarize_wallhaven_provider(ctx: &WallsCtx) -> WallhavenProviderSummary {
+    let search = &ctx.config.wallhaven.search;
+    let api_key_present = !ctx.secrets.wallhaven_api_key.trim().is_empty();
+    let query = if search.q.trim().is_empty() {
+        "(empty query)".into()
+    } else {
+        search.q.clone()
+    };
+    let collections = ctx
+        .config
+        .wallhaven
+        .collections
+        .iter()
+        .map(|collection| {
+            let label = collection.label.as_deref().unwrap_or("collection");
+            format!("{}: {}/{}", label, collection.username, collection.id)
+        })
+        .collect();
+
+    let mut warnings = Vec::new();
+    if !ctx.config.change.internet_enabled {
+        warnings.push("warning: online sources disabled".into());
+    }
+    if !api_key_present {
+        warnings.push("warning: API key missing; search and downloads are unavailable".into());
+    }
+    if search.purity.chars().nth(2) == Some('1') {
+        warnings.push("warning: NSFW purity requires Wallhaven account access".into());
+    }
+
+    WallhavenProviderSummary {
+        internet_enabled: ctx.config.change.internet_enabled,
+        api_key_present,
+        prefer: format!("{:?}", ctx.config.wallhaven.prefer),
+        collections,
+        query,
+        categories: search.categories.clone(),
+        purity: search.purity.clone(),
+        sorting: search.sorting.clone(),
+        order: search.order.clone(),
+        atleast: search.atleast.clone(),
+        warnings,
     }
 }
 
