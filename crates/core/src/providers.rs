@@ -11,6 +11,7 @@ pub enum ProviderKind {
     MediaRss,
     Attribution,
     Json,
+    Pixabay,
     Unsupported,
 }
 
@@ -125,6 +126,7 @@ fn source_kind(source_type: &str) -> ProviderKind {
         "mediarss" => ProviderKind::MediaRss,
         "attribution" => ProviderKind::Attribution,
         "json" => ProviderKind::Json,
+        "pixabay" => ProviderKind::Pixabay,
         _ => ProviderKind::Unsupported,
     }
 }
@@ -139,7 +141,8 @@ fn capabilities_for_kind(kind: ProviderKind) -> Vec<ProviderCapability> {
         | ProviderKind::Apod
         | ProviderKind::MediaRss
         | ProviderKind::Attribution
-        | ProviderKind::Json => vec![
+        | ProviderKind::Json
+        | ProviderKind::Pixabay => vec![
             ProviderCapability::ConfigValidation,
             ProviderCapability::QueueRefill,
             ProviderCapability::Download,

@@ -338,3 +338,29 @@ fn jsonfeed_source_is_classified_with_full_capabilities_not_unsupported() {
         .capabilities
         .contains(&ProviderCapability::Metadata));
 }
+
+#[test]
+fn pixabay_source_is_classified_with_full_capabilities_not_unsupported() {
+    // RED for #164 Pixabay (will fail until Pixabay kind).
+    let sources: Vec<SourceEntry> = serde_json::from_value(serde_json::json!([
+        { "enabled": true, "type": "pixabay", "query": "nature" }
+    ]))
+    .expect("sources");
+
+    let providers = configured_source_providers(&sources);
+
+    assert_ne!(
+        providers[0].kind,
+        ProviderKind::Unsupported,
+        "pixabay must not be Unsupported"
+    );
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::Download));
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::QueueRefill));
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::Metadata));
+}
