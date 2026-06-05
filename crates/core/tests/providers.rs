@@ -179,3 +179,31 @@ fn failure_scope_names_provider_and_operation() {
     assert!(scope.contains("Local"), "{scope}");
     assert!(scope.contains("local source listing"), "{scope}");
 }
+
+#[test]
+fn reddit_source_is_classified_with_full_capabilities_not_unsupported() {
+    // RED phase for #158: configurable Reddit source (subreddit via query for now).
+    // Currently "reddit" type -> Unsupported (no Download/Refill caps).
+    // Test must fail until ProviderKind::Reddit + source_kind + caps wiring added (minimal per AC).
+    let sources: Vec<SourceEntry> = serde_json::from_value(serde_json::json!([
+        { "enabled": true, "type": "reddit", "query": "wallpapers" }
+    ]))
+    .expect("sources");
+
+    let providers = configured_source_providers(&sources);
+
+    assert_ne!(
+        providers[0].kind,
+        ProviderKind::Unsupported,
+        "reddit must not be Unsupported"
+    );
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::Download));
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::QueueRefill));
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::Metadata));
+}
