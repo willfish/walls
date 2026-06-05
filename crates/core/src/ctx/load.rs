@@ -1,17 +1,19 @@
 use super::WallsCtx;
 use crate::config::{load_config, load_secrets};
+use crate::error::{Result, WallsError};
 use crate::paths::WallsPaths;
 use crate::state::State;
 use std::path::Path;
 
 impl WallsCtx {
-    pub fn load() -> anyhow::Result<Self> {
-        let paths = WallsPaths::discover()?;
+    pub fn load() -> Result<Self> {
+        let paths =
+            WallsPaths::discover().map_err(|source| WallsError::PathDiscovery { source })?;
         Self::load_with_paths(paths)
     }
 
     /// Load config/state from a test or alternate root directory.
-    pub fn load_from(root: &Path) -> anyhow::Result<Self> {
+    pub fn load_from(root: &Path) -> Result<Self> {
         let paths = WallsPaths {
             config_dir: root.to_path_buf(),
             config_file: root.join("config.json"),
@@ -26,13 +28,25 @@ impl WallsCtx {
         Self::load_with_paths(paths)
     }
 
-    pub fn load_with_paths(mut paths: WallsPaths) -> anyhow::Result<Self> {
-        let config = load_config(&paths.config_file)
-            .map_err(|e| anyhow::anyhow!("failed to load {}: {e}", paths.config_file.display()))?;
-        let secrets = load_secrets(&paths.secrets_file)?;
+    pub fn load_with_paths(mut paths: WallsPaths) -> Result<Self> {
+        let config = load_config(&paths.config_file).map_err(|source| WallsError::ConfigLoad {
+            path: paths.config_file.clone(),
+            source,
+        })?;
+        let secrets =
+            load_secrets(&paths.secrets_file).map_err(|source| WallsError::SecretsLoad {
+                path: paths.secrets_file.clone(),
+                source,
+            })?;
         paths.apply_config_paths(&config.paths);
-        paths.ensure_data_dirs()?;
-        let state = State::load_or_default(&paths.state_file)?;
+        paths
+            .ensure_data_dirs()
+            .map_err(|source| WallsError::DataDirCreate { source })?;
+        let state =
+            State::load_or_default(&paths.state_file).map_err(|source| WallsError::StateLoad {
+                path: paths.state_file.clone(),
+                source,
+            })?;
         let ctx = Self {
             paths,
             config,
@@ -53,6 +67,25 @@ impl WallsCtx {
     ) -> anyhow::Result<R> {
         let _lock = crate::lock::StateLock::acquire(&self.paths.state_file)?;
         self.state = State::load_or_default(&self.paths.state_file)?;
+        f(self)
+    }
+
+    pub(super) fn with_typed_state_lock<R>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<R>,
+    ) -> Result<R> {
+        let _lock = crate::lock::StateLock::acquire(&self.paths.state_file).map_err(|source| {
+            WallsError::StateLock {
+                path: self.paths.state_file.clone(),
+                source,
+            }
+        })?;
+        self.state = State::load_or_default(&self.paths.state_file).map_err(|source| {
+            WallsError::StateLoad {
+                path: self.paths.state_file.clone(),
+                source,
+            }
+        })?;
         f(self)
     }
 }
