@@ -538,10 +538,12 @@ fn config_lines(app: &App) -> Vec<String> {
         1,
         app.config_cursor,
         "Local sources",
-        app.ctx.config.sources.iter().any(|source| source.enabled),
+        app.local_source_summaries
+            .iter()
+            .any(|source| source.enabled),
         format!(
             "{} configured, {} candidates",
-            app.ctx.config.sources.len(),
+            app.local_source_summaries.len(),
             app.local_candidates.len()
         ),
         local_source_details(app),
@@ -587,14 +589,14 @@ fn config_lines(app: &App) -> Vec<String> {
     lines
 }
 
-fn push_config_block<const N: usize>(
+fn push_config_block(
     lines: &mut Vec<String>,
     index: usize,
     cursor: usize,
     title: &str,
     enabled: bool,
     summary: String,
-    details: [String; N],
+    details: impl IntoIterator<Item = String>,
 ) {
     let marker = if cursor == index { ">" } else { " " };
     let state = if enabled { "on" } else { "off" };
@@ -606,28 +608,32 @@ fn push_config_block<const N: usize>(
     }
 }
 
-fn local_source_details(app: &App) -> [String; 3] {
-    let enabled = app
-        .ctx
-        .config
-        .sources
-        .iter()
-        .filter(|source| source.enabled)
-        .count();
-    let disabled = app.ctx.config.sources.len().saturating_sub(enabled);
-    let first_path = app
-        .ctx
-        .config
-        .sources
-        .iter()
-        .find_map(|source| source.path.as_deref())
-        .unwrap_or("(no path configured)");
+fn local_source_details(app: &App) -> Vec<String> {
+    if app.local_source_summaries.is_empty() {
+        return vec!["no local sources configured".into()];
+    }
 
-    [
-        format!("enabled sources: {enabled}"),
-        format!("disabled sources: {disabled}"),
-        format!("first path: {first_path}"),
-    ]
+    app.local_source_summaries
+        .iter()
+        .enumerate()
+        .map(|(index, source)| {
+            let state = if source.enabled { "on" } else { "off" };
+            let plural = if source.candidates == 1 {
+                "candidate"
+            } else {
+                "candidates"
+            };
+            format!(
+                "{}. [{state}] {} ({}) - {} - {} {plural} - {}",
+                index + 1,
+                source.label,
+                source.source_type,
+                source.status,
+                source.candidates,
+                source.path,
+            )
+        })
+        .collect()
 }
 
 fn wallhaven_summary(app: &App) -> String {
@@ -705,6 +711,18 @@ mod tests {
         fs::create_dir_all(&image_dir).expect("images dir");
         fs::write(image_dir.join("a.jpg"), b"x").expect("image");
 
+        test_app_with_sources(
+            tmp,
+            serde_json::json!([{ "enabled": true, "type": "folder", "path": image_dir.display().to_string() }]),
+        )
+    }
+
+    fn test_app_with_sources(tmp: tempfile::TempDir, sources: serde_json::Value) -> App {
+        fs::create_dir_all(tmp.path().join("favorites")).expect("favorites dir");
+        fs::create_dir_all(tmp.path().join("fetched")).expect("fetched dir");
+        fs::write(tmp.path().join("favorites").join("fav.jpg"), b"x").expect("favorite image");
+        fs::write(tmp.path().join("fetched").join("fetch.jpg"), b"x").expect("fetched image");
+
         let noop = tmp.path().join("noop.sh");
         fs::write(&noop, "#!/bin/sh\nexit 0\n").expect("noop");
         #[cfg(unix)]
@@ -724,7 +742,7 @@ mod tests {
             },
             "apply": { "backend": "custom-script", "custom_script": noop.display().to_string() },
             "display": { "mode": "os" },
-            "sources": [{ "enabled": true, "type": "folder", "path": image_dir.display().to_string() }],
+            "sources": sources,
         });
         fs::write(
             tmp.path().join("config.json"),
@@ -789,10 +807,63 @@ mod tests {
         let text = render_text(&app, 80, 24);
 
         assert!(text.contains("> [on] Local sources"), "{text}");
-        assert!(text.contains("enabled sources: 1"), "{text}");
-        assert!(text.contains("disabled sources: 0"), "{text}");
-        assert!(text.contains("first path:"), "{text}");
+        assert!(
+            text.contains("1. [on] folder (folder) - ready - 1 candidate"),
+            "{text}"
+        );
         assert!(!text.contains("on start: false"), "{text}");
+    }
+
+    #[test]
+    fn local_source_block_renders_enabled_disabled_and_missing_sources() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let image_dir = tmp.path().join("images");
+        fs::create_dir_all(&image_dir).expect("images dir");
+        fs::write(image_dir.join("a.jpg"), b"x").expect("folder image");
+        let image_file = tmp.path().join("single.jpg");
+        fs::write(&image_file, b"x").expect("single image");
+        let missing = tmp.path().join("missing");
+
+        let mut app = test_app_with_sources(
+            tmp,
+            serde_json::json!([
+                { "enabled": true, "type": "favorites", "label": "Favorites" },
+                { "enabled": true, "type": "fetched", "label": "Fetched" },
+                { "enabled": true, "type": "folder", "label": "Wallpapers", "path": image_dir.display().to_string() },
+                { "enabled": true, "type": "image", "label": "Single", "path": image_file.display().to_string() },
+                { "enabled": false, "type": "folder", "label": "Disabled", "path": image_dir.display().to_string() },
+                { "enabled": true, "type": "folder", "label": "Missing", "path": missing.display().to_string() }
+            ]),
+        );
+        app.config_cursor = 1;
+
+        let text = render_text(&app, 120, 30);
+
+        assert!(text.contains("6 configured, 4 candidates"), "{text}");
+        assert!(
+            text.contains("1. [on] Favorites (favorites) - ready - 1 candidate"),
+            "{text}"
+        );
+        assert!(
+            text.contains("2. [on] Fetched (fetched) - ready - 1 candidate"),
+            "{text}"
+        );
+        assert!(
+            text.contains("3. [on] Wallpapers (folder) - ready - 1 candidate"),
+            "{text}"
+        );
+        assert!(
+            text.contains("4. [on] Single (image) - ready - 1 candidate"),
+            "{text}"
+        );
+        assert!(
+            text.contains("5. [off] Disabled (folder) - disabled, ready - 1 candidate"),
+            "{text}"
+        );
+        assert!(
+            text.contains("6. [on] Missing (folder) - missing path - 0 candidates"),
+            "{text}"
+        );
     }
 
     #[test]
