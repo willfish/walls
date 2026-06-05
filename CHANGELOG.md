@@ -9,6 +9,13 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-06-05
+
+### Fixed
+
+- `WallsCtx::load` now warns on Unix when `secrets.json` is readable by group or other users, recommending `chmod 600` without failing startup ([#120](https://github.com/willfish/walls/pull/120)).
+- ImageMagick filter/display-mode command spawning now retries transient `Text file busy` errors, stabilizing CI and freshly-created wrapper scripts ([#121](https://github.com/willfish/walls/pull/121)).
+
 ## [0.6.4] - 2026-06-04
 
 ### Added
