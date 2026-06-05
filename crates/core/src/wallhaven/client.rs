@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use anyhow::{ensure, Context};
 use reqwest::{Client, Response, StatusCode};
 
 use crate::config::{WallhavenCollection, WallhavenSearch};
@@ -11,6 +12,7 @@ use super::types::{SearchResponse, Wallpaper, WallpaperResponse};
 pub const DEFAULT_API_BASE: &str = "https://wallhaven.cc";
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_MAX_DOWNLOAD_BYTES: u64 = 50 * 1024 * 1024;
 const MAX_ATTEMPTS: u32 = 3;
 const RETRY_BACKOFF_BASE_MS: u64 = 100;
 
@@ -22,6 +24,7 @@ pub struct WallhavenClient {
     http: Client,
     base_url: String,
     api_key: String,
+    max_download_bytes: u64,
 }
 
 impl WallhavenClient {
@@ -40,6 +43,22 @@ impl WallhavenClient {
         request_timeout: Duration,
         connect_timeout: Duration,
     ) -> anyhow::Result<Self> {
+        Self::new_with_limits(
+            base_url,
+            api_key,
+            request_timeout,
+            connect_timeout,
+            DEFAULT_MAX_DOWNLOAD_BYTES,
+        )
+    }
+
+    pub fn new_with_limits(
+        base_url: impl Into<String>,
+        api_key: impl Into<String>,
+        request_timeout: Duration,
+        connect_timeout: Duration,
+        max_download_bytes: u64,
+    ) -> anyhow::Result<Self> {
         let base = base_url.into();
         Ok(Self {
             http: Client::builder()
@@ -48,6 +67,7 @@ impl WallhavenClient {
                 .build()?,
             base_url: base.trim_end_matches('/').to_string(),
             api_key: api_key.into(),
+            max_download_bytes,
         })
     }
 
@@ -92,11 +112,8 @@ impl WallhavenClient {
         if dest.exists() {
             return Ok(dest);
         }
-        let bytes = self
-            .send_with_retries(|| self.http.get(&wp.path))
-            .await?
-            .bytes()
-            .await?;
+        let response = self.send_with_retries(|| self.http.get(&wp.path)).await?;
+        let bytes = pipe_limited_body(response, self.max_download_bytes).await?;
         tokio::fs::write(&dest, &bytes).await?;
         Ok(dest)
     }
@@ -166,6 +183,30 @@ impl WallhavenClient {
             attempt += 1;
         }
     }
+}
+
+async fn pipe_limited_body(mut response: Response, max_bytes: u64) -> anyhow::Result<Vec<u8>> {
+    if let Some(content_length) = response.content_length() {
+        ensure!(
+            content_length <= max_bytes,
+            "Wallhaven download size {content_length} bytes exceeds limit of {max_bytes} bytes"
+        );
+    }
+
+    let mut total = 0_u64;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        let chunk_len = u64::try_from(chunk.len())?;
+        total = total
+            .checked_add(chunk_len)
+            .context("Wallhaven download size overflowed while reading response")?;
+        ensure!(
+            total <= max_bytes,
+            "Wallhaven download exceeded limit of {max_bytes} bytes while reading response"
+        );
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
 }
 
 fn is_transient_status(status: StatusCode) -> bool {
