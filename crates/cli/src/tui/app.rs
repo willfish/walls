@@ -16,6 +16,7 @@ pub enum Tab {
     History,
     Browse,
     Search,
+    Logs,
 }
 
 impl Tab {
@@ -26,6 +27,7 @@ impl Tab {
             Tab::History => 2,
             Tab::Browse => 3,
             Tab::Search => 4,
+            Tab::Logs => 5,
         }
     }
 
@@ -36,6 +38,7 @@ impl Tab {
             Tab::History => "History",
             Tab::Browse => "Browse",
             Tab::Search => "Search",
+            Tab::Logs => "Logs",
         }
     }
 
@@ -46,6 +49,7 @@ impl Tab {
             2 => Tab::History,
             3 => Tab::Browse,
             4 => Tab::Search,
+            5 => Tab::Logs,
             _ => Tab::Config,
         }
     }
@@ -56,6 +60,24 @@ pub enum InputMode {
     Normal,
     Command,
     SearchInput,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub enum EditTarget {
+    Block(usize),
+    Source(usize),
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct EditSession {
+    pub target: EditTarget,
+    pub draft_source: Option<SourceEntry>,
+    pub draft_block_values: std::collections::HashMap<String, String>,
+    pub field_cursor: usize,
+    pub field_buffer: String,
+    pub validation_errors: Vec<String>,
 }
 
 pub struct SearchHit {
@@ -99,6 +121,8 @@ pub struct App {
     pub cursor: usize,
     pub message: String,
     pub input_mode: InputMode,
+    #[allow(dead_code)]
+    pub editing: Option<EditSession>,
     pub cmd_line: String,
     pub search_query: String,
     pub search_results: Vec<SearchHit>,
@@ -146,6 +170,7 @@ impl App {
             cursor: 0,
             message: String::new(),
             input_mode: InputMode::Normal,
+            editing: None,
             cmd_line: String::new(),
             search_query,
             search_results: Vec::new(),
@@ -200,6 +225,7 @@ impl App {
             Tab::History => self.ctx.state.history.len(),
             Tab::Browse => self.browse_items().len(),
             Tab::Search => self.search_results.len(),
+            Tab::Logs => super::log_len(),
             _ => 0,
         }
     }
@@ -250,6 +276,20 @@ impl App {
             }
         }
         lines
+    }
+
+    pub fn logs_lines(&self) -> Vec<String> {
+        let logs = super::LOG_BUFFER.lock().unwrap();
+        if logs.is_empty() {
+            return vec!["(no logs captured yet)".into()];
+        }
+        logs.iter()
+            .enumerate()
+            .map(|(i, line)| {
+                let mark = if i == self.cursor { ">" } else { " " };
+                format!("{mark} {line}")
+            })
+            .collect()
     }
 
     pub fn browse_items(&self) -> Vec<String> {
@@ -406,13 +446,75 @@ impl App {
         Ok(Some(message))
     }
 
+    #[allow(dead_code)]
+    pub fn start_edit_for_current(&mut self) {
+        if self.tab != Tab::Config {
+            return;
+        }
+        // Minimal: for RED/GREEN, target block 0 or first source if present; real sub logic later
+        let target = if !self.ctx.config.sources.is_empty() && self.config_cursor == 1 {
+            EditTarget::Source(0)
+        } else {
+            EditTarget::Block(self.config_cursor)
+        };
+        let session = match &target {
+            EditTarget::Source(i) if *i < self.ctx.config.sources.len() => {
+                let idx = *i;
+                EditSession {
+                    target: target.clone(),
+                    draft_source: Some(self.ctx.config.sources[idx].clone()),
+                    draft_block_values: std::collections::HashMap::new(),
+                    field_cursor: 0,
+                    field_buffer: String::new(),
+                    validation_errors: vec![],
+                }
+            }
+            EditTarget::Block(0) => {
+                let mut vals = std::collections::HashMap::new();
+                vals.insert("enabled".into(), self.ctx.config.change.enabled.to_string());
+                vals.insert(
+                    "interval".into(),
+                    self.ctx.config.change.interval_secs.to_string(),
+                );
+                vals.insert(
+                    "internet".into(),
+                    self.ctx.config.change.internet_enabled.to_string(),
+                );
+                EditSession {
+                    target: target.clone(),
+                    draft_source: None,
+                    draft_block_values: vals,
+                    field_cursor: 0,
+                    field_buffer: String::new(),
+                    validation_errors: vec![],
+                }
+            }
+            _ => return,
+        };
+        self.editing = Some(session);
+        self.message.clear();
+    }
+
+    #[allow(dead_code)]
+    pub fn cancel_edit(&mut self) {
+        self.editing = None;
+        self.message = "edit cancelled".into();
+    }
+
+    #[allow(dead_code)]
+    pub fn is_editing(&self) -> bool {
+        self.editing.is_some()
+    }
+
     pub fn run_command(&mut self, rt: &tokio::runtime::Handle) -> anyhow::Result<Option<String>> {
         let msg = match ParsedCommand::parse(&self.cmd_line) {
-            ParsedCommand::Next => match rt.block_on(self.ctx.advance_next()) {
-                Ok(Some(p)) => format!("next: {}", p.display()),
-                Ok(None) => "next: no change".into(),
-                Err(e) => format!("next error: {e}"),
-            },
+            ParsedCommand::Next => {
+                match tokio::task::block_in_place(|| rt.block_on(self.ctx.advance_next())) {
+                    Ok(Some(p)) => format!("next: {}", p.display()),
+                    Ok(None) => "next: no change".into(),
+                    Err(e) => format!("next error: {e}"),
+                }
+            }
             ParsedCommand::Prev => match self.ctx.advance_prev() {
                 Ok(Some(p)) => format!("prev: {}", p.display()),
                 Ok(None) => "prev: none".into(),
@@ -450,7 +552,7 @@ impl App {
                 Tab::Config => {
                     "1 Config | j/k blocks | t toggle e cycle | n/p | space pause | : cmd".into()
                 }
-                _ => "1-5 tabs | n/p next/prev | f favorite d trash | space pause | : cmd".into(),
+                _ => "1-6 tabs | n/p next/prev | f favorite d trash | space pause | : cmd".into(),
             },
         };
         format!("{keys} | q quit")

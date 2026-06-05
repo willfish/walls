@@ -15,9 +15,78 @@ use ratatui::crossterm::terminal::{
 use ratatui::crossterm::ExecutableCommand;
 use ratatui::prelude::*;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, Paragraph, Tabs};
+use ratatui::widgets::{Clear, List, ListItem, Paragraph, Tabs};
 use walls_core::config::{ApplyBackendSetting, CosmicMethod};
 use walls_core::WallsCtx;
+
+use std::io;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex,
+};
+
+pub(crate) static LOG_BUFFER: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static IN_TUI: AtomicBool = AtomicBool::new(false);
+
+const MAX_LOG_LINES: usize = 2000;
+
+pub(crate) fn log_len() -> usize {
+    LOG_BUFFER.lock().unwrap().len()
+}
+
+pub(crate) struct ConsoleWriter;
+
+impl io::Write for ConsoleWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if !IN_TUI.load(Ordering::Relaxed) {
+            let _ = io::stdout().write_all(buf);
+        }
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        if !IN_TUI.load(Ordering::Relaxed) {
+            let _ = io::stdout().flush();
+        }
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for ConsoleWriter {
+    type Writer = ConsoleWriter;
+    fn make_writer(&'a self) -> Self::Writer {
+        ConsoleWriter
+    }
+}
+
+pub(crate) struct CaptureWriter;
+
+impl io::Write for CaptureWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if let Ok(s) = std::str::from_utf8(buf) {
+            let mut logs = LOG_BUFFER.lock().unwrap();
+            for line in s.lines() {
+                if !line.trim().is_empty() {
+                    logs.push(line.trim_end().to_string());
+                    if logs.len() > MAX_LOG_LINES {
+                        let to_drain = logs.len() - MAX_LOG_LINES / 2;
+                        logs.drain(0..to_drain);
+                    }
+                }
+            }
+        }
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CaptureWriter {
+    type Writer = CaptureWriter;
+    fn make_writer(&'a self) -> Self::Writer {
+        CaptureWriter
+    }
+}
 
 pub fn run() -> anyhow::Result<()> {
     require_tty()?;
@@ -34,6 +103,7 @@ pub fn run() -> anyhow::Result<()> {
     let mut app = App::new(WallsCtx::load().context(
         "failed to load ~/.config/walls/config.json — copy config.example.json to get started",
     )?)?;
+    IN_TUI.store(true, Ordering::Relaxed);
     #[cfg(feature = "tui-preview")]
     let mut preview = preview::ImagePreview::detect();
 
@@ -61,7 +131,7 @@ fn require_tty() -> anyhow::Result<()> {
     if !stdin().is_terminal() || !stdout().is_terminal() {
         anyhow::bail!(
             "walls tui requires an interactive terminal (stdin and stdout must be a TTY).\n\
-             Try: walls tui   # from a terminal emulator, not a pipe or IDE task output"
+             Try: walls   # (or `walls tui`) from a terminal emulator, not a pipe or IDE task output"
         );
     }
     Ok(())
@@ -73,6 +143,7 @@ impl Drop for TerminalRestore {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
         let _ = stdout().execute(LeaveAlternateScreen);
+        IN_TUI.store(false, Ordering::Relaxed);
     }
 }
 
@@ -169,10 +240,10 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
         KeyCode::Char(' ') => UiAction::TogglePause,
         KeyCode::Char('t') if app.tab == Tab::Config => UiAction::ToggleConfigValue,
         KeyCode::Char('e') if app.tab == Tab::Config => UiAction::CycleConfigValue,
-        KeyCode::Char(c @ '1'..='5') => {
+        KeyCode::Char(c @ '1'..='6') => {
             let index = c
                 .to_digit(10)
-                .expect("key guard only allows ASCII digits 1-5") as usize
+                .expect("key guard only allows ASCII digits 1-6") as usize
                 - 1;
             UiAction::SwitchTab(Tab::from_index(index))
         }
@@ -214,7 +285,7 @@ fn update(
         UiAction::CommandChar(c) => app.cmd_line.push(c),
         UiAction::SubmitSearch => {
             app.input_mode = InputMode::Normal;
-            app.message = match rt.block_on(app.run_search()) {
+            app.message = match tokio::task::block_in_place(|| rt.block_on(app.run_search())) {
                 Ok(()) => format!("search: {} results", app.search_results.len()),
                 Err(e) => format!("search error: {e}"),
             };
@@ -224,7 +295,8 @@ fn update(
         }
         UiAction::SearchChar(c) => app.search_query.push(c),
         UiAction::Next => {
-            app.message = match rt.block_on(app.ctx.advance_next()) {
+            app.message = match tokio::task::block_in_place(|| rt.block_on(app.ctx.advance_next()))
+            {
                 Ok(Some(p)) => format!("next: {}", p.display()),
                 Ok(None) => "next: no change".into(),
                 Err(e) => format!("next error: {e}"),
@@ -304,7 +376,9 @@ fn handle_enter(app: &mut App, rt: &tokio::runtime::Handle) -> anyhow::Result<Up
             }
         }
         Tab::Browse => {
-            if let Some(msg) = rt.block_on(app.apply_browse_selection())? {
+            if let Some(msg) =
+                tokio::task::block_in_place(|| rt.block_on(app.apply_browse_selection()))?
+            {
                 app.message = msg;
                 return Ok(UpdateEffect::Reload);
             }
@@ -312,7 +386,9 @@ fn handle_enter(app: &mut App, rt: &tokio::runtime::Handle) -> anyhow::Result<Up
         Tab::Search => {
             if app.search_results.is_empty() {
                 app.input_mode = InputMode::SearchInput;
-            } else if let Some(msg) = rt.block_on(app.apply_search_selection())? {
+            } else if let Some(msg) =
+                tokio::task::block_in_place(|| rt.block_on(app.apply_search_selection()))?
+            {
                 app.message = msg;
                 return Ok(UpdateEffect::Reload);
             }
@@ -349,7 +425,7 @@ fn draw_inner(f: &mut Frame, app: &App) {
         ])
         .split(area);
 
-    let titles = vec!["Config", "Now", "History", "Browse", "Search"];
+    let titles = vec!["Config", "Now", "History", "Browse", "Search", "Logs"];
     let tabs = Tabs::new(titles)
         .block(theme.chrome_block("walls"))
         .style(theme.normal())
@@ -380,7 +456,7 @@ fn draw_inner(f: &mut Frame, app: &App, preview: Option<&mut preview::ImagePrevi
         ])
         .split(area);
 
-    let titles = vec!["Config", "Now", "History", "Browse", "Search"];
+    let titles = vec!["Config", "Now", "History", "Browse", "Search", "Logs"];
     let tabs = Tabs::new(titles)
         .block(theme.chrome_block("walls"))
         .style(theme.normal())
@@ -402,6 +478,7 @@ fn render_tab_body(
     preview: Option<&mut preview::ImagePreview>,
     theme: style::Theme,
 ) {
+    f.render_widget(Clear, area);
     if app.tab == Tab::Now && terminal_size(area) == TerminalSize::Wide {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -439,6 +516,7 @@ fn render_tab_body(
     _preview: Option<()>,
     theme: style::Theme,
 ) {
+    f.render_widget(Clear, area);
     render_lines(f, area, app.tab.title(), tab_lines(app), theme);
 }
 
@@ -449,6 +527,7 @@ fn tab_lines(app: &App) -> Vec<String> {
         Tab::History => app.history_lines(),
         Tab::Browse => app.browse_lines(),
         Tab::Search => app.search_lines(),
+        Tab::Logs => app.logs_lines(),
     }
 }
 
@@ -1479,6 +1558,12 @@ mod tests {
                 .expect("handle key")
         );
         assert_eq!(app.tab, Tab::Now);
+
+        assert!(
+            !handle_key(&mut app, KeyEvent::from(KeyCode::Char('6')), rt.handle())
+                .expect("handle key")
+        );
+        assert_eq!(app.tab, Tab::Logs);
     }
 
     #[test]
@@ -1574,5 +1659,29 @@ mod tests {
         let text = std::fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
         assert!(text.contains("\"strategy\": \"sequential\""), "{text}");
         assert!(render_text(&app, 120, 32).contains("selection: Sequential"));
+    }
+
+    #[test]
+    fn config_edit_state_starts_and_cancels_without_side_effects() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [
+                    { "enabled": true, "type": "json", "label": "demo", "url": "https://example", "image_path": "$.u" }
+                ]
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 0; // rotation block (or sources; start_edit will decide)
+        assert!(app.editing.is_none());
+        // direct for RED (will be wired via action later)
+        app.start_edit_for_current();
+        assert!(app.editing.is_some());
+        app.cancel_edit();
+        assert!(app.editing.is_none());
+        // no side effects
+        assert!(app.ctx.config.change.enabled);
     }
 }
