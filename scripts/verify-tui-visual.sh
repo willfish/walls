@@ -162,16 +162,20 @@ def capture(name, cols, rows, keys=b"", extra_env=None):
     return frame
 
 
-standard = capture("standard-status", 80, 24)
-assert "normal ready" in standard, standard
+standard = capture("standard-config", 80, 24)
+assert "normal ready | paused=false | queue=0 | history=0" in standard, standard
 assert "space pause" in standard and "q quit" in standard, standard
-assert "local candidates: 1 paths" in standard, standard
+assert "Config" in standard, standard
+assert "> [on] Rotation" in standard, standard
+assert "  [on] Local sources - 1 configured, 1 candidates" in standard, standard
+assert "  [off] Wallhaven" in standard, standard
+assert "paused:" not in standard, standard
 
 narrow_search = capture("narrow-search", 42, 10, b"5")
 assert "Search" in narrow_search and "query:" in narrow_search, narrow_search
 assert "i edit | Enter | j/k | : | q" in narrow_search, narrow_search
 
-no_colour = capture("no-colour-status", 80, 24, extra_env={"WALLS_TUI_COLOR": "never"})
+no_colour = capture("no-colour-config", 80, 24, extra_env={"WALLS_TUI_COLOR": "never"})
 assert "normal ready" in no_colour and "q quit" in no_colour, no_colour
 
 wide_now = capture("wide-now-preview-disabled", 120, 32, b"2")

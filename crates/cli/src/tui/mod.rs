@@ -328,7 +328,7 @@ fn draw_inner(f: &mut Frame, app: &App) {
         ])
         .split(area);
 
-    let titles = vec!["Status", "Now", "History", "Browse", "Search"];
+    let titles = vec!["Config", "Now", "History", "Browse", "Search"];
     let tabs = Tabs::new(titles)
         .block(theme.chrome_block("walls"))
         .style(theme.normal())
@@ -359,7 +359,7 @@ fn draw_inner(f: &mut Frame, app: &App, preview: Option<&mut preview::ImagePrevi
         ])
         .split(area);
 
-    let titles = vec!["Status", "Now", "History", "Browse", "Search"];
+    let titles = vec!["Config", "Now", "History", "Browse", "Search"];
     let tabs = Tabs::new(titles)
         .block(theme.chrome_block("walls"))
         .style(theme.normal())
@@ -423,7 +423,7 @@ fn render_tab_body(
 
 fn tab_lines(app: &App) -> Vec<String> {
     match app.tab {
-        Tab::Status => status_lines(app),
+        Tab::Config => config_lines(app),
         Tab::Now => now_lines(app),
         Tab::History => app.history_lines(),
         Tab::Browse => app.browse_lines(),
@@ -452,16 +452,22 @@ fn footer_paragraph(app: &App, width: u16, theme: style::Theme) -> Paragraph<'_>
         InputMode::SearchInput => "search",
     };
     let status = if app.message.is_empty() {
-        "ready"
+        "ready".to_string()
     } else {
-        app.message.as_str()
+        app.message.clone()
     };
-    let status_kind = style::status_kind(status);
+    let status_line = format!(
+        "{status} | paused={} | queue={} | history={}",
+        app.ctx.state.paused,
+        app.ctx.state.cache_queue.len(),
+        app.ctx.state.history.len()
+    );
+    let status_kind = style::status_kind(&status);
 
     Paragraph::new(vec![
         Line::from(vec![
             Span::styled(format!("{mode} "), theme.accent()),
-            Span::styled(status.to_string(), theme.status(status_kind)),
+            Span::styled(status_line, theme.status(status_kind)),
         ]),
         Line::from(vec![Span::styled(
             footer_keys(app, width),
@@ -500,17 +506,167 @@ fn line_style(line: &str, theme: style::Theme) -> Style {
     theme.status(style::status_kind(line))
 }
 
-fn status_lines(app: &App) -> Vec<String> {
-    vec![
-        format!("paused: {}", app.ctx.state.paused),
-        format!("change enabled: {}", app.ctx.config.change.enabled),
-        format!("config: {}", app.ctx.paths.config_file.display()),
-        format!("state: {}", app.ctx.paths.state_file.display()),
-        format!("history: {} entries", app.ctx.state.history.len()),
-        format!("cache queue: {} ids", app.ctx.state.cache_queue.len()),
-        format!("local candidates: {} paths", app.local_candidates.len()),
-        format!("cache dir: {}", app.ctx.paths.cache_dir.display()),
-        app.message.clone(),
+fn config_lines(app: &App) -> Vec<String> {
+    let mut lines = Vec::new();
+    push_config_block(
+        &mut lines,
+        0,
+        app.cursor,
+        "Rotation",
+        app.ctx.config.change.enabled,
+        format!(
+            "every {}s, {}",
+            app.ctx.config.change.interval_secs,
+            if app.ctx.config.change.internet_enabled {
+                "online sources allowed"
+            } else {
+                "local sources only"
+            }
+        ),
+        [
+            format!("on start: {}", app.ctx.config.change.on_start),
+            format!("safe mode: {}", app.ctx.config.change.safe_mode),
+            format!(
+                "download preference: {:.0}% online",
+                app.ctx.config.change.download_preference_ratio * 100.0
+            ),
+        ],
+    );
+    push_config_block(
+        &mut lines,
+        1,
+        app.cursor,
+        "Local sources",
+        app.ctx.config.sources.iter().any(|source| source.enabled),
+        format!(
+            "{} configured, {} candidates",
+            app.ctx.config.sources.len(),
+            app.local_candidates.len()
+        ),
+        local_source_details(app),
+    );
+    push_config_block(
+        &mut lines,
+        2,
+        app.cursor,
+        "Wallhaven",
+        app.ctx.config.change.internet_enabled,
+        wallhaven_summary(app),
+        wallhaven_details(app),
+    );
+    push_config_block(
+        &mut lines,
+        3,
+        app.cursor,
+        "Library",
+        app.ctx.config.quota.enabled,
+        format!(
+            "{} queued, {} history entries",
+            app.ctx.state.cache_queue.len(),
+            app.ctx.state.history.len()
+        ),
+        [
+            format!("cache: {}", app.ctx.paths.cache_dir.display()),
+            format!("downloaded: {}", app.ctx.paths.download_dir.display()),
+            format!("quota: {} MB", app.ctx.config.quota.size_mb),
+        ],
+    );
+    push_config_block(
+        &mut lines,
+        4,
+        app.cursor,
+        "Apply/display",
+        true,
+        format!(
+            "{:?} backend, {} mode",
+            app.ctx.config.apply.backend, app.ctx.config.display.mode
+        ),
+        apply_display_details(app),
+    );
+    lines
+}
+
+fn push_config_block<const N: usize>(
+    lines: &mut Vec<String>,
+    index: usize,
+    cursor: usize,
+    title: &str,
+    enabled: bool,
+    summary: String,
+    details: [String; N],
+) {
+    let marker = if cursor == index { ">" } else { " " };
+    let state = if enabled { "on" } else { "off" };
+    lines.push(format!("{marker} [{state}] {title} - {summary}"));
+    if cursor == index {
+        for detail in details {
+            lines.push(format!("    {detail}"));
+        }
+    }
+}
+
+fn local_source_details(app: &App) -> [String; 3] {
+    let enabled = app
+        .ctx
+        .config
+        .sources
+        .iter()
+        .filter(|source| source.enabled)
+        .count();
+    let disabled = app.ctx.config.sources.len().saturating_sub(enabled);
+    let first_path = app
+        .ctx
+        .config
+        .sources
+        .iter()
+        .find_map(|source| source.path.as_deref())
+        .unwrap_or("(no path configured)");
+
+    [
+        format!("enabled sources: {enabled}"),
+        format!("disabled sources: {disabled}"),
+        format!("first path: {first_path}"),
+    ]
+}
+
+fn wallhaven_summary(app: &App) -> String {
+    let collections = app.ctx.config.wallhaven.collections.len();
+    let query = if app.ctx.config.wallhaven.search.q.is_empty() {
+        "empty query"
+    } else {
+        app.ctx.config.wallhaven.search.q.as_str()
+    };
+    format!(
+        "{collections} collections, {query}, {:?}",
+        app.ctx.config.wallhaven.prefer
+    )
+}
+
+fn wallhaven_details(app: &App) -> [String; 3] {
+    [
+        format!("categories: {}", app.ctx.config.wallhaven.search.categories),
+        format!("purity: {}", app.ctx.config.wallhaven.search.purity),
+        format!("minimum: {}", app.ctx.config.wallhaven.search.atleast),
+    ]
+}
+
+fn apply_display_details(app: &App) -> [String; 3] {
+    let target = match (
+        app.ctx.config.display.target_width,
+        app.ctx.config.display.target_height,
+    ) {
+        (Some(width), Some(height)) => format!("{width}x{height}"),
+        _ => "automatic target".into(),
+    };
+
+    [
+        format!("auto rotate: {}", app.ctx.config.display.auto_rotate),
+        format!("target: {target}"),
+        format!(
+            "filters: {} configured, enabled={}",
+            app.ctx.config.display.filters.filters.len(),
+            app.ctx.config.display.filters.enabled
+        ),
     ]
 }
 
@@ -603,15 +759,39 @@ mod tests {
     }
 
     #[test]
-    fn default_status_screen_renders_semantic_chrome_and_ready_status() {
+    fn default_config_screen_renders_blocks_and_footer_status() {
         let app = test_app();
         let text = render_text(&app, 80, 24);
 
         assert!(text.contains("walls"), "{text}");
-        assert!(text.contains("Status"), "{text}");
-        assert!(text.contains("local candidates: 1 paths"), "{text}");
+        assert!(text.contains("Config"), "{text}");
+        assert!(text.contains("> [on] Rotation"), "{text}");
+        assert!(text.contains("  [on] Local sources"), "{text}");
+        assert!(text.contains("  [off] Wallhaven"), "{text}");
+        assert!(text.contains("  [on] Library"), "{text}");
+        assert!(text.contains("  [on] Apply/display"), "{text}");
+        assert!(text.contains("on start: false"), "{text}");
+        assert!(text.contains("local sources only"), "{text}");
+        assert!(!text.contains("paused:"), "{text}");
         assert!(text.contains("normal"), "{text}");
-        assert!(text.contains("ready"), "{text}");
+        assert!(
+            text.contains("ready | paused=false | queue=0 | history=0"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn focused_config_block_expands_concrete_settings() {
+        let mut app = test_app();
+        app.cursor = 1;
+
+        let text = render_text(&app, 80, 24);
+
+        assert!(text.contains("> [on] Local sources"), "{text}");
+        assert!(text.contains("enabled sources: 1"), "{text}");
+        assert!(text.contains("disabled sources: 0"), "{text}");
+        assert!(text.contains("first path:"), "{text}");
+        assert!(!text.contains("on start: false"), "{text}");
     }
 
     #[test]
