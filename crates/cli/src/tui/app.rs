@@ -119,6 +119,8 @@ pub struct App {
     pub tab: Tab,
     pub config_cursor: usize,
     pub cursor: usize,
+    pub config_in_subnav: bool,
+    pub config_sub_cursor: usize,
     pub message: String,
     pub input_mode: InputMode,
     #[allow(dead_code)]
@@ -168,6 +170,8 @@ impl App {
             tab: Tab::Config,
             config_cursor: 0,
             cursor: 0,
+            config_in_subnav: false,
+            config_sub_cursor: 0,
             message: String::new(),
             input_mode: InputMode::Normal,
             editing: None,
@@ -207,21 +211,68 @@ impl App {
     }
 
     pub fn move_down(&mut self) {
+        if self.tab == Tab::Config
+            && self.config_in_subnav
+            && self.is_sources_list_block(self.config_cursor)
+        {
+            let len = self.ctx.config.sources.len();
+            if len > 0 {
+                self.config_sub_cursor = (self.config_sub_cursor + 1).min(len - 1);
+            }
+            return;
+        }
         let len = self.list_len();
         if len > 0 {
+            let is_config = self.tab == Tab::Config;
+            let old_block = if is_config {
+                Some(self.config_cursor)
+            } else {
+                None
+            };
             let cursor = self.active_cursor_mut();
             *cursor = (*cursor + 1).min(len - 1);
+            if let Some(old_b) = old_block {
+                let new_b = *cursor;
+                if new_b != old_b && !self.is_sources_list_block(new_b) {
+                    self.config_in_subnav = false;
+                }
+            }
         }
     }
 
     pub fn move_up(&mut self) {
+        if self.tab == Tab::Config
+            && self.config_in_subnav
+            && self.is_sources_list_block(self.config_cursor)
+        {
+            self.config_sub_cursor = self.config_sub_cursor.saturating_sub(1);
+            return;
+        }
+        let is_config = self.tab == Tab::Config;
+        let old_block = if is_config {
+            Some(self.config_cursor)
+        } else {
+            None
+        };
         let cursor = self.active_cursor_mut();
         *cursor = (*cursor).saturating_sub(1);
+        if let Some(old_b) = old_block {
+            let new_b = *cursor;
+            if new_b != old_b && !self.is_sources_list_block(new_b) {
+                self.config_in_subnav = false;
+            }
+        }
     }
 
     pub fn list_len(&self) -> usize {
         match self.tab {
-            Tab::Config => Self::config_block_count(),
+            Tab::Config => {
+                if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
+                    self.ctx.config.sources.len()
+                } else {
+                    Self::config_block_count()
+                }
+            }
             Tab::History => self.ctx.state.history.len(),
             Tab::Browse => self.browse_items().len(),
             Tab::Search => self.search_results.len(),
@@ -451,7 +502,25 @@ impl App {
         if self.tab != Tab::Config {
             return;
         }
-        // Minimal: for RED/GREEN, target block 0 or first source if present; real sub logic later
+        // Support subnav for Sources block: if in subnav, target the sub item
+        if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
+            let idx = self.config_sub_cursor;
+            if idx < self.ctx.config.sources.len() {
+                let target = EditTarget::Source(idx);
+                let session = EditSession {
+                    target,
+                    draft_source: Some(self.ctx.config.sources[idx].clone()),
+                    draft_block_values: std::collections::HashMap::new(),
+                    field_cursor: 0,
+                    field_buffer: String::new(),
+                    validation_errors: vec![],
+                };
+                self.editing = Some(session);
+                self.message.clear();
+                return;
+            }
+        }
+        // block target (or first source fallback for old tests)
         let target = if !self.ctx.config.sources.is_empty() && self.config_cursor == 1 {
             EditTarget::Source(0)
         } else {
@@ -504,6 +573,28 @@ impl App {
     #[allow(dead_code)]
     pub fn is_editing(&self) -> bool {
         self.editing.is_some()
+    }
+
+    pub fn is_sources_list_block(&self, block: usize) -> bool {
+        block == 1 // the "Sources" block (was Local sources)
+    }
+
+    #[allow(dead_code)]
+    pub fn toggle_config_subnav(&mut self) {
+        if self.tab == Tab::Config && self.is_sources_list_block(self.config_cursor) {
+            self.config_in_subnav = !self.config_in_subnav;
+            if self.config_in_subnav {
+                self.config_sub_cursor = 0;
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn enter_config_subnav(&mut self) {
+        if self.tab == Tab::Config && self.is_sources_list_block(self.config_cursor) {
+            self.config_in_subnav = true;
+            self.config_sub_cursor = 0;
+        }
     }
 
     #[allow(dead_code)]
@@ -704,7 +795,7 @@ impl App {
                     "5 Search | i edit query Enter search | j/k | Enter apply | : cmd".into()
                 }
                 Tab::Config => {
-                    "1 Config | j/k blocks | t toggle e cycle | n/p | space pause | : cmd".into()
+                    "1 Config | j/k | Enter (subnav for lists) | e edit | t toggle | n/p | space pause | : cmd".into()
                 }
                 _ => "1-6 tabs | n/p next/prev | f favorite d trash | space pause | : cmd".into(),
             },
