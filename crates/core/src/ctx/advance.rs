@@ -19,17 +19,15 @@ impl WallsCtx {
         &self,
         mut visit: impl FnMut(PathBuf) -> anyhow::Result<()>,
     ) -> anyhow::Result<()> {
-        use crate::sources::{enabled_sources, list_images_with_paths};
+        use crate::providers::{enabled_local_sources, provider_for_source};
+        use crate::sources::list_images_with_paths;
+        use anyhow::Context;
 
-        for src in enabled_sources(&self.config.sources) {
-            if !matches!(
-                src.source_type.as_str(),
-                "folder" | "favorites" | "fetched" | "image"
-            ) {
-                continue;
-            }
+        for src in enabled_local_sources(&self.config.sources) {
+            let provider = provider_for_source(src);
             for img in
-                list_images_with_paths(src, &self.paths.favorites_dir, &self.paths.fetched_dir)?
+                list_images_with_paths(src, &self.paths.favorites_dir, &self.paths.fetched_dir)
+                    .with_context(|| provider.failure_scope("local source listing").to_string())?
             {
                 visit(img.path)?;
             }
@@ -93,23 +91,27 @@ impl<'ctx> AdvanceNext<'ctx> {
     }
 
     async fn apply_wallhaven_queue(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        use anyhow::Context;
+
         if !self.wallhaven_enabled() {
             return Ok(None);
         }
 
+        let provider = crate::providers::wallhaven_provider(&self.ctx.config, &self.ctx.secrets);
         let client = self.wallhaven_client()?;
-        if let Some(path) = self.apply_wallhaven_queue_head(&client).await? {
+        if let Some(path) = self.apply_wallhaven_queue_head(&client, &provider).await? {
             return Ok(Some(path));
         }
 
         crate::wallhaven::refill_wallhaven_cache(&client, &self.ctx.config, &mut self.ctx.state)
-            .await?;
+            .await
+            .with_context(|| provider.failure_scope("queue refill").to_string())?;
         self.ctx.save_state()?;
-        self.apply_wallhaven_queue_head(&client).await
+        self.apply_wallhaven_queue_head(&client, &provider).await
     }
 
     fn wallhaven_enabled(&self) -> bool {
-        self.ctx.config.change.internet_enabled && !self.ctx.secrets.wallhaven_api_key.is_empty()
+        crate::providers::wallhaven_provider(&self.ctx.config, &self.ctx.secrets).enabled
     }
 
     fn wallhaven_client(&self) -> anyhow::Result<crate::wallhaven::WallhavenClient> {
@@ -122,14 +124,20 @@ impl<'ctx> AdvanceNext<'ctx> {
     async fn apply_wallhaven_queue_head(
         &mut self,
         client: &crate::wallhaven::WallhavenClient,
+        provider: &crate::providers::ProviderDescriptor,
     ) -> anyhow::Result<Option<PathBuf>> {
+        use anyhow::Context;
+
         let Some(id) = self.ctx.state.cache_queue.first().cloned() else {
             return Ok(None);
         };
         let path = if let Some(p) = self.cached_wallhaven_path(&id) {
             p
         } else {
-            let wp = client.fetch_wallpaper(&id).await?;
+            let wp = client
+                .fetch_wallpaper(&id)
+                .await
+                .with_context(|| provider.failure_scope("metadata fetch").to_string())?;
             client
                 .download_to_cache_with_quota(
                     &wp,
@@ -138,7 +146,8 @@ impl<'ctx> AdvanceNext<'ctx> {
                     self.ctx.config.quota.size_mb,
                     self.ctx.config.quota.enabled,
                 )
-                .await?
+                .await
+                .with_context(|| provider.failure_scope("download").to_string())?
         };
         self.ctx.state.cache_queue.remove(0);
         self.ctx
