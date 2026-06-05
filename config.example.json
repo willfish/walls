@@ -53,7 +53,14 @@
   "sources": [
     { "enabled": true, "type": "favorites", "label": "The Favorites folder" },
     { "enabled": true, "type": "fetched", "label": "The Fetched folder" },
-    { "enabled": true, "type": "folder", "path": "/usr/share/backgrounds" }
+    { "enabled": true, "type": "folder", "path": "/usr/share/backgrounds" },
+    {
+      "enabled": false,
+      "type": "unsplash",
+      "label": "Unsplash nature",
+      "query": "nature",
+      "orientation": "landscape"
+    }
   ],
   "wallhaven": {
     "collections": [],

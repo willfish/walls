@@ -53,6 +53,32 @@ fn validate_config_reports_missing_folder_path() {
 }
 
 #[test]
+fn validate_config_reports_missing_unsplash_key() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    std::fs::create_dir_all(&images).unwrap();
+    let noop = common::write_noop_script(root.path());
+    common::write_minimal_config(root.path(), &images, &noop);
+
+    let mut config = load_config_json(root.path());
+    config["change"]["internet_enabled"] = serde_json::json!(true);
+    config["sources"] = serde_json::json!([{
+        "enabled": true,
+        "type": "unsplash",
+        "query": "forest"
+    }]);
+    write_config_json(root.path(), &config);
+
+    let errors = validate_root(root.path());
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("secrets.unsplash_access_key is empty")),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn validate_config_reports_missing_custom_script_for_custom_script_backend() {
     let root = tempfile::tempdir().unwrap();
     let images = root.path().join("images");
