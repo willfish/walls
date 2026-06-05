@@ -14,6 +14,7 @@ pub enum ProviderKind {
     Pixabay,
     Immich,
     Spotlight,
+    Weighting,
     Unsupported,
 }
 
@@ -131,6 +132,7 @@ fn source_kind(source_type: &str) -> ProviderKind {
         "pixabay" => ProviderKind::Pixabay,
         "immich" => ProviderKind::Immich,
         "spotlight" => ProviderKind::Spotlight,
+        "weighting" => ProviderKind::Weighting,
         _ => ProviderKind::Unsupported,
     }
 }
@@ -148,7 +150,8 @@ fn capabilities_for_kind(kind: ProviderKind) -> Vec<ProviderCapability> {
         | ProviderKind::Json
         | ProviderKind::Pixabay
         | ProviderKind::Immich
-        | ProviderKind::Spotlight => vec![
+        | ProviderKind::Spotlight
+        | ProviderKind::Weighting => vec![
             ProviderCapability::ConfigValidation,
             ProviderCapability::QueueRefill,
             ProviderCapability::Download,
