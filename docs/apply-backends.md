@@ -10,6 +10,6 @@
 | wlroots compositors | Explicit `apply.backend=wlroots` | restart `swaybg -i <path> -m <mode>` | `apply.backend=wlroots walls next` with `swaybg` installed |
 | Hyprland | Hyprland | `hyprctl monitors` text parsing, then restart per-output `swaybg -o <output> -i <path> -m <mode>` | `XDG_CURRENT_DESKTOP=Hyprland walls next` in Hyprland with `swaybg` installed |
 | feh/nitrogen fallback | Everything else when `apply.backend=auto` | `feh --bg-fill`, then `nitrogen --set-zoom-fill --save` | `walls next` on an X11 session with `feh` or `nitrogen` installed |
-| Custom script | Explicit `apply.backend=custom-script` | `apply.custom_script` | Configure a script and run `walls next` |
+| Custom script | Explicit `apply.backend=custom-script` | `apply.custom_script` trusted user code; see [Security](security.md#custom-apply-scripts) | Configure a script and run `walls next` |
 
 Set an explicit backend with `apply.backend` when auto-detection is not appropriate.
