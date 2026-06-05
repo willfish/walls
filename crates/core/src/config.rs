@@ -23,6 +23,10 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "this serde struct mirrors the user-facing config schema, where separate toggles are clearer than a nested internal enum."
+)]
 pub struct ChangeConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,

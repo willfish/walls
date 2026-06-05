@@ -88,11 +88,9 @@ impl Applier for CosmicConfigApplier {
     }
 }
 
-pub fn build_cosmic_applier(apply: &ApplyConfig) -> anyhow::Result<Box<dyn Applier>> {
+pub fn build_cosmic_applier(apply: &ApplyConfig) -> Box<dyn Applier> {
     match apply.cosmic.method {
-        CosmicMethod::CosmicConfig => Ok(Box::new(CosmicConfigApplier::new(
-            &apply.cosmic.config_path,
-        ))),
-        CosmicMethod::CosmicExtBgCtl => Ok(Box::new(CosmicExtBgApplier)),
+        CosmicMethod::CosmicConfig => Box::new(CosmicConfigApplier::new(&apply.cosmic.config_path)),
+        CosmicMethod::CosmicExtBgCtl => Box::new(CosmicExtBgApplier),
     }
 }

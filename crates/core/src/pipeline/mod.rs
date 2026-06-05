@@ -41,7 +41,7 @@ pub fn compose(
 }
 
 fn auto_rotate(paths: &WallsPaths, original: &Path) -> anyhow::Result<Option<PathBuf>> {
-    let Ok(reader) = ImageReader::open(original).and_then(|r| r.with_guessed_format()) else {
+    let Ok(reader) = ImageReader::open(original).and_then(ImageReader::with_guessed_format) else {
         return Ok(None);
     };
     let Ok(mut decoder) = reader.into_decoder() else {
@@ -287,10 +287,10 @@ fn filter_name_slug(name: &str) -> String {
 }
 
 fn fnv1a64(path: &Path) -> String {
-    let mut hash = 0xcbf29ce484222325_u64;
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for byte in path.as_os_str().as_encoded_bytes() {
         hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
     format!("{hash:016x}")
 }
