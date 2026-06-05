@@ -553,7 +553,7 @@ fn config_lines(app: &App) -> Vec<String> {
         2,
         app.config_cursor,
         "Wallhaven",
-        app.ctx.config.change.internet_enabled,
+        app.wallhaven_summary.usable(),
         wallhaven_summary(app),
         wallhaven_details(app),
     );
@@ -637,24 +637,85 @@ fn local_source_details(app: &App) -> Vec<String> {
 }
 
 fn wallhaven_summary(app: &App) -> String {
-    let collections = app.ctx.config.wallhaven.collections.len();
-    let query = if app.ctx.config.wallhaven.search.q.is_empty() {
-        "empty query"
+    let provider = &app.wallhaven_summary;
+    let online = if provider.internet_enabled {
+        "online on"
     } else {
-        app.ctx.config.wallhaven.search.q.as_str()
+        "online off"
     };
+    let key = if provider.api_key_present {
+        "key"
+    } else {
+        "no key"
+    };
+    let collection_count = provider.collections.len();
+    let collection_label = if collection_count == 1 { "col" } else { "cols" };
     format!(
-        "{collections} collections, {query}, {:?}",
-        app.ctx.config.wallhaven.prefer
+        "{online}, {key}, {collection_count} {collection_label}, q={}, pref={}",
+        short_query(&provider.query),
+        short_wallhaven_prefer(&provider.prefer)
     )
 }
 
-fn wallhaven_details(app: &App) -> [String; 3] {
-    [
-        format!("categories: {}", app.ctx.config.wallhaven.search.categories),
-        format!("purity: {}", app.ctx.config.wallhaven.search.purity),
-        format!("minimum: {}", app.ctx.config.wallhaven.search.atleast),
-    ]
+fn short_wallhaven_prefer(prefer: &str) -> &str {
+    match prefer {
+        "CollectionsThenSearch" => "c+s",
+        "SearchOnly" => "search",
+        "CollectionsOnly" => "coll",
+        _ => prefer,
+    }
+}
+
+fn short_query(query: &str) -> String {
+    if query == "(empty query)" {
+        return "empty".into();
+    }
+
+    const MAX_QUERY_CHARS: usize = 24;
+    let mut chars = query.chars();
+    let short: String = chars.by_ref().take(MAX_QUERY_CHARS).collect();
+    if chars.next().is_some() {
+        format!("{short}...")
+    } else {
+        short
+    }
+}
+
+fn wallhaven_details(app: &App) -> Vec<String> {
+    let provider = &app.wallhaven_summary;
+    let key = if provider.api_key_present {
+        "present"
+    } else {
+        "missing"
+    };
+    let mut details = vec![
+        format!("api key: {key}"),
+        format!("prefer: {}", provider.prefer),
+        format!(
+            "search: q={} categories={} purity={}",
+            provider.query, provider.categories, provider.purity
+        ),
+        format!(
+            "sort: {} {} minimum {}",
+            provider.sorting, provider.order, provider.atleast
+        ),
+    ];
+
+    if provider.collections.is_empty() {
+        details.push("collections: none".into());
+    } else {
+        details.push(format!("collections: {}", provider.collections.len()));
+        details.extend(
+            provider
+                .collections
+                .iter()
+                .enumerate()
+                .map(|(index, collection)| format!("{}. {}", index + 1, collection)),
+        );
+    }
+
+    details.extend(provider.warnings.iter().cloned());
+    details
 }
 
 fn apply_display_details(app: &App) -> [String; 3] {
@@ -750,6 +811,51 @@ mod tests {
         )
         .expect("write config");
         fs::write(tmp.path().join("secrets.json"), "{}").expect("write secrets");
+
+        App::new(WallsCtx::load_from(tmp.path()).expect("ctx")).expect("app")
+    }
+
+    fn test_app_with_wallhaven(
+        internet_enabled: bool,
+        wallhaven: serde_json::Value,
+        secrets: serde_json::Value,
+    ) -> App {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(tmp.path().join("favorites")).expect("favorites dir");
+        fs::create_dir_all(tmp.path().join("fetched")).expect("fetched dir");
+
+        let noop = tmp.path().join("noop.sh");
+        fs::write(&noop, "#!/bin/sh\nexit 0\n").expect("noop");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&noop, fs::Permissions::from_mode(0o755)).expect("chmod");
+        }
+
+        let config = serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": internet_enabled },
+            "paths": {
+                "cache_dir": tmp.path().join("cache").display().to_string(),
+                "download_dir": tmp.path().join("downloaded").display().to_string(),
+                "favorites_dir": tmp.path().join("favorites").display().to_string(),
+                "fetched_dir": tmp.path().join("fetched").display().to_string(),
+                "compose_dir": tmp.path().join("wallpaper").display().to_string(),
+            },
+            "apply": { "backend": "custom-script", "custom_script": noop.display().to_string() },
+            "display": { "mode": "os" },
+            "sources": [],
+            "wallhaven": wallhaven,
+        });
+        fs::write(
+            tmp.path().join("config.json"),
+            serde_json::to_string_pretty(&config).expect("config json"),
+        )
+        .expect("write config");
+        fs::write(
+            tmp.path().join("secrets.json"),
+            serde_json::to_string_pretty(&secrets).expect("secrets json"),
+        )
+        .expect("write secrets");
 
         App::new(WallsCtx::load_from(tmp.path()).expect("ctx")).expect("app")
     }
@@ -875,8 +981,84 @@ mod tests {
 
         assert!(text.contains("Config"), "{text}");
         assert!(text.contains("> [off] Wallhaven"), "{text}");
-        assert!(text.contains("categories: 111"), "{text}");
+        assert!(text.contains("api key: missing"), "{text}");
         assert!(text.contains("j/k blocks"), "{text}");
+    }
+
+    #[test]
+    fn wallhaven_block_renders_search_collections_and_missing_key_warning() {
+        let mut app = test_app_with_wallhaven(
+            true,
+            serde_json::json!({
+                "prefer": "collections_then_search",
+                "collections": [
+                    { "username": "alice", "id": 42, "label": "Abstract" }
+                ],
+                "search": {
+                    "q": "mountains",
+                    "categories": "101",
+                    "purity": "100",
+                    "sorting": "toplist",
+                    "order": "desc",
+                    "atleast": "2560x1440"
+                }
+            }),
+            serde_json::json!({}),
+        );
+        app.config_cursor = 2;
+
+        let text = render_text(&app, 120, 30);
+
+        assert!(
+            text.contains("> [off] Wallhaven - online on, no key, 1 col"),
+            "{text}"
+        );
+        assert!(text.contains("api key: missing"), "{text}");
+        assert!(
+            text.contains("search: q=mountains categories=101 purity=100"),
+            "{text}"
+        );
+        assert!(
+            text.contains("sort: toplist desc minimum 2560x1440"),
+            "{text}"
+        );
+        assert!(text.contains("1. Abstract: alice/42"), "{text}");
+        assert!(
+            text.contains("warning: API key missing; search and downloads are unavailable"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn wallhaven_block_shows_key_presence_without_leaking_secret() {
+        let mut app = test_app_with_wallhaven(
+            true,
+            serde_json::json!({
+                "prefer": "search_only",
+                "search": {
+                    "q": "forest",
+                    "purity": "111"
+                }
+            }),
+            serde_json::json!({ "wallhaven_api_key": "super-secret-token" }),
+        );
+        app.config_cursor = 2;
+
+        let text = render_text(&app, 120, 30);
+
+        assert!(text.contains("> [on] Wallhaven - online on, key"), "{text}");
+        assert!(text.contains("api key: present"), "{text}");
+        assert!(text.contains("prefer: SearchOnly"), "{text}");
+        assert!(
+            text.contains("search: q=forest categories=111 purity=111"),
+            "{text}"
+        );
+        assert!(text.contains("collections: none"), "{text}");
+        assert!(
+            text.contains("warning: NSFW purity requires Wallhaven account access"),
+            "{text}"
+        );
+        assert!(!text.contains("super-secret-token"), "{text}");
     }
 
     #[test]
