@@ -53,6 +53,51 @@ pub fn validate_config(config: &Config, secrets: &Secrets, paths: &WallsPaths) -
         }
     }
 
+    validate_apply_config(config, &mut errors);
+    validate_quota_config(config, &mut errors);
+
+    errors
+}
+
+fn validate_apply_config(config: &Config, errors: &mut Vec<String>) {
+    let custom_script = config
+        .apply
+        .custom_script
+        .as_deref()
+        .filter(|path| !path.trim().is_empty());
+
+    match (config.apply.backend, custom_script) {
+        (ApplyBackendSetting::CustomScript, Some(script)) => {
+            let script_path = expand_home(script);
+            if !script_path.is_file() {
+                errors.push(format!(
+                    "apply.custom_script not found or not a file: {}",
+                    script_path.display()
+                ));
+                return;
+            }
+            #[cfg(unix)]
+            if !is_executable(&script_path) {
+                errors.push(format!(
+                    "apply.custom_script is not executable: {}; run `chmod +x {}`",
+                    script_path.display(),
+                    script_path.display()
+                ));
+            }
+        }
+        (ApplyBackendSetting::CustomScript, None) => {
+            errors
+                .push("apply.custom_script is required when apply.backend is custom-script".into());
+        }
+        (backend, Some(_)) => {
+            errors.push(format!(
+                "apply.custom_script is set but apply.backend is {}; set apply.backend to custom-script or remove apply.custom_script",
+                apply_backend_name(backend)
+            ));
+        }
+        (_, None) => {}
+    }
+
     if config.apply.backend == ApplyBackendSetting::Cosmic {
         let cosmic_path = expand_home(&config.apply.cosmic.config_path);
         if !cosmic_path.is_file() {
@@ -62,8 +107,44 @@ pub fn validate_config(config: &Config, secrets: &Secrets, paths: &WallsPaths) -
             ));
         }
     }
+}
 
-    errors
+fn validate_quota_config(config: &Config, errors: &mut Vec<String>) {
+    if config.quota.size_mb == 0 {
+        errors.push("quota.size_mb must be greater than zero".into());
+    }
+}
+
+fn apply_backend_name(backend: ApplyBackendSetting) -> &'static str {
+    match backend {
+        ApplyBackendSetting::Auto => "auto",
+        ApplyBackendSetting::Cosmic => "cosmic",
+        ApplyBackendSetting::CosmicExtBgCtl => "cosmic-ext-bg-ctl",
+        ApplyBackendSetting::Gnome => "gnome",
+        ApplyBackendSetting::Kde => "kde",
+        ApplyBackendSetting::Xfce => "xfce",
+        ApplyBackendSetting::Sway => "sway",
+        ApplyBackendSetting::Wlroots => "wlroots",
+        ApplyBackendSetting::Hyprland => "hyprland",
+        ApplyBackendSetting::Feh => "feh",
+        ApplyBackendSetting::CustomScript => "custom-script",
+    }
+}
+
+#[cfg(unix)]
+fn is_executable(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    #[allow(
+        clippy::verbose_bit_mask,
+        reason = "custom script validation intentionally accepts any owner/group/other execute bit."
+    )]
+    {
+        metadata.permissions().mode() & 0o111 != 0
+    }
 }
 
 #[cfg(unix)]
