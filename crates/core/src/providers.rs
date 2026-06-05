@@ -10,6 +10,7 @@ pub enum ProviderKind {
     Apod,
     MediaRss,
     Attribution,
+    Json,
     Unsupported,
 }
 
@@ -123,6 +124,7 @@ fn source_kind(source_type: &str) -> ProviderKind {
         "apod" => ProviderKind::Apod,
         "mediarss" => ProviderKind::MediaRss,
         "attribution" => ProviderKind::Attribution,
+        "json" => ProviderKind::Json,
         _ => ProviderKind::Unsupported,
     }
 }
@@ -136,7 +138,8 @@ fn capabilities_for_kind(kind: ProviderKind) -> Vec<ProviderCapability> {
         | ProviderKind::Bing
         | ProviderKind::Apod
         | ProviderKind::MediaRss
-        | ProviderKind::Attribution => vec![
+        | ProviderKind::Attribution
+        | ProviderKind::Json => vec![
             ProviderCapability::ConfigValidation,
             ProviderCapability::QueueRefill,
             ProviderCapability::Download,

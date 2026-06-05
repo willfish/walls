@@ -311,3 +311,30 @@ fn attribution_source_is_classified_with_full_capabilities_not_unsupported() {
         .capabilities
         .contains(&ProviderCapability::Metadata));
 }
+
+#[test]
+fn jsonfeed_source_is_classified_with_full_capabilities_not_unsupported() {
+    // RED for #163 generic JSON image feed (will fail until Json kind added).
+    // Per AC: supports URL + JSON path selectors.
+    let sources: Vec<SourceEntry> = serde_json::from_value(serde_json::json!([
+        { "enabled": true, "type": "json", "url": "https://example.com/feed.json" }
+    ]))
+    .expect("sources");
+
+    let providers = configured_source_providers(&sources);
+
+    assert_ne!(
+        providers[0].kind,
+        ProviderKind::Unsupported,
+        "json must not be Unsupported"
+    );
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::Download));
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::QueueRefill));
+    assert!(providers[0]
+        .capabilities
+        .contains(&ProviderCapability::Metadata));
+}
