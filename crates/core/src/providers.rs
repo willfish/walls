@@ -13,6 +13,7 @@ pub enum ProviderKind {
     Json,
     Pixabay,
     Immich,
+    Spotlight,
     Unsupported,
 }
 
@@ -129,6 +130,7 @@ fn source_kind(source_type: &str) -> ProviderKind {
         "json" => ProviderKind::Json,
         "pixabay" => ProviderKind::Pixabay,
         "immich" => ProviderKind::Immich,
+        "spotlight" => ProviderKind::Spotlight,
         _ => ProviderKind::Unsupported,
     }
 }
@@ -145,7 +147,8 @@ fn capabilities_for_kind(kind: ProviderKind) -> Vec<ProviderCapability> {
         | ProviderKind::Attribution
         | ProviderKind::Json
         | ProviderKind::Pixabay
-        | ProviderKind::Immich => vec![
+        | ProviderKind::Immich
+        | ProviderKind::Spotlight => vec![
             ProviderCapability::ConfigValidation,
             ProviderCapability::QueueRefill,
             ProviderCapability::Download,
