@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use walls_core::apply::ApplyTrigger;
 use walls_core::WallsCtx;
 
+use super::style::ColorMode;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Status,
@@ -67,6 +69,7 @@ pub struct App {
     pub search_query: String,
     pub search_results: Vec<SearchHit>,
     pub(crate) local_candidates: Vec<PathBuf>,
+    pub color_mode: ColorMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +110,7 @@ impl App {
             search_query,
             search_results: Vec::new(),
             local_candidates: Vec::new(),
+            color_mode: ColorMode::from_env(),
         };
         app.refresh_local_candidates()?;
         Ok(app)
@@ -327,7 +331,7 @@ impl App {
         Ok(Some(msg))
     }
 
-    pub fn footer_help(&self) -> String {
+    pub fn footer_keys(&self) -> String {
         let keys = match self.input_mode {
             InputMode::Command => format!(":{}_ | Enter run Esc cancel", self.cmd_line),
             InputMode::SearchInput => {
@@ -340,7 +344,7 @@ impl App {
                 _ => "1-5 tabs | n/p next/prev | f favorite d trash | space pause | : cmd".into(),
             },
         };
-        format!("{keys} | q quit | {}", self.message)
+        format!("{keys} | q quit")
     }
 }
 
