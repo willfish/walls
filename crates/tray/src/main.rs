@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use tracing_subscriber::EnvFilter;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-use walls_tray::{icon, resolve_walls_bin, tui};
+use walls_tray::{icon, lock, resolve_walls_bin, tui};
 
 fn run_walls(walls: &PathBuf, args: &[&str]) -> anyhow::Result<()> {
     let status = Command::new(walls).args(args).status()?;
@@ -26,6 +26,19 @@ fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive("walls_tray=info".parse()?))
         .init();
+
+    // Singleton: exit early/cleanly if another tray is running. This makes "ensure tray from TUI/CLI if not already started" safe (no duplicate icons).
+    let lock_path = match walls_core::paths::WallsPaths::discover() {
+        Ok(paths) => paths.config_dir.join("tray.lock"),
+        Err(_) => std::env::temp_dir().join("walls-tray.lock"),
+    };
+    let _tray_lock = match lock::try_acquire_tray_lock(&lock_path) {
+        Ok(guard) => guard,
+        Err(e) => {
+            tracing::info!("walls-tray already running ({}); exiting cleanly", e);
+            return Ok(());
+        }
+    };
 
     let walls = resolve_walls_bin();
     let menu = Menu::new();
