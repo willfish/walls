@@ -18,10 +18,42 @@ pub fn patch_wallpaper_path(contents: &str, new_path: &Path) -> String {
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
     let replacement = format!(r#"source: Path("{escaped}")"#);
-    Regex::new(r#"source: Path\("[^"]+"\)"#)
-        .expect("valid regex")
+    let source_re = Regex::new(r#"source: Path\("[^"]+"\)"#).expect("valid regex");
+    let patched = source_re
         .replace_all(contents, replacement.as_str())
-        .into_owned()
+        .into_owned();
+    if patched != contents {
+        return patched;
+    }
+
+    // No existing source entry found.
+    // Prefer injecting inside a per-output tuple (realistic COSMIC structure from the native switcher / multi-monitor).
+    // This ensures the source is in the idiomatic place the DE uses for that output.
+    let output_re = Regex::new(r#"(output:\s*"[^"]+"\s*,\s*)"#).expect("valid regex for output");
+    if let Some(caps) = output_re.captures(contents) {
+        let prefix = &caps[1];
+        let inserted = format!("{prefix}source: Path(\"{escaped}\"), ");
+        let m = caps.get(0).unwrap();
+        let mut res = contents.to_string();
+        res.replace_range(m.start()..m.end(), &inserted);
+        if res != contents {
+            return res;
+        }
+    }
+
+    // Fallback for flat/simple backgrounds: ( color: ... ) style (no outputs).
+    let insert_re = Regex::new(r"(backgrounds:\s*\(\s*)").expect("valid regex");
+    if let Some(caps) = insert_re.captures(contents) {
+        let prefix = &caps[1];
+        let inserted = format!("{prefix}source: Path(\"{escaped}\"), ");
+        let m = caps.get(0).unwrap();
+        let mut res = contents.to_string();
+        res.replace_range(m.start()..m.end(), &inserted);
+        return res;
+    }
+
+    // Last resort minimal (may lose other settings)
+    format!(r#"backgrounds: ( source: Path("{escaped}"), color: [0.0, 0.0, 0.0, 1.0], )"#)
 }
 
 pub struct CosmicConfigApplier {
@@ -43,14 +75,23 @@ impl CosmicConfigApplier {
             )
         })?;
         let patched = patch_wallpaper_path(&contents, wallpaper);
-        if patched == contents {
-            anyhow::bail!(
-                "no source: Path(...) entry found in {}",
-                self.config_path.display()
-            );
-        }
         fs::write(&self.config_path, patched)?;
         tracing::info!(path = %self.config_path.display(), "patched COSMIC wallpaper path");
+
+        // Best-effort force live update via ext ctl (if installed).
+        // This makes the wallpaper *actually change* on screen immediately, even if the ron patch
+        // alone doesn't trigger the bg daemon's hot-reload/watch (explains "log says applies but no
+        // visual change" until native switcher normalized the config file, after which patches took effect).
+        // We still wrote the ron for persistence (reboot/login etc.).
+        let ctl_res = Command::new("cosmic-ext-bg-ctl")
+            .arg("set")
+            .arg(wallpaper)
+            .status();
+        if let Ok(status) = ctl_res {
+            if status.success() {
+                tracing::info!("also forced live bg via cosmic-ext-bg-ctl set");
+            }
+        } // else: binary not in PATH or failed; swallow (best effort, ron patch is the main thing)
         Ok(())
     }
 }

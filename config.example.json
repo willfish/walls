@@ -60,6 +60,68 @@
       "label": "Unsplash nature",
       "query": "nature",
       "orientation": "landscape"
+    },
+    {
+      "enabled": true,
+      "type": "bing",
+      "label": "Bing Image of the Day"
+    },
+    {
+      "enabled": false,
+      "type": "reddit",
+      "label": "Reddit wallpapers",
+      "query": "wallpapers"
+    },
+    {
+      "enabled": false,
+      "type": "apod",
+      "label": "NASA Astronomy Picture of the Day"
+    },
+    {
+      "enabled": false,
+      "type": "mediarss",
+      "label": "NASA Image of the Day (RSS)",
+      "url": "https://www.nasa.gov/rss/dyn/lg_image_of_the_day.rss"
+    },
+    {
+      "enabled": false,
+      "type": "attribution",
+      "label": "Example with attribution",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5b/Elon_Musk_Tesla.jpg/800px-Elon_Musk_Tesla.jpg",
+      "source": "Wikimedia",
+      "author": "Tesla"
+    },
+    {
+      "enabled": false,
+      "type": "json",
+      "label": "Demo JSON image feed",
+      "url": "https://picsum.photos/id/1015/info",
+      "image_path": "$.download_url"
+    },
+    {
+      "enabled": false,
+      "type": "pixabay",
+      "label": "Pixabay nature",
+      "query": "nature",
+      "api_key": "YOUR_PIXABAY_KEY_HERE"
+    },
+    {
+      "enabled": false,
+      "type": "immich",
+      "label": "My Immich",
+      "url": "https://immich.example.com",
+      "api_key": "YOUR_IMMICH_KEY"
+    },
+    {
+      "enabled": false,
+      "type": "spotlight",
+      "label": "Windows Spotlight"
+    },
+    {
+      "enabled": false,
+      "type": "weighting",
+      "label": "High priority weighting",
+      "query": "high"
     }
   ],
   "wallhaven": {

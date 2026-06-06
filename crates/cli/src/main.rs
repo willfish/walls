@@ -1,9 +1,8 @@
-use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{prelude::*, EnvFilter, Layer};
 use walls_core::apply::ApplyTrigger;
 use walls_core::{RefreshLevel, WallsCtx};
 
@@ -92,8 +91,20 @@ impl From<CliRefreshLevel> for RefreshLevel {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive("walls=info".parse()?))
+    let filter = EnvFilter::from_default_env().add_directive("walls=info".parse()?);
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(tui::ConsoleWriter)
+                .with_ansi(true)
+                .with_filter(filter.clone()),
+        )
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(tui::CaptureWriter)
+                .with_ansi(false)
+                .with_filter(filter),
+        )
         .init();
 
     let cli = Cli::parse();
@@ -113,15 +124,7 @@ async fn main() -> anyhow::Result<()> {
             ConfigSub::Validate => cmd_config_validate()?,
         },
         #[cfg(feature = "tui")]
-        Some(Command::Tui) => return tui::run().context("tui failed"),
-        None => {
-            #[cfg(feature = "tui")]
-            if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
-                return tui::run().context("tui failed");
-            }
-            eprintln!("walls: no command specified (try `walls apply <path>` or `walls tui`)");
-            std::process::exit(1);
-        }
+        Some(Command::Tui) | None => return tui::run().context("tui failed"),
         #[cfg(not(feature = "tui"))]
         None => {
             eprintln!("walls: no command specified (try `walls apply <path>`)");

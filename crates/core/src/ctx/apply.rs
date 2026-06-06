@@ -122,11 +122,10 @@ impl WallsCtx {
             post_filter_path: Some(composed.display().to_string()),
         });
         if update_history {
-            if self.state.history.first().map(String::as_str) != Some(history_id.as_str()) {
-                self.state.history.insert(0, history_id);
-                if self.state.history.len() > 1000 {
-                    self.state.history.truncate(1000);
-                }
+            self.state.history.retain(|h| h != &history_id);
+            self.state.history.insert(0, history_id);
+            if self.state.history.len() > 1000 {
+                self.state.history.truncate(1000);
             }
             self.state.history_index = 0;
         }
