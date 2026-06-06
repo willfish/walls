@@ -1,6 +1,6 @@
 # TUI Design And Verification
 
-`walls tui` is a keyboard-first Ratatui surface for repeated wallpaper management. Keep it quiet, dense, and predictable.
+`walls` (no args) or `walls tui` starts the keyboard-first Ratatui surface for repeated wallpaper management. Keep it quiet, dense, and predictable.
 
 ## Architecture
 
@@ -55,3 +55,10 @@ Use `WALLS_TUI_PREVIEW=0`, `false`, `no`, `off`, `never`, or `metadata` for meta
 ## Verification
 
 Before closing TUI work, run the checks in [`tui-verification.md`](tui-verification.md). Layout, colour, key handling, and preview changes require both automated tests and PTY visual/behavioural verification.
+
+## Config editing (drill-down, non-modal)
+`e` on a Config block or (after `Enter` to subnav on the Sources list) on a provider item enters focused edit: main content replaced by the form for the item (stable layout, no overlay/popup). `j/k` fields, type to edit (live `val|buffer`), `Enter` commit field, `s` save (strict validate_config; errors flash red + block save), `Esc` back to list.
+
+Wide (tui-preview): split list-context | form (like Now preview split). Narrow: full form.
+
+Nested providers: "Sources" block shows full sources vec (all types from config.example), subnav j/k pick, `e` edits chosen SourceEntry (type-aware fields like path/query/url/image_path/api_key, designed per schema). Reuses atomic save + Reload + existing validation.

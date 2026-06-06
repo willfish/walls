@@ -87,6 +87,18 @@ impl<'ctx> AdvanceNext<'ctx> {
             return Ok(Some(path));
         }
 
+        if let Some(path) = self.apply_bing().await? {
+            return Ok(Some(path));
+        }
+
+        if let Some(path) = self.apply_json_feed().await? {
+            return Ok(Some(path));
+        }
+
+        if let Some(path) = self.apply_media_rss().await? {
+            return Ok(Some(path));
+        }
+
         self.apply_local_candidate()
     }
 
@@ -284,6 +296,230 @@ impl<'ctx> AdvanceNext<'ctx> {
     fn cached_wallhaven_path(&self, id: &str) -> Option<PathBuf> {
         crate::wallhaven::cached_wallpaper_path(&self.ctx.paths.cache_dir, id)
     }
+
+    // Minimal support for Bing provider (public endpoint, no key) so that
+    // a SourceEntry {type: "bing"} can deliver a real wallpaper.
+    // Fetches current daily image using reqwest (already a dep).
+    async fn apply_bing(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        use crate::providers::provider_for_source;
+        use anyhow::Context;
+        let bing_sources: Vec<_> = self
+            .ctx
+            .config
+            .sources
+            .iter()
+            .filter(|s| s.enabled && s.source_type == "bing")
+            .collect();
+        if bing_sources.is_empty() || !self.ctx.config.change.internet_enabled {
+            return Ok(None);
+        }
+        let provider = provider_for_source(bing_sources[0]);
+
+        let client = ::reqwest::Client::new();
+        let j: serde_json::Value = client
+            .get("https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1")
+            .send()
+            .await
+            .with_context(|| provider.failure_scope("bing json fetch").to_string())?
+            .json()
+            .await
+            .with_context(|| provider.failure_scope("bing json parse").to_string())?;
+
+        let img = &j["images"][0];
+        let rel = img["url"].as_str().unwrap_or("");
+        if rel.is_empty() {
+            return Ok(None);
+        }
+        let url = format!("https://www.bing.com{rel}");
+
+        let bytes = client
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| provider.failure_scope("bing image download").to_string())?
+            .bytes()
+            .await
+            .with_context(|| provider.failure_scope("bing bytes").to_string())?;
+
+        let dest = self.ctx.paths.cache_dir.join("bing-daily.jpg");
+        tokio::fs::create_dir_all(&self.ctx.paths.cache_dir)
+            .await
+            .ok();
+        tokio::fs::write(&dest, &bytes)
+            .await
+            .with_context(|| provider.failure_scope("bing write cache").to_string())?;
+
+        self.ctx
+            .apply_file_inner(&dest, ApplyTrigger::Auto, Some("bing-daily".into()), true)?;
+        Ok(Some(dest))
+    }
+
+    // Minimal support for JSON image feed (url + optional image_path like "$.download_url").
+    // Used by the default in config.example.json for the "json" provider type.
+    async fn apply_json_feed(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        use crate::providers::provider_for_source;
+        use anyhow::Context;
+        let json_sources: Vec<_> = self
+            .ctx
+            .config
+            .sources
+            .iter()
+            .filter(|s| s.enabled && s.source_type == "json")
+            .collect();
+        if json_sources.is_empty() || !self.ctx.config.change.internet_enabled {
+            return Ok(None);
+        }
+        let src = json_sources[0];
+        let provider = provider_for_source(src);
+        let feed_url = src
+            .url
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("json source missing url"))?;
+
+        let client = ::reqwest::Client::new();
+        let j: serde_json::Value = client
+            .get(feed_url)
+            .send()
+            .await
+            .with_context(|| provider.failure_scope("json feed fetch").to_string())?
+            .json()
+            .await
+            .with_context(|| provider.failure_scope("json feed parse").to_string())?;
+
+        let image_url = extract_json_string(&j, src.image_path.as_deref().unwrap_or("$.url"))
+            .or_else(|| {
+                j.get("url")
+                    .and_then(|v| v.as_str())
+                    .map(ToString::to_string)
+            })
+            .or_else(|| {
+                j.get("download_url")
+                    .and_then(|v| v.as_str())
+                    .map(ToString::to_string)
+            })
+            .ok_or_else(|| anyhow::anyhow!("no image url found in json feed"))?;
+
+        let bytes = client
+            .get(&image_url)
+            .send()
+            .await
+            .with_context(|| provider.failure_scope("json image download").to_string())?
+            .bytes()
+            .await
+            .with_context(|| provider.failure_scope("json bytes").to_string())?;
+
+        let dest = self.ctx.paths.cache_dir.join("json-feed.jpg");
+        tokio::fs::create_dir_all(&self.ctx.paths.cache_dir)
+            .await
+            .ok();
+        tokio::fs::write(&dest, &bytes)
+            .await
+            .with_context(|| provider.failure_scope("json write cache").to_string())?;
+
+        self.ctx
+            .apply_file_inner(&dest, ApplyTrigger::Auto, Some("json-feed".into()), true)?;
+        Ok(Some(dest))
+    }
+
+    // Minimal support for Media RSS (url pointing to RSS with enclosure or media:content).
+    // Supports the default in example for "mediarss" type.
+    async fn apply_media_rss(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        use crate::providers::provider_for_source;
+        use anyhow::Context;
+        let rss_sources: Vec<_> = self
+            .ctx
+            .config
+            .sources
+            .iter()
+            .filter(|s| s.enabled && s.source_type == "mediarss")
+            .collect();
+        if rss_sources.is_empty() || !self.ctx.config.change.internet_enabled {
+            return Ok(None);
+        }
+        let src = rss_sources[0];
+        let provider = provider_for_source(src);
+        let rss_url = src
+            .url
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("mediarss missing url"))?;
+
+        let client = ::reqwest::Client::new();
+        let xml = client
+            .get(rss_url)
+            .send()
+            .await
+            .with_context(|| provider.failure_scope("mediarss fetch").to_string())?
+            .text()
+            .await
+            .with_context(|| provider.failure_scope("mediarss text").to_string())?;
+
+        let image_url = extract_first_media_from_rss(&xml)
+            .ok_or_else(|| anyhow::anyhow!("no image enclosure found in mediarss"))?;
+
+        let bytes = client
+            .get(&image_url)
+            .send()
+            .await
+            .with_context(|| {
+                provider
+                    .failure_scope("mediarss image download")
+                    .to_string()
+            })?
+            .bytes()
+            .await
+            .with_context(|| provider.failure_scope("mediarss bytes").to_string())?;
+
+        let dest = self.ctx.paths.cache_dir.join("mediarss.jpg");
+        tokio::fs::create_dir_all(&self.ctx.paths.cache_dir)
+            .await
+            .ok();
+        tokio::fs::write(&dest, &bytes)
+            .await
+            .with_context(|| provider.failure_scope("mediarss write cache").to_string())?;
+
+        self.ctx
+            .apply_file_inner(&dest, ApplyTrigger::Auto, Some("mediarss".into()), true)?;
+        Ok(Some(dest))
+    }
+}
+
+// Minimal helpers for the feed extractors (used by json/mediarss wiring).
+fn extract_json_string(value: &serde_json::Value, path: &str) -> Option<String> {
+    if !path.starts_with("$.") {
+        return value
+            .get(path)
+            .and_then(|v| v.as_str())
+            .map(ToString::to_string);
+    }
+    let mut current = value;
+    for part in path[2..].split('.') {
+        let part = part.trim();
+        if !part.is_empty() {
+            if let Some(idx_start) = part.find('[') {
+                let key = &part[..idx_start];
+                if !key.is_empty() {
+                    current = current.get(key)?;
+                }
+                // handle [0]
+                if let Some(end) = part.find(']') {
+                    if let Ok(i) = part[idx_start + 1..end].parse::<usize>() {
+                        current = current.get(i)?;
+                    }
+                }
+            } else {
+                current = current.get(part)?;
+            }
+        }
+    }
+    current.as_str().map(ToString::to_string)
+}
+
+fn extract_first_media_from_rss(xml: &str) -> Option<String> {
+    // Look for enclosure url= or media:content url= (common in image RSS)
+    let re = regex::Regex::new(r#"(?:enclosure|media:content)[^>]*url=["']([^"']+)["']"#).ok()?;
+    re.captures(xml)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().to_string())
 }
 
 struct LocalCandidatePicker<'recent> {

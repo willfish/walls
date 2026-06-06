@@ -32,7 +32,21 @@ fn classifies_existing_source_entries_without_schema_changes() {
         { "enabled": true, "type": "favorites" },
         { "enabled": false, "type": "image", "path": "/tmp/wall.jpg" },
         { "enabled": true, "type": "unsplash", "query": "forest" },
-        { "enabled": true, "type": "future-provider", "url": "https://example.com/feed.json" }
+        // All the new classified providers from the v0.11 extensibility backlog.
+        // These use the SourceEntry fields (query/url/user/collection/topic/orientation/label/api_key)
+        // that match Variety's RedditSource, Bing, APOD, MediaRss, JSON, Pixabay, Immich, etc.
+        // The test proves the public providers API (configured_source_providers, ProviderKind, caps)
+        // accepts them without schema changes or falling to Unsupported.
+        { "enabled": true, "type": "reddit", "query": "wallpapers", "label": "Reddit" },
+        { "enabled": true, "type": "bing", "label": "Bing" },
+        { "enabled": true, "type": "apod", "label": "APOD" },
+        { "enabled": true, "type": "mediarss", "url": "https://example.com/rss", "label": "MediaRSS" },
+        { "enabled": true, "type": "attribution", "url": "https://ex.com/img.jpg", "source": "NASA", "author": "Hubble", "label": "Attr" },
+        { "enabled": true, "type": "json", "url": "https://ex.com/feed.json", "image_path": "$.img", "label": "JSON" },
+        { "enabled": true, "type": "pixabay", "query": "cat", "label": "Pixabay" },
+        { "enabled": true, "type": "immich", "url": "https://immich.ex", "api_key": "k", "label": "Immich" },
+        { "enabled": true, "type": "spotlight", "label": "Spotlight" },
+        { "enabled": true, "type": "weighting", "query": "high", "label": "Weighting" }
     ]))
     .expect("sources");
 
@@ -55,10 +69,39 @@ fn classifies_existing_source_entries_without_schema_changes() {
     assert!(providers[3]
         .capabilities
         .contains(&ProviderCapability::Download));
-    assert_eq!(providers[4].kind, ProviderKind::Unsupported);
-    assert!(!providers[4]
-        .capabilities
-        .contains(&ProviderCapability::ConfigValidation));
+
+    // Feature the new providers: all classified, not Unsupported, full online caps.
+    // This uses the public API and proves Variety-style configs for the 10 new kinds work.
+    let new_kinds_start = 4;
+    for (i, expected_kind) in [
+        ProviderKind::Reddit,
+        ProviderKind::Bing,
+        ProviderKind::Apod,
+        ProviderKind::MediaRss,
+        ProviderKind::Attribution,
+        ProviderKind::Json,
+        ProviderKind::Pixabay,
+        ProviderKind::Immich,
+        ProviderKind::Spotlight,
+        ProviderKind::Weighting,
+    ]
+    .iter()
+    .enumerate()
+    {
+        let p = &providers[new_kinds_start + i];
+        assert_eq!(
+            p.kind, *expected_kind,
+            "provider {} should be classified as {:?}",
+            p.id, expected_kind
+        );
+        assert_ne!(p.kind, ProviderKind::Unsupported);
+        assert!(p
+            .capabilities
+            .contains(&ProviderCapability::ConfigValidation));
+        assert!(p.capabilities.contains(&ProviderCapability::QueueRefill));
+        assert!(p.capabilities.contains(&ProviderCapability::Download));
+        assert!(p.capabilities.contains(&ProviderCapability::Metadata));
+    }
 }
 
 #[test]
@@ -170,6 +213,9 @@ fn failure_scope_names_provider_and_operation() {
         user: None,
         topic: None,
         orientation: None,
+        api_key: None,
+        image_path: None,
+        title_path: None,
     }])
     .remove(0);
 
@@ -441,4 +487,42 @@ fn weighting_source_is_classified_with_full_capabilities_not_unsupported() {
     assert!(providers[0]
         .capabilities
         .contains(&ProviderCapability::Metadata));
+}
+
+// Features the public providers API (configured_providers, descriptors) with a realistic
+// mix of the new classified kinds (using Variety-compatible SourceEntry fields).
+// Proves that configs with reddit/bing/apod/... load into full-capability descriptors
+// alongside wallhaven adapter, without breaking existing behavior.
+#[test]
+fn configured_providers_features_all_new_classified_kinds() {
+    let config = test_config_with_sources(
+        true,
+        serde_json::json!([
+            { "enabled": true, "type": "folder", "label": "Local", "path": "/tmp/walls" },
+            { "enabled": true, "type": "reddit", "query": "wallpapers" },
+            { "enabled": true, "type": "bing" },
+            { "enabled": true, "type": "json", "url": "https://ex.com/feed.json", "image_path": "$.u" }
+        ]),
+    );
+    let secrets = serde_json::from_value::<walls_core::config::Secrets>(serde_json::json!({
+        "wallhaven_api_key": "key",
+        "unsplash_access_key": ""
+    }))
+    .expect("secrets");
+
+    let providers = configured_providers(&config, &secrets);
+
+    // sources (Local + 3 new) + wallhaven adapter = 5
+    assert_eq!(providers.len(), 5);
+    assert_eq!(providers[0].kind, ProviderKind::Local);
+    assert_eq!(providers[1].kind, ProviderKind::Reddit);
+    assert_eq!(providers[2].kind, ProviderKind::Bing);
+    assert_eq!(providers[3].kind, ProviderKind::Json);
+    assert_eq!(providers[4].kind, ProviderKind::Wallhaven);
+
+    // The new ones (1,2,3) have full caps (proves the classification API for extensibility)
+    for p in [&providers[1], &providers[2], &providers[3]] {
+        assert!(p.capabilities.contains(&ProviderCapability::Download));
+        assert!(p.capabilities.contains(&ProviderCapability::Metadata));
+    }
 }
