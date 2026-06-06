@@ -9,6 +9,8 @@ use walls_core::{RefreshLevel, WallsCtx};
 #[cfg(feature = "tui")]
 mod tui;
 
+mod bin_utils;
+
 #[derive(Parser)]
 #[command(name = "walls", version, about = "Wallpaper manager")]
 struct Cli {
