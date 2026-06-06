@@ -9,6 +9,8 @@ use walls_core::{RefreshLevel, WallsCtx};
 #[cfg(feature = "tui")]
 mod tui;
 
+mod bin_utils;
+
 #[derive(Parser)]
 #[command(name = "walls", version, about = "Wallpaper manager")]
 struct Cli {
@@ -124,7 +126,10 @@ async fn main() -> anyhow::Result<()> {
             ConfigSub::Validate => cmd_config_validate()?,
         },
         #[cfg(feature = "tui")]
-        Some(Command::Tui) | None => return tui::run().context("tui failed"),
+        Some(Command::Tui) | None => {
+            bin_utils::ensure_tray_running();
+            return tui::run().context("tui failed");
+        },
         #[cfg(not(feature = "tui"))]
         None => {
             eprintln!("walls: no command specified (try `walls apply <path>`)");
