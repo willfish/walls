@@ -125,6 +125,11 @@ async fn advance_next_avoids_recent_candidates_across_many_local_files() {
 // TDD RED test for wiring a real provider (Bing - public no-key).
 // We expect advance_next with only a "bing" source + internet_enabled to fetch a real
 // image from Bing's public endpoint and apply it. Currently will be None (no path for bing).
+//
+// Ignored by default: live network fetch against public endpoint. These fail under
+// --offline (as used in nix checkPhase for hermetic derivations) and can be flaky in CI.
+// Run with `cargo test -- --ignored` for manual end-to-end provider proof.
+#[ignore = "live network; skipped in offline/hermetic CI nix checks"]
 #[tokio::test]
 async fn advance_next_with_bing_source_fetches_real_bing_wallpaper() {
     let root = tempfile::tempdir().unwrap();
@@ -194,7 +199,11 @@ async fn advance_next_with_bing_source_fetches_real_bing_wallpaper() {
 // TDD RED tests for additional working defaults (JSON feed, MediaRSS).
 // These will fail until we add apply_json_feed / apply_media_rss in advance (similar to bing).
 // The defaults in config.example.json point to public feeds that these will support.
-
+//
+// Ignored by default: live network fetch against public endpoint. These fail under
+// --offline (as used in nix checkPhase for hermetic derivations) and can be flaky in CI.
+// Run with `cargo test -- --ignored` for manual end-to-end provider proof.
+#[ignore = "live network; skipped in offline/hermetic CI nix checks"]
 #[tokio::test]
 async fn advance_next_with_json_source_fetches_real_image_from_feed() {
     let root = tempfile::tempdir().unwrap();
@@ -246,6 +255,10 @@ async fn advance_next_with_json_source_fetches_real_image_from_feed() {
     assert!(p.exists());
 }
 
+// Ignored by default: live network fetch against public endpoint. These fail under
+// --offline (as used in nix checkPhase for hermetic derivations) and can be flaky in CI.
+// Run with `cargo test -- --ignored` for manual end-to-end provider proof.
+#[ignore = "live network; skipped in offline/hermetic CI nix checks"]
 #[tokio::test]
 async fn advance_next_with_mediarss_source_fetches_real_image_from_rss() {
     let root = tempfile::tempdir().unwrap();

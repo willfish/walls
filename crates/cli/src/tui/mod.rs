@@ -15,6 +15,7 @@ use ratatui::crossterm::terminal::{
 };
 use ratatui::crossterm::ExecutableCommand;
 use ratatui::prelude::*;
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, List, ListItem, Paragraph, Tabs};
 use walls_core::config::{ApplyBackendSetting, CosmicMethod};
@@ -645,20 +646,14 @@ fn render_tab_body(
                 vec!["(use normal view for j/k subnav)".into()],
                 theme,
             );
-            render_lines(
-                f,
-                chunks[1],
-                &edit_target_title(app),
-                config_edit_form_lines(app),
-                theme,
-            );
+            render_rich_edit(f, chunks[1], app, theme, &edit_target_title(app));
         } else {
-            let (title, body) = if app.tab == Tab::Config && app.is_editing() {
-                (edit_target_title(app), config_edit_form_lines(app))
+            if app.tab == Tab::Config && app.is_editing() {
+                render_rich_edit(f, area, app, theme, &edit_target_title(app));
             } else {
-                (app.tab.title().to_string(), tab_lines(app))
-            };
-            render_lines(f, area, &title, body, theme);
+                let (title, body) = (app.tab.title().to_string(), tab_lines(app));
+                render_lines(f, area, &title, body, theme);
+            }
         }
     }
 }
@@ -672,12 +667,12 @@ fn render_tab_body(
     theme: style::Theme,
 ) {
     f.render_widget(Clear, area);
-    let (title, body) = if app.tab == Tab::Config && app.is_editing() {
-        (edit_target_title(app), config_edit_form_lines(app))
+    if app.tab == Tab::Config && app.is_editing() {
+        render_rich_edit(f, area, app, theme, &edit_target_title(app));
     } else {
-        (app.tab.title().to_string(), tab_lines(app))
-    };
-    render_lines(f, area, &title, body, theme);
+        let (title, body) = (app.tab.title().to_string(), tab_lines(app));
+        render_lines(f, area, &title, body, theme);
+    }
 }
 
 fn tab_lines(app: &App) -> Vec<String> {
@@ -755,8 +750,20 @@ fn footer_keys(app: &App, width: u16) -> String {
 
 fn line_style(line: &str, theme: style::Theme) -> Style {
     let trimmed = line.trim_start();
-    if trimmed.starts_with('>') {
+    if trimmed.starts_with('>') || trimmed.starts_with("▸ ") {
         return theme.selected();
+    }
+    if trimmed.starts_with("Edit ") {
+        // Edit form titles pop with accent (cyan bold in colour mode) for hierarchy.
+        return theme.accent();
+    }
+    if trimmed.starts_with("┄")
+        || trimmed.starts_with("───")
+        || trimmed.starts_with("─ ")
+        || trimmed.starts_with("===")
+    {
+        // Modern separator/header with box chars: bold muted (calm, legible in no-colour).
+        return theme.muted().add_modifier(Modifier::BOLD);
     }
     if trimmed.starts_with("--") {
         return theme.muted();
@@ -765,10 +772,16 @@ fn line_style(line: &str, theme: style::Theme) -> Style {
         return theme.muted();
     }
     if trimmed.starts_with("!!") {
-        // Validation errors in edit forms must be visually obvious (red/bold) inline in the body.
+        // Validation errors ... red/bold inline.
         return theme.status(style::StatusKind::Error);
     }
-    theme.status(style::status_kind(line))
+    // Default to normal (main fg) for content lines so the edit form "pops" with readable text.
+    // Combined with selected row highlight, accent headers, alignment, and Unicode, it feels more modern.
+    let kind = style::status_kind(line);
+    if kind == style::StatusKind::Neutral {
+        return theme.normal();
+    }
+    theme.status(kind)
 }
 
 fn config_lines(app: &App) -> Vec<String> {
@@ -1176,21 +1189,10 @@ fn edit_target_title(app: &App) -> String {
 /// No overlay/Clear/popup - stable layout, reuses render_lines.
 fn config_edit_form_lines(app: &App) -> Vec<String> {
     if let Some(sess) = &app.editing {
-        let title = match &sess.target {
-            EditTarget::Block(0) => "Edit Rotation".to_string(),
-            EditTarget::Block(b) => format!("Edit: block {}", b),
-            EditTarget::Source(i) => {
-                if let Some(ref src) = sess.draft_source {
-                    let lab = src.label.clone().unwrap_or_else(|| src.source_type.clone());
-                    format!("Edit Source #{}: {} ({})", i, lab, src.source_type)
-                } else {
-                    format!("Edit source #{} (form)", i)
-                }
-            }
-        };
         let mut lines: Vec<String> = vec![
-            title.clone(),
-            "=== EDIT FORM (arrows fields | type/BS | Enter save | Esc) ===".into(),
+            // Modern form header using box-drawing for a contemporary TUI feel (like lazygit, helix, etc.).
+            // No duplicate title (chrome provides "Edit Rotation" etc.).
+            "┄─ EDIT FORM (▸ focus | ↑/↓ | type | Enter save | Esc) ─┄".into(),
         ];
         // Validation errors inline at top (after marker) so visible immediately, with !! cue for red styling.
         // This addresses "they have no validation" and "s it just fails" (user sees *why* before or on save).
@@ -1252,22 +1254,122 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
                 }
             }
         }
+        // Right-aligned labels within a capped column for a tight, modern form look (avoids huge gaps on short labels like "Type").
+        // Values stay in a clean column. Cap prevents sparse layout on small forms.
+        let max_label = fields.iter().map(|(l, _)| l.len()).max().unwrap_or(0);
+        let pad = std::cmp::min(max_label, 28);
         for (i, (k, v)) in fields.iter().enumerate() {
+            let padded = format!("{:>width$}", k, width = pad);
             let val = if i == sess.field_cursor {
                 format!("{}|", sess.field_buffer)
             } else {
                 v.clone()
             };
             if i == sess.field_cursor {
-                lines.push(format!("> {}: {}", k, val));
+                lines.push(format!("▸ {}: {}", padded, val));
             } else {
-                lines.push(format!("  {}: {}", k, val));
+                lines.push(format!("  {}: {}", padded, val));
             }
         }
         lines
     } else {
         vec![]
     }
+}
+
+/// Build rich ListItems for the edit form using Spans for per-segment styling.
+/// This enables modern form aesthetics: accent/cyan labels for hierarchy, normal values,
+/// strong selected highlight on the current row (▸ ), red errors, etc.
+/// Keeps the plain text content the same for tests/pty inspection.
+fn build_rich_edit_form_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
+    let plain_lines = config_edit_form_lines(app);
+    let mut items = Vec::new();
+    for line in plain_lines {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("┄")
+            || trimmed.starts_with("───")
+            || trimmed.starts_with("─ ")
+            || trimmed.starts_with("===")
+        {
+            // Modern header/separator
+            let l = Line::from(Span::styled(
+                line,
+                theme.accent().add_modifier(Modifier::BOLD),
+            ));
+            items.push(ListItem::new(l));
+            continue;
+        }
+        if trimmed.starts_with("!!") {
+            let err_st = theme.status(style::StatusKind::Error);
+            let l = Line::from(vec![
+                Span::styled("!! ", err_st),
+                Span::styled(line[3..].to_string(), err_st),
+            ]);
+            items.push(ListItem::new(l));
+            continue;
+        }
+        if trimmed.starts_with("▸ ") || trimmed.starts_with("  ") {
+            // Field: split for rich modern styling.
+            // - Current row: label gets strong accent + underline (focus pop), value normal.
+            // - Non-current: labels muted. For bool fields (common in rotation/sources), pretty-print
+            //   with ✓/✗ + success/error colour (redundant with text, works in no-colour via modifiers).
+            if let Some(colon_pos) = line.find(": ") {
+                let label_part = &line[..colon_pos];
+                let value_part = &line[colon_pos + 2..];
+                let is_cur = trimmed.starts_with("▸ ");
+                let label_st = if is_cur {
+                    theme
+                        .accent()
+                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                } else {
+                    theme.muted()
+                };
+                let val_st = if !is_cur && (value_part == "true" || value_part == "false") {
+                    if value_part == "true" {
+                        theme.status(style::StatusKind::Success)
+                    } else {
+                        theme.status(style::StatusKind::Error)
+                    }
+                } else {
+                    theme.normal()
+                };
+                let display_val = if !is_cur && value_part == "true" {
+                    "✓ true".to_string()
+                } else if !is_cur && value_part == "false" {
+                    "✗ false".to_string()
+                } else {
+                    value_part.to_string()
+                };
+                let row_st = if is_cur {
+                    theme.selected()
+                } else {
+                    theme.normal()
+                };
+                let l = Line::from(vec![
+                    Span::styled(label_part.to_string(), label_st),
+                    Span::raw(": "),
+                    Span::styled(display_val, val_st),
+                ]);
+                items.push(ListItem::new(l).style(row_st));
+                continue;
+            }
+        }
+        // Fallback to plain + line_style
+        let st = line_style(&line, theme);
+        items.push(ListItem::new(line).style(st));
+    }
+    items
+}
+
+/// Render the edit form with rich per-segment Spans (labels in accent/muted for hierarchy,
+/// values normal, current row with selected highlight). This makes the form feel more modern
+/// and "designed" (visual distinction, scannable) while reusing the string builder for tests.
+fn render_rich_edit(f: &mut Frame, area: Rect, app: &App, theme: style::Theme, block_title: &str) {
+    let items = build_rich_edit_form_items(app, theme);
+    let list = List::new(items)
+        .block(theme.content_block(block_title))
+        .style(theme.normal());
+    f.render_widget(list, area);
 }
 
 fn now_lines(app: &App) -> Vec<String> {
@@ -2416,8 +2518,10 @@ mod tests {
         // Render exercises config_edit_form_lines which builds from draft (cloned from config json at start_edit)
         // Use taller height so that with possible !! errors section (from auto-persist on Commit in new UX) the later fields like Orientation are still in the captured buffer.
         let text = render_text(&app, 80, 30);
+        // Note: labels are now padded for alignment (e.g. "Query                                    : nature!|"),
+        // so contains checks use the distinctive value parts (robust to padding and errors section).
         assert!(
-            text.contains("Query: nature!"),
+            text.contains("nature!"),
             "form must show updated draft value from json+edit; text: {}",
             text
         );
@@ -2425,9 +2529,9 @@ mod tests {
             text.contains("Orientation"),
             "orientation prefilled from json"
         );
-        assert!(text.contains("Collection: 123456"), "collection prefilled");
-        assert!(text.contains("User: johndoe"), "user prefilled");
-        assert!(text.contains("Topic: wallpapers"), "topic prefilled");
+        assert!(text.contains("123456"), "collection prefilled");
+        assert!(text.contains("johndoe"), "user prefilled");
+        assert!(text.contains("wallpapers"), "topic prefilled");
         // only necessary; no title_path ever, no bleed from other
         assert!(
             !text.contains("title_path"),
@@ -2449,12 +2553,10 @@ mod tests {
         app2.config_cursor = 1;
         app2.start_edit_for_current();
         let text2 = render_text(&app2, 80, 24);
+        // Padded labels (e.g. "Query                                    : cats"), so check distinctive values.
+        assert!(text2.contains("cats"), "pixabay query prefilled from json");
         assert!(
-            text2.contains("Query: cats"),
-            "pixabay query prefilled from json"
-        );
-        assert!(
-            text2.contains("API key: SECRET123"),
+            text2.contains("SECRET123"),
             "api_key prefilled (masked? but in test form shows; from json)"
         );
         assert!(!text2.contains("url"), "no url for pixabay");
