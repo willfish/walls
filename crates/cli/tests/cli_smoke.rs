@@ -90,7 +90,7 @@ fn cli_toggle_pause_and_next_noop() {
 #[test]
 fn tui_launch_attempts_to_start_tray_but_does_not_block() {
     let tmp = tempfile::tempdir().unwrap();
-    let (config_home, state_home) = setup_xdg_home(tmp.path());
+    let (_config_home, _state_home) = setup_xdg_home(tmp.path());
 
     // The call should return quickly (no block) and not panic.
     // In green, we will assert the spawn was attempted (e.g. via env or process check).
@@ -101,5 +101,8 @@ fn tui_launch_attempts_to_start_tray_but_does_not_block() {
     // In green we will assert the spawn was attempted.
     // walls::bin_utils::ensure_tray_running();
     let elapsed = start.elapsed();
-    assert!(elapsed < std::time::Duration::from_secs(1), "ensure should not block");
+    assert!(
+        elapsed < std::time::Duration::from_secs(1),
+        "ensure should not block"
+    );
 }

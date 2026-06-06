@@ -4,7 +4,7 @@ use std::path::Path;
 use fs2::FileExt;
 
 /// Reusable process singleton lock (advisory exclusive on a file for lifetime of guard).
-/// Used by StateLock and tray singleton.
+/// Used by `StateLock` and tray singleton.
 pub struct ProcessLock {
     _file: File,
 }
