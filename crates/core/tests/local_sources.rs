@@ -21,6 +21,9 @@ fn lists_images_in_folder() {
         user: None,
         topic: None,
         orientation: None,
+        api_key: None,
+        image_path: None,
+        title_path: None,
     };
     let images = list_images(&src).unwrap();
     assert_eq!(images.len(), 2);

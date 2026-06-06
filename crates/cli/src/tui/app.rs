@@ -516,6 +516,10 @@ impl App {
                     validation_errors: vec![],
                 };
                 self.editing = Some(session);
+                let new_buf = self.current_edit_field_value();
+                if let Some(s) = &mut self.editing {
+                    s.field_buffer = new_buf;
+                }
                 self.message.clear();
                 return;
             }
@@ -561,6 +565,10 @@ impl App {
             _ => return,
         };
         self.editing = Some(session);
+        let new_buf = self.current_edit_field_value();
+        if let Some(s) = &mut self.editing {
+            s.field_buffer = new_buf;
+        }
         self.message.clear();
     }
 
@@ -573,6 +581,220 @@ impl App {
     #[allow(dead_code)]
     pub fn is_editing(&self) -> bool {
         self.editing.is_some()
+    }
+
+    /// Ordered list of editable field names for a given source type.
+    /// This is the single source of truth for "100% necessary fields per config item".
+    /// Includes only fields that are part of SourceEntry, appear in example.json or tests for the type,
+    /// or are actively read by core (local path, json url+image_path, mediarss url, unsplash params, etc).
+    /// Omits title_path (serde compat only, never used in logic).
+    /// Omits attribution's "source"/"author" (present in some example but not modeled in SourceEntry).
+    #[allow(dead_code)]
+    pub fn source_editable_fields(src: &walls_core::config::SourceEntry) -> Vec<String> {
+        let mut f = vec![
+            "enabled".to_string(),
+            "type".to_string(),
+            "label".to_string(),
+        ];
+        let t = src.source_type.as_str();
+        match t {
+            "folder" | "image" | "favorites" | "fetched" => {
+                f.push("path".into());
+            }
+            "json" => {
+                f.push("url".into());
+                f.push("image_path".into());
+            }
+            "mediarss" => {
+                f.push("url".into());
+            }
+            "attribution" => {
+                f.push("url".into());
+            }
+            "unsplash" => {
+                f.push("url".into());
+                f.push("query".into());
+                f.push("collection".into());
+                f.push("user".into());
+                f.push("topic".into());
+                f.push("orientation".into());
+            }
+            "reddit" | "weighting" => {
+                f.push("query".into());
+            }
+            "pixabay" => {
+                f.push("query".into());
+                f.push("api_key".into());
+            }
+            "immich" => {
+                f.push("url".into());
+                f.push("api_key".into());
+            }
+            // bing, apod, spotlight, wallhaven (global), others: no per-source extras beyond common
+            _ => {}
+        }
+        f
+    }
+
+    #[allow(dead_code)]
+    pub fn get_source_field(src: &walls_core::config::SourceEntry, name: &str) -> String {
+        match name {
+            "enabled" => src.enabled.to_string(),
+            "type" => src.source_type.clone(),
+            "label" => src.label.clone().unwrap_or_default(),
+            "url" => src.url.clone().unwrap_or_default(),
+            "path" => src.path.clone().unwrap_or_default(),
+            "image_path" => src.image_path.clone().unwrap_or_default(),
+            "query" => src.query.clone().unwrap_or_default(),
+            "api_key" => src.api_key.clone().unwrap_or_default(),
+            "collection" => src.collection.clone().unwrap_or_default(),
+            "user" => src.user.clone().unwrap_or_default(),
+            "topic" => src.topic.clone().unwrap_or_default(),
+            "orientation" => src.orientation.clone().unwrap_or_default(),
+            _ => String::new(),
+        }
+    }
+
+    /// Lenient bool parser for edit buffers (user may type t/f/1/0/yes/no/on/off/true/false).
+    /// Prevents "I set false, s just fails" from strict parse only accepting "true"/"false".
+    fn parse_bool_like(s: &str) -> Option<bool> {
+        let t = s.trim().to_ascii_lowercase();
+        match t.as_str() {
+            "true" | "t" | "1" | "yes" | "y" | "on" => Some(true),
+            "false" | "f" | "0" | "no" | "n" | "off" => Some(false),
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn set_source_field(draft: &mut walls_core::config::SourceEntry, name: &str, buf: &str) {
+        let trimmed = buf.trim();
+        let v = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        };
+        match name {
+            "enabled" => {
+                draft.enabled = Self::parse_bool_like(trimmed).unwrap_or(draft.enabled);
+            }
+            "type" if !trimmed.is_empty() => {
+                draft.source_type = trimmed.to_string();
+            }
+            "label" => draft.label = v,
+            "url" => draft.url = v,
+            "path" => draft.path = v,
+            "image_path" => draft.image_path = v,
+            "query" => draft.query = v,
+            "api_key" => draft.api_key = v,
+            "collection" => draft.collection = v,
+            "user" => draft.user = v,
+            "topic" => draft.topic = v,
+            "orientation" => draft.orientation = v,
+            _ => {}
+        }
+    }
+
+    /// Pure value lookup for a field at a given cursor idx for a target (no reliance on live editing sess cursor).
+    /// Used by up/down handlers to precompute the *new* position's buffer value without borrow conflicts.
+    #[allow(dead_code)]
+    pub fn edit_field_value_at(&self, target: &EditTarget, idx: usize) -> String {
+        match target {
+            EditTarget::Source(i) if *i < self.ctx.config.sources.len() => {
+                // Prefer draft for the matching editing target (so nav in edit after commits prefills
+                // edited values from draft state that originated from json config).
+                let src = if let Some(sess) = &self.editing {
+                    if let Some(d) = &sess.draft_source {
+                        if matches!(&sess.target, EditTarget::Source(j) if j == i) {
+                            d
+                        } else {
+                            &self.ctx.config.sources[*i]
+                        }
+                    } else {
+                        &self.ctx.config.sources[*i]
+                    }
+                } else {
+                    &self.ctx.config.sources[*i]
+                };
+                let names = Self::source_editable_fields(src);
+                if idx < names.len() {
+                    Self::get_source_field(src, &names[idx])
+                } else {
+                    String::new()
+                }
+            }
+            EditTarget::Block(0) => {
+                let key = match idx {
+                    0 => "enabled",
+                    1 => "interval",
+                    2 => "internet",
+                    _ => "",
+                };
+                if !key.is_empty() {
+                    if let Some(sess) = &self.editing {
+                        if let Some(v) = sess.draft_block_values.get(key) {
+                            return v.clone();
+                        }
+                    }
+                }
+                match idx {
+                    0 => self.ctx.config.change.enabled.to_string(),
+                    1 => self.ctx.config.change.interval_secs.to_string(),
+                    2 => self.ctx.config.change.internet_enabled.to_string(),
+                    _ => String::new(),
+                }
+            }
+            _ => String::new(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn current_edit_field_value(&self) -> String {
+        if let Some(sess) = &self.editing {
+            let idx = sess.field_cursor;
+            match &sess.target {
+                EditTarget::Source(i) if *i < self.ctx.config.sources.len() => {
+                    // Prefer draft (the in-memory edit copy started from the json config at e) so that
+                    // after field commits (which update only draft), moving fields prefills from the
+                    // "current config item state" not stale live ctx. This makes prefill reflect the
+                    // json + uncommitted edits.
+                    let src = if let Some(d) = &sess.draft_source {
+                        d
+                    } else {
+                        &self.ctx.config.sources[*i]
+                    };
+                    let names = Self::source_editable_fields(src);
+                    if idx < names.len() {
+                        return Self::get_source_field(src, &names[idx]);
+                    }
+                    String::new()
+                }
+                EditTarget::Block(0) => {
+                    // For blocks, prefer draft_block_values (populated at start from json/config) so
+                    // prefills after partial commits come from edit state.
+                    let key = match idx {
+                        0 => "enabled",
+                        1 => "interval",
+                        2 => "internet",
+                        _ => "",
+                    };
+                    if !key.is_empty() {
+                        if let Some(v) = sess.draft_block_values.get(key) {
+                            return v.clone();
+                        }
+                    }
+                    match idx {
+                        0 => self.ctx.config.change.enabled.to_string(),
+                        1 => self.ctx.config.change.interval_secs.to_string(),
+                        2 => self.ctx.config.change.internet_enabled.to_string(),
+                        _ => String::new(),
+                    }
+                }
+                _ => String::new(),
+            }
+        } else {
+            String::new()
+        }
     }
 
     pub fn is_sources_list_block(&self, block: usize) -> bool {
@@ -639,41 +861,10 @@ impl App {
             match &mut sess.target {
                 EditTarget::Source(i) if *i < self.ctx.config.sources.len() => {
                     if let Some(draft) = &mut sess.draft_source {
-                        // map cursor to field (simplified order matching render)
-                        match field_idx {
-                            0 => draft.enabled = buf.trim().parse().unwrap_or(draft.enabled),
-                            1 if !buf.trim().is_empty() => {
-                                draft.source_type = buf.trim().to_string();
-                            }
-                            2 => {
-                                draft.label = if buf.trim().is_empty() {
-                                    None
-                                } else {
-                                    Some(buf.trim().to_string())
-                                }
-                            }
-                            3 => {
-                                draft.url = if buf.trim().is_empty() {
-                                    None
-                                } else {
-                                    Some(buf.trim().to_string())
-                                }
-                            }
-                            4 => {
-                                draft.path = if buf.trim().is_empty() {
-                                    None
-                                } else {
-                                    Some(buf.trim().to_string())
-                                }
-                            }
-                            5 => {
-                                draft.image_path = if buf.trim().is_empty() {
-                                    None
-                                } else {
-                                    Some(buf.trim().to_string())
-                                }
-                            }
-                            _ => {}
+                        let names = Self::source_editable_fields(draft);
+                        if field_idx < names.len() {
+                            let name = &names[field_idx];
+                            Self::set_source_field(draft, name, &buf);
                         }
                     }
                 }
@@ -703,6 +894,12 @@ impl App {
 
     #[allow(dead_code)]
     pub fn save_edit_item(&mut self) -> anyhow::Result<()> {
+        // Auto-commit any pending field buffer so user can type a change then hit 's' directly
+        // (without final Enter to commit the last field). This fixes the common "I edited the value
+        // then s just fails" (change not in draft, or validation on old).
+        if self.editing.is_some() {
+            self.commit_edit_field_buffer();
+        }
         let sess = match &self.editing {
             Some(s) => s,
             None => return Ok(()),
@@ -719,7 +916,8 @@ impl App {
             EditTarget::Block(0) => {
                 // apply rotation values (simplified)
                 if let Some(v) = sess.draft_block_values.get("enabled") {
-                    config.change.enabled = v == "true";
+                    config.change.enabled =
+                        Self::parse_bool_like(v).unwrap_or(config.change.enabled);
                 }
                 if let Some(v) = sess.draft_block_values.get("interval") {
                     if let Ok(n) = v.parse() {
@@ -727,7 +925,8 @@ impl App {
                     }
                 }
                 if let Some(v) = sess.draft_block_values.get("internet") {
-                    config.change.internet_enabled = v == "true";
+                    config.change.internet_enabled =
+                        Self::parse_bool_like(v).unwrap_or(config.change.internet_enabled);
                 }
                 success_msg = "config saved: rotation".into();
             }
@@ -785,6 +984,9 @@ impl App {
     }
 
     pub fn footer_keys(&self) -> String {
+        if self.is_editing() {
+            return "edit: j/k fields | type/Backspace | Enter commit field | s save | Esc cancel | q".into();
+        }
         let keys = match self.input_mode {
             InputMode::Command => format!(":{}_ | Enter run Esc cancel", self.cmd_line),
             InputMode::SearchInput => {

@@ -112,6 +112,12 @@ pub struct SourceEntry {
     pub topic: Option<String>,
     #[serde(default)]
     pub orientation: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub image_path: Option<String>,
+    #[serde(default)]
+    pub title_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

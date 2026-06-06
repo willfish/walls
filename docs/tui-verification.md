@@ -17,11 +17,12 @@ scripts/verify-tui-visual.sh
 
 ## Manual/Visual Checks
 
-- Standard terminal, dark background: `walls tui`
-- Light-background terminal or theme: `WALLS_TUI_COLOR=never walls tui`
+- Standard terminal, dark background: `walls` (or `walls tui`)
+- Light-background terminal or theme: `WALLS_TUI_COLOR=never walls`
+- Config edit (drill-down): Config tab, j/k to Sources, Enter subnav, j/k pick provider, `e` -> form replaces main content (j/k fields, type, Enter commit, s save with validation flash on error). Wide: split. Narrow: full form. Esc back. Test narrow 50x12, WALLS_TUI_COLOR=never (legible), no stale cells.
 - Narrow terminal around `42x10`: confirm mode/status and `q` remain visible.
 - Wide terminal around `120x32`: confirm the `Now` tab keeps metadata and preview/fallback regions stable.
-- Preview disabled: `WALLS_TUI_PREVIEW=0 walls tui`
+- Preview disabled: `WALLS_TUI_PREVIEW=0 walls`
 - Unknown terminal fallback: run with a normal `xterm-256color`-style environment and confirm no raw image escape sequences are shown.
 - Ghostty: run in Ghostty with preview enabled. It should probe the Kitty-compatible graphics path when available, or show `preview unavailable: ...; showing metadata` without corrupting the UI.
 
