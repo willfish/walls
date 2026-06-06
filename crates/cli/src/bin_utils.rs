@@ -12,8 +12,19 @@ pub fn resolve_tray_bin() -> PathBuf {
 
 /// Testable resolver for `walls-tray` next to the walls binary or from `WALLS_TRAY_BIN`.
 #[allow(dead_code)]
-pub fn resolve_tray_bin_from(_tray_bin_env: Option<&str>, _current_exe: Option<&Path>) -> PathBuf {
-    unimplemented!("resolver not implemented")
+pub fn resolve_tray_bin_from(tray_bin_env: Option<&str>, current_exe: Option<&Path>) -> PathBuf {
+    if let Some(path) = tray_bin_env {
+        return PathBuf::from(path);
+    }
+    if let Some(exe) = current_exe {
+        if let Some(parent) = exe.parent() {
+            let sibling = parent.join("walls-tray");
+            if sibling.is_file() {
+                return sibling;
+            }
+        }
+    }
+    PathBuf::from("walls-tray")
 }
 
 #[cfg(test)]
