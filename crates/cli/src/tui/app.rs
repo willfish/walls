@@ -546,12 +546,28 @@ impl App {
                 let mut vals = std::collections::HashMap::new();
                 vals.insert("enabled".into(), self.ctx.config.change.enabled.to_string());
                 vals.insert(
+                    "on_start".into(),
+                    self.ctx.config.change.on_start.to_string(),
+                );
+                vals.insert(
                     "interval".into(),
                     self.ctx.config.change.interval_secs.to_string(),
                 );
                 vals.insert(
                     "internet".into(),
                     self.ctx.config.change.internet_enabled.to_string(),
+                );
+                vals.insert(
+                    "safe_mode".into(),
+                    self.ctx.config.change.safe_mode.to_string(),
+                );
+                vals.insert(
+                    "change_lock_screen".into(),
+                    self.ctx.config.change.change_lock_screen.to_string(),
+                );
+                vals.insert(
+                    "download_preference_ratio".into(),
+                    self.ctx.config.change.download_preference_ratio.to_string(),
                 );
                 EditSession {
                     target: target.clone(),
@@ -726,8 +742,12 @@ impl App {
             EditTarget::Block(0) => {
                 let key = match idx {
                     0 => "enabled",
-                    1 => "interval",
-                    2 => "internet",
+                    1 => "on_start",
+                    2 => "interval",
+                    3 => "internet",
+                    4 => "safe_mode",
+                    5 => "change_lock_screen",
+                    6 => "download_preference_ratio",
                     _ => "",
                 };
                 if !key.is_empty() {
@@ -739,8 +759,12 @@ impl App {
                 }
                 match idx {
                     0 => self.ctx.config.change.enabled.to_string(),
-                    1 => self.ctx.config.change.interval_secs.to_string(),
-                    2 => self.ctx.config.change.internet_enabled.to_string(),
+                    1 => self.ctx.config.change.on_start.to_string(),
+                    2 => self.ctx.config.change.interval_secs.to_string(),
+                    3 => self.ctx.config.change.internet_enabled.to_string(),
+                    4 => self.ctx.config.change.safe_mode.to_string(),
+                    5 => self.ctx.config.change.change_lock_screen.to_string(),
+                    6 => self.ctx.config.change.download_preference_ratio.to_string(),
                     _ => String::new(),
                 }
             }
@@ -774,8 +798,12 @@ impl App {
                     // prefills after partial commits come from edit state.
                     let key = match idx {
                         0 => "enabled",
-                        1 => "interval",
-                        2 => "internet",
+                        1 => "on_start",
+                        2 => "interval",
+                        3 => "internet",
+                        4 => "safe_mode",
+                        5 => "change_lock_screen",
+                        6 => "download_preference_ratio",
                         _ => "",
                     };
                     if !key.is_empty() {
@@ -785,8 +813,12 @@ impl App {
                     }
                     match idx {
                         0 => self.ctx.config.change.enabled.to_string(),
-                        1 => self.ctx.config.change.interval_secs.to_string(),
-                        2 => self.ctx.config.change.internet_enabled.to_string(),
+                        1 => self.ctx.config.change.on_start.to_string(),
+                        2 => self.ctx.config.change.interval_secs.to_string(),
+                        3 => self.ctx.config.change.internet_enabled.to_string(),
+                        4 => self.ctx.config.change.safe_mode.to_string(),
+                        5 => self.ctx.config.change.change_lock_screen.to_string(),
+                        6 => self.ctx.config.change.download_preference_ratio.to_string(),
                         _ => String::new(),
                     }
                 }
@@ -869,7 +901,7 @@ impl App {
                     }
                 }
                 EditTarget::Block(0) => {
-                    // rotation scalars
+                    // rotation scalars (now full ChangeConfig, not just 3)
                     match field_idx {
                         0 => {
                             sess.draft_block_values
@@ -877,11 +909,27 @@ impl App {
                         }
                         1 => {
                             sess.draft_block_values
-                                .insert("interval".into(), buf.trim().to_string());
+                                .insert("on_start".into(), buf.trim().to_string());
                         }
                         2 => {
                             sess.draft_block_values
+                                .insert("interval".into(), buf.trim().to_string());
+                        }
+                        3 => {
+                            sess.draft_block_values
                                 .insert("internet".into(), buf.trim().to_string());
+                        }
+                        4 => {
+                            sess.draft_block_values
+                                .insert("safe_mode".into(), buf.trim().to_string());
+                        }
+                        5 => {
+                            sess.draft_block_values
+                                .insert("change_lock_screen".into(), buf.trim().to_string());
+                        }
+                        6 => {
+                            sess.draft_block_values
+                                .insert("download_preference_ratio".into(), buf.trim().to_string());
                         }
                         _ => {}
                     }
@@ -893,12 +941,19 @@ impl App {
     }
 
     #[allow(dead_code)]
-    pub fn save_edit_item(&mut self) -> anyhow::Result<()> {
-        // Auto-commit any pending field buffer so user can type a change then hit 's' directly
-        // (without final Enter to commit the last field). This fixes the common "I edited the value
-        // then s just fails" (change not in draft, or validation on old).
+    pub fn save_edit_item(&mut self, exit_on_success: bool) -> anyhow::Result<()> {
+        // Auto-commit only if there's a pending non-empty buffer (e.g. direct Save action use, or 's' if ever mapped).
+        // When caller did explicit commit first (Enter or arrow move), buffer is empty so we avoid re-committing empty
+        // which would clear text fields.
         if self.editing.is_some() {
-            self.commit_edit_field_buffer();
+            let has_pending = if let Some(s) = &self.editing {
+                !s.field_buffer.is_empty()
+            } else {
+                false
+            };
+            if has_pending {
+                self.commit_edit_field_buffer();
+            }
         }
         let sess = match &self.editing {
             Some(s) => s,
@@ -914,10 +969,14 @@ impl App {
                 }
             }
             EditTarget::Block(0) => {
-                // apply rotation values (simplified)
+                // apply rotation values (full ChangeConfig now)
                 if let Some(v) = sess.draft_block_values.get("enabled") {
                     config.change.enabled =
                         Self::parse_bool_like(v).unwrap_or(config.change.enabled);
+                }
+                if let Some(v) = sess.draft_block_values.get("on_start") {
+                    config.change.on_start =
+                        Self::parse_bool_like(v).unwrap_or(config.change.on_start);
                 }
                 if let Some(v) = sess.draft_block_values.get("interval") {
                     if let Ok(n) = v.parse() {
@@ -927,6 +986,19 @@ impl App {
                 if let Some(v) = sess.draft_block_values.get("internet") {
                     config.change.internet_enabled =
                         Self::parse_bool_like(v).unwrap_or(config.change.internet_enabled);
+                }
+                if let Some(v) = sess.draft_block_values.get("safe_mode") {
+                    config.change.safe_mode =
+                        Self::parse_bool_like(v).unwrap_or(config.change.safe_mode);
+                }
+                if let Some(v) = sess.draft_block_values.get("change_lock_screen") {
+                    config.change.change_lock_screen =
+                        Self::parse_bool_like(v).unwrap_or(config.change.change_lock_screen);
+                }
+                if let Some(v) = sess.draft_block_values.get("download_preference_ratio") {
+                    if let Ok(f) = v.parse::<f64>() {
+                        config.change.download_preference_ratio = f.clamp(0.0, 1.0);
+                    }
                 }
                 success_msg = "config saved: rotation".into();
             }
@@ -946,7 +1018,9 @@ impl App {
         self.message = success_msg;
         // reload will happen via effect if we return it, but for simplicity here reload
         self.reload_ctx()?;
-        self.editing = None;
+        if exit_on_success {
+            self.editing = None;
+        }
         Ok(())
     }
 
@@ -985,7 +1059,9 @@ impl App {
 
     pub fn footer_keys(&self) -> String {
         if self.is_editing() {
-            return "edit: j/k fields | type/Backspace | Enter commit field | s save | Esc cancel | q".into();
+            // j/k letters reserved for main list / subnav (Esc first); arrows move fields inside the form.
+            // Enter commits the field buffer and saves/persists the item (no separate save).
+            return "edit: ↑/↓ fields | type/Backspace | Enter save | Esc cancel | q".into();
         }
         let keys = match self.input_mode {
             InputMode::Command => format!(":{}_ | Enter run Esc cancel", self.cmd_line),

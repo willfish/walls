@@ -174,6 +174,7 @@ enum UiAction {
     EditFieldCommit,
     EditFieldUp,
     EditFieldDown,
+    #[allow(dead_code)]
     SaveEditItem,
     SwitchTab(Tab),
     EditSearch,
@@ -240,17 +241,16 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
         InputMode::Normal => {}
     }
 
-    // Editing steals other keys for j/k field nav + live typing into buffer (no sub-mode)
-    // Note: n/p for wallpaper are *not* forced here; in edit they become EditFieldChar('n'/'p')
-    // (wallpaper change disabled while editing, per requirements), when not editing they hit
-    // the final match below which maps to Next/Prev from *any* tab. This avoids the previous
-    // regression where n/p only "worked" in limited cases.
+    // Editing steals keys for field nav (arrows only), live typing, commit/save on Enter, cancel.
+    // Letter j/k are *not* field nav here (they become Char => type into buffer, or for list nav you Esc first then j/k).
+    // This implements "Rather than jk in edit mode. Let's allow the user to hit escape first and then j/k".
+    // n/p etc also type (disabled for globals).
+    // Enter = commit buffer for current field + persist/save the item (no separate save key; "enter ... should just save the config").
     if app.is_editing() {
         return match key.code {
-            KeyCode::Up | KeyCode::Char('k') => UiAction::EditFieldUp,
-            KeyCode::Down | KeyCode::Char('j') => UiAction::EditFieldDown,
+            KeyCode::Up => UiAction::EditFieldUp,
+            KeyCode::Down => UiAction::EditFieldDown,
             KeyCode::Esc => UiAction::CancelEdit,
-            KeyCode::Char('s') | KeyCode::Char('S') => UiAction::SaveEditItem,
             KeyCode::Backspace => UiAction::EditFieldBackspace,
             KeyCode::Enter => UiAction::EditFieldCommit,
             KeyCode::Char(c) => UiAction::EditFieldChar(c),
@@ -421,10 +421,23 @@ fn update(
         UiAction::EditFieldCommit => {
             if app.editing.is_some() {
                 app.commit_edit_field_buffer();
+                // Commit the field to draft, then persist/save the item (atomic write + reload).
+                // Keep the edit form open (user can continue to other fields of this item or Esc to leave).
+                // This makes "type ... and hit enter" save the config without a separate save step.
+                let _ = app.save_edit_item(false);
+                // Re-fill buffer from the (now committed) draft value so the focused line shows "val|" (not empty |)
+                // ready for further typing on this field, and indicates the committed state.
+                if app.is_editing() {
+                    let val = app.current_edit_field_value();
+                    if let Some(s) = &mut app.editing {
+                        s.field_buffer = val;
+                    }
+                }
             }
         }
         UiAction::EditFieldUp => {
-            // Compute buf for the *target* position (after dec) using pure at() to avoid stale/old-cursor and borrow issues.
+            // Pure field move inside edit form (triggered by arrows; letter j/k no longer do this).
+            // No auto commit/persist on arrow (uncommitted typing on a field is lost if you arrow away; hit Enter to commit+save a field).
             let buf = if let Some(sess) = &app.editing {
                 let c = sess.field_cursor.saturating_sub(1);
                 app.edit_field_value_at(&sess.target, c)
@@ -439,6 +452,8 @@ fn update(
             }
         }
         UiAction::EditFieldDown => {
+            // Pure field move inside edit form (triggered by arrows; letter j/k no longer do this).
+            // No auto commit/persist on arrow (uncommitted typing on a field is lost if you arrow away; hit Enter to commit+save a field).
             let buf = if let Some(sess) = &app.editing {
                 let c = sess.field_cursor + 1;
                 app.edit_field_value_at(&sess.target, c)
@@ -451,8 +466,8 @@ fn update(
             }
         }
         UiAction::SaveEditItem => {
-            let _ = app.save_edit_item();
-            // save_edit_item will set message and clear editing on success, or errors
+            // The (now un-bound in edit UI) Save action does full commit+persist and exits the edit form.
+            let _ = app.save_edit_item(true);
         }
         UiAction::SwitchTab(tab) => {
             app.tab = tab;
@@ -1175,7 +1190,7 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
         };
         let mut lines: Vec<String> = vec![
             title.clone(),
-            "=== EDIT FORM (j/k, type/BS, Enter=commit field, s=save, Esc) ===".into(),
+            "=== EDIT FORM (arrows fields | type/BS | Enter save | Esc) ===".into(),
         ];
         // Validation errors inline at top (after marker) so visible immediately, with !! cue for red styling.
         // This addresses "they have no validation" and "s it just fails" (user sees *why* before or on save).
@@ -1211,13 +1226,26 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
             }
         } else {
             // Block(0) rotation: use fixed stable order + user-friendly labels (hashmap iter order not guaranteed)
-            let keys_in_order = ["enabled", "interval", "internet"];
+            // Expose the *full* ChangeConfig (previously only 3 fields were wired for edit; now all so rotation is fully configurable).
+            let keys_in_order = [
+                "enabled",
+                "on_start",
+                "interval",
+                "internet",
+                "safe_mode",
+                "change_lock_screen",
+                "download_preference_ratio",
+            ];
             for k in keys_in_order {
                 if let Some(v) = sess.draft_block_values.get(k) {
                     let label = match k {
                         "enabled" => "Enabled",
+                        "on_start" => "On start",
                         "interval" => "Interval (seconds)",
                         "internet" => "Internet enabled",
+                        "safe_mode" => "Safe mode",
+                        "change_lock_screen" => "Change lock screen",
+                        "download_preference_ratio" => "Download preference ratio (0.0-1.0)",
                         _ => k,
                     };
                     fields.push((label.to_string(), v.clone()));
@@ -2274,10 +2302,31 @@ mod tests {
             KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty()),
         );
         assert!(matches!(p_action, UiAction::EditFieldChar('p')));
+        // j/k (letters) no longer perform field nav in edit mode (per request: rather than jk in edit, hit Esc first then j/k for main list/subnav navigation).
+        // Letters now type into the current field buffer (like other chars, to support queries/labels containing j/k).
+        // Arrows (Up/Down) remain for moving between fields inside the edit form.
+        let j_action = action_for_key(
+            &app,
+            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
+        );
+        assert!(
+            matches!(j_action, UiAction::EditFieldChar('j')),
+            "j in edit must be EditFieldChar (types into field), not field nav; Esc first then j/k to navigate list or sources subnav"
+        );
+        let k_action = action_for_key(
+            &app,
+            KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()),
+        );
+        assert!(matches!(k_action, UiAction::EditFieldChar('k')));
+        let down_action = action_for_key(&app, KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
+        assert!(
+            matches!(down_action, UiAction::EditFieldDown),
+            "Down arrow still moves to next field inside edit form"
+        );
         // other globals' *actions* disabled in edit (e.g. no tab switch, no quit);
         // instead Char(c) for most (incl '1','q','n' now) types into the field buffer (required to support
         // "type out all of the options" in forms for values containing digits/letters like queries, labels, urls).
-        // Enter/Esc are the explicit commit/cancel; s also allowed for full save.
+        // Enter now commits the field buffer AND persists/saves the config item (no separate 's'); Esc to exit edit form.
         let one_action = action_for_key(
             &app,
             KeyEvent::new(KeyCode::Char('1'), KeyModifiers::empty()),
@@ -2365,7 +2414,8 @@ mod tests {
         assert_eq!(qbuf_after_commit_and_return, "nature!", "after commit, returning to field must prefill buffer from draft state (which started from json config + edits), not stale live ctx");
 
         // Render exercises config_edit_form_lines which builds from draft (cloned from config json at start_edit)
-        let text = render_text(&app, 80, 24);
+        // Use taller height so that with possible !! errors section (from auto-persist on Commit in new UX) the later fields like Orientation are still in the captured buffer.
+        let text = render_text(&app, 80, 30);
         assert!(
             text.contains("Query: nature!"),
             "form must show updated draft value from json+edit; text: {}",
@@ -2436,7 +2486,7 @@ mod tests {
         // Drive rotation block edit (cursor 0)
         app.config_cursor = 0;
         app.start_edit_for_current();
-        let rot_text = render_text(&app, 80, 24);
+        let rot_text = render_text(&app, 80, 30);
         eprintln!(
             "=== SCREENSHOT: EDIT ROTATION BLOCK (before bool change) ===\n{}",
             rot_text
@@ -2446,6 +2496,25 @@ mod tests {
             rot_text.contains("Edit Rotation") || rot_text.contains("Rotation"),
             "rotation edit form must make target obvious; got head: {}",
             &rot_text[..rot_text.len().min(400)]
+        );
+        // TDD for full rotation fields: previously only enabled/interval/internet were in the block edit form
+        // (hardcoded in start_edit, form_lines, value_at, commit, save). All ChangeConfig fields should be editable
+        // (on_start, safe_mode, change_lock_screen, download_preference_ratio too) so user can configure the full rotation.
+        assert!(
+            rot_text.contains("On start") || rot_text.contains("on start"),
+            "rotation edit must list on_start (full rotation settings, not just 3)"
+        );
+        assert!(
+            rot_text.contains("Safe mode") || rot_text.contains("safe mode"),
+            "rotation edit must list safe_mode"
+        );
+        assert!(
+            rot_text.contains("Change lock screen") || rot_text.contains("lock screen"),
+            "rotation edit must list change_lock_screen"
+        );
+        assert!(
+            rot_text.contains("Download preference") || rot_text.contains("preference ratio"),
+            "rotation edit must list download_preference_ratio"
         );
 
         // Now drive source with label from real user config ("wallhaven space")
@@ -2479,23 +2548,23 @@ mod tests {
         for c in ['f', 'a', 'l', 's', 'e'] {
             update(&mut app, UiAction::EditFieldChar(c), rt.handle()).ok();
         }
-        // Now hit s directly (tests the auto-commit-on-save path that was added to prevent "s just fails")
-        update(&mut app, UiAction::SaveEditItem, rt.handle()).ok();
-        let after_save_msg = app.message.clone();
+        // Now hit Enter (commit field buffer + persist/save the config, keep in edit form so user can continue with other fields or Esc).
+        // This satisfies "type false and hit enter" to save without separate save key, and "enter ... should just save the config".
+        update(&mut app, UiAction::EditFieldCommit, rt.handle()).ok();
+        let after_enter_msg = app.message.clone();
         let still_editing = app.is_editing();
         eprintln!(
-            "=== AFTER BOOL TOGGLE + s: message='{}' still_editing={} ===",
-            after_save_msg, still_editing
+            "=== AFTER BOOL TOGGLE + Enter: message='{}' still_editing={} ===",
+            after_enter_msg, still_editing
         );
-        // The bool false change + direct s (auto commit) must have applied to draft (even if later atomic fs fails in tmp test harness).
-        // This proves "change true to false" + s no longer "just fails" due to buffer/draft/roundtrip issues.
+        // Must have persisted the change (draft has it; in real use the ctx would too after successful atomic).
+        // Editing stays open (Esc to leave the form for the item; no j/k letters for fields -- Esc first then j/k for list).
         let draft_enabled_false = app
             .editing
             .as_ref()
             .and_then(|s| s.draft_source.as_ref())
             .map(|d| !d.enabled)
             .unwrap_or_else(|| {
-                // if editing cleared, the save path may have succeeded to ctx.config
                 !app.ctx
                     .config
                     .sources
@@ -2505,11 +2574,14 @@ mod tests {
             });
         assert!(
             draft_enabled_false,
-            "after backspace+type 'false' + s (SaveEditItem which auto-commits), the draft or live must have enabled=false for the source; msg={}",
-            after_save_msg
+            "after backspace+type 'false' + Enter (commit + save), the draft must have enabled=false; msg={}",
+            after_enter_msg
         );
-        // Do not assert absence of all "fail" strings: tmp test ctx may hit fs "config file not found" on atomic inside save_edit_item;
-        // that is env, not a bool/parse/roundtrip failure. The content validate passed (we reached draft apply).
+        assert!(
+            still_editing,
+            "Enter on field in edit must keep the edit form open (persist the item but allow editing more fields of it); got still_editing=false"
+        );
+        // Do not assert absence of "fail" strings: in tmp test harness atomic save often hits "config file not found" (env), but draft apply and validate path succeeded.
 
         // Drive a validation error case and ensure it is visible inline at top of form (not just footer status, not buried at bottom)
         app.cancel_edit();
@@ -2519,7 +2591,7 @@ mod tests {
         app.start_edit_for_current();
         // Make a bad change that will fail strict validate_config on save (e.g. clear a required-ish or set bad type for wallhaven; simplest: empty the type for a source that needs it, or use invalid for block)
         // For source, "type" is editable; set to empty to trigger type-aware validation on save.
-        // Move cursor to "type" field (idx 1), clear it, commit, s
+        // Move cursor to "type" field (idx 1), clear it, commit (which now also saves/persists), then Save (exits edit) to drive the error render while errors are set.
         update(&mut app, UiAction::EditFieldDown, rt.handle()).ok(); // to type field
         for _ in 0..20 {
             update(&mut app, UiAction::EditFieldBackspace, rt.handle()).ok();
