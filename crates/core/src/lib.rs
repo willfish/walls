@@ -19,6 +19,7 @@ pub mod config;
 pub mod ctx;
 pub mod downloads;
 pub mod error;
+pub mod feeds;
 pub mod library;
 pub mod lock;
 pub mod paths;
