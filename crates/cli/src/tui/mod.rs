@@ -1,6 +1,7 @@
 mod app;
 #[cfg(feature = "tui-preview")]
 mod preview;
+mod sources_view;
 mod style;
 
 use std::io::{stdout, IsTerminal};
@@ -21,7 +22,7 @@ use ratatui::widgets::{Clear, List, ListItem, Paragraph, Tabs};
 use walls_core::apply::{
     backend_setting_label, summarize_apply_environment, ApplyEnvironmentSummary,
 };
-use walls_core::config::{reddit_summary, ApplyBackendSetting, CosmicMethod};
+use walls_core::config::{ApplyBackendSetting, CosmicMethod};
 use walls_core::WallsCtx;
 
 use std::io;
@@ -713,8 +714,7 @@ fn render_tab_body(
             if app.tab == Tab::Config && app.is_editing() {
                 render_rich_edit(f, area, app, theme, &edit_target_title(app));
             } else {
-                let (title, body) = (app.tab.title().to_string(), tab_lines(app, area.width));
-                render_lines(f, area, &title, body, theme);
+                render_tab_content(f, area, app, theme, area.width);
             }
         }
     }
@@ -732,9 +732,25 @@ fn render_tab_body(
     if app.tab == Tab::Config && app.is_editing() {
         render_rich_edit(f, area, app, theme, &edit_target_title(app));
     } else {
-        let (title, body) = (app.tab.title().to_string(), tab_lines(app, area.width));
-        render_lines(f, area, &title, body, theme);
+        render_tab_content(f, area, app, theme, area.width);
     }
+}
+
+fn render_tab_content(f: &mut Frame, area: Rect, app: &App, theme: style::Theme, width: u16) {
+    if app.tab == Tab::Config {
+        render_config_tab(f, area, app, theme);
+        return;
+    }
+    let (title, body) = (app.tab.title().to_string(), tab_lines(app, width));
+    render_lines(f, area, &title, body, theme);
+}
+
+fn render_config_tab(f: &mut Frame, area: Rect, app: &App, theme: style::Theme) {
+    let items = config_list_items(app, theme);
+    let list = List::new(items)
+        .block(theme.content_block("Config"))
+        .style(theme.normal());
+    f.render_widget(list, area);
 }
 
 fn tab_lines(app: &App, width: u16) -> Vec<String> {
@@ -751,15 +767,119 @@ fn tab_lines(app: &App, width: u16) -> Vec<String> {
 fn render_lines(f: &mut Frame, area: Rect, title: &str, body: Vec<String>, theme: style::Theme) {
     let items: Vec<ListItem> = body
         .iter()
-        .map(|line| {
-            let item_style = line_style(line, theme);
-            ListItem::new(line.as_str()).style(item_style)
-        })
+        .map(|line| string_list_item(line, theme))
         .collect();
     let list = List::new(items)
         .block(theme.content_block(title))
         .style(theme.normal());
     f.render_widget(list, area);
+}
+
+fn string_list_item(line: &str, theme: style::Theme) -> ListItem<'static> {
+    ListItem::new(line.to_string()).style(line_style(line, theme))
+}
+
+fn config_list_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
+    let mut items = Vec::new();
+    push_config_block_items(
+        &mut items,
+        0,
+        app.config_cursor,
+        "Rotation",
+        app.ctx.config.change.enabled,
+        format!(
+            "every {}s, {}, {:.0}% online",
+            app.ctx.config.change.interval_secs,
+            if app.ctx.config.change.internet_enabled {
+                "online"
+            } else {
+                "local only"
+            },
+            app.ctx.config.change.download_preference_ratio * 100.0
+        ),
+        rotation_details(app)
+            .into_iter()
+            .map(|line| string_list_item(&line, theme))
+            .collect(),
+        theme,
+    );
+
+    let sources = &app.ctx.config.sources;
+    let wallhaven_enabled = app.wallhaven_summary.enabled;
+    let sources_enabled = sources.iter().any(|s| s.enabled) || wallhaven_enabled;
+    let sources_details = if app.config_cursor == 1 {
+        sources_view::build_sources_list_items(app, theme, 4)
+    } else {
+        Vec::new()
+    };
+    push_config_block_items(
+        &mut items,
+        1,
+        app.config_cursor,
+        "Sources",
+        sources_enabled,
+        sources_view::sources_block_summary(app),
+        sources_details,
+        theme,
+    );
+
+    push_config_block_items(
+        &mut items,
+        2,
+        app.config_cursor,
+        "Library",
+        app.ctx.config.quota.enabled,
+        format!(
+            "{} queued, {} history, quota {}",
+            app.ctx.state.cache_queue.len(),
+            app.ctx.state.history.len(),
+            quota_summary(app)
+        ),
+        library_details(app)
+            .into_iter()
+            .map(|line| string_list_item(&line, theme))
+            .collect(),
+        theme,
+    );
+
+    push_config_block_items(
+        &mut items,
+        3,
+        app.config_cursor,
+        "Apply/display",
+        true,
+        format!(
+            "{} backend, {} mode, {}",
+            apply_block_backend_summary(app),
+            app.ctx.config.display.mode,
+            display_target_summary(app)
+        ),
+        apply_display_details(app)
+            .into_iter()
+            .map(|line| string_list_item(&line, theme))
+            .collect(),
+        theme,
+    );
+    items
+}
+
+fn push_config_block_items(
+    items: &mut Vec<ListItem<'static>>,
+    index: usize,
+    cursor: usize,
+    title: &str,
+    enabled: bool,
+    summary: String,
+    details: Vec<ListItem<'static>>,
+    theme: style::Theme,
+) {
+    let marker = if cursor == index { ">" } else { " " };
+    let state = if enabled { "on" } else { "off" };
+    let header = format!("{marker} [{state}] {title} - {summary}");
+    items.push(string_list_item(&header, theme));
+    if cursor == index {
+        items.extend(details);
+    }
 }
 
 fn footer_paragraph(app: &App, width: u16, theme: style::Theme) -> Paragraph<'_> {
@@ -875,21 +995,14 @@ fn config_lines(app: &App) -> Vec<String> {
     let sources = &app.ctx.config.sources;
     let wallhaven_enabled = app.wallhaven_summary.enabled;
     let sources_enabled = sources.iter().any(|s| s.enabled) || wallhaven_enabled;
-    let enabled_count =
-        sources.iter().filter(|s| s.enabled).count() + usize::from(wallhaven_enabled);
-    let sources_summary = format!(
-        "{} configured, {} enabled",
-        sources.len() + 1,
-        enabled_count
-    );
     push_config_block(
         &mut lines,
         1,
         app.config_cursor,
         "Sources",
         sources_enabled,
-        sources_summary,
-        sources_details(app),
+        sources_view::sources_block_summary(app),
+        sources_view::sources_detail_lines(app),
     );
     push_config_block(
         &mut lines,
@@ -970,69 +1083,6 @@ fn local_source_details(app: &App) -> Vec<String> {
         .collect()
 }
 
-fn sources_details(app: &App) -> Vec<String> {
-    let sources = &app.ctx.config.sources;
-    let in_sub = app.config_in_subnav && app.is_sources_list_block(app.config_cursor);
-    let sub_sel = if in_sub {
-        Some(app.config_sub_cursor)
-    } else {
-        None
-    };
-    let mut lines = Vec::new();
-    for (index, src) in sources.iter().enumerate() {
-        let state = if src.enabled { "on" } else { "off" };
-        let marker = if sub_sel == Some(index) { "> " } else { "  " };
-        if src.source_type == "reddit" {
-            lines.push(format!(
-                "{}{}. [{state}] Reddit - {}",
-                marker,
-                index + 1,
-                reddit_summary(src)
-            ));
-            continue;
-        }
-        let key = src
-            .path
-            .as_deref()
-            .or(src.url.as_deref())
-            .or(src.query.as_deref())
-            .unwrap_or("(no key)");
-        let label = src.label.as_deref().unwrap_or(&src.source_type);
-        lines.push(format!(
-            "{}{}. [{state}] {} ({}) - {}",
-            marker,
-            index + 1,
-            label,
-            src.source_type,
-            key
-        ));
-    }
-
-    let wallhaven_index = sources.len();
-    let wallhaven_state = if app.wallhaven_summary.enabled {
-        "on"
-    } else {
-        "off"
-    };
-    let marker = if sub_sel == Some(wallhaven_index) {
-        "> "
-    } else {
-        "  "
-    };
-    lines.push(format!(
-        "{}{}. [{wallhaven_state}] Wallhaven (wallhaven) - {}",
-        marker,
-        wallhaven_index + 1,
-        wallhaven_summary(app)
-    ));
-    if sub_sel == Some(wallhaven_index) {
-        for detail in wallhaven_details(app) {
-            lines.push(format!("      {detail}"));
-        }
-    }
-    lines
-}
-
 fn rotation_details(app: &App) -> Vec<String> {
     vec![
         format!("enabled: {}", app.ctx.config.change.enabled),
@@ -1046,94 +1096,6 @@ fn rotation_details(app: &App) -> Vec<String> {
             app.ctx.config.change.download_preference_ratio * 100.0
         ),
     ]
-}
-
-fn wallhaven_summary(app: &App) -> String {
-    let provider = &app.wallhaven_summary;
-    let online = if provider.internet_enabled {
-        "online on"
-    } else {
-        "online off"
-    };
-    let key = if provider.api_key_present {
-        "key"
-    } else {
-        "no key"
-    };
-    let collection_count = provider.collections.len();
-    let collection_label = if collection_count == 1 { "col" } else { "cols" };
-    format!(
-        "{online}, {key}, {collection_count} {collection_label}, q={}, pref={}",
-        short_query(&provider.query),
-        short_wallhaven_prefer(&provider.prefer)
-    )
-}
-
-fn short_wallhaven_prefer(prefer: &str) -> &str {
-    match prefer {
-        "CollectionsThenSearch" => "c+s",
-        "SearchOnly" => "search",
-        "CollectionsOnly" => "coll",
-        _ => prefer,
-    }
-}
-
-fn short_query(query: &str) -> String {
-    if query == "(empty query)" {
-        return "empty".into();
-    }
-
-    const MAX_QUERY_CHARS: usize = 24;
-    let mut chars = query.chars();
-    let short: String = chars.by_ref().take(MAX_QUERY_CHARS).collect();
-    if chars.next().is_some() {
-        format!("{short}...")
-    } else {
-        short
-    }
-}
-
-fn wallhaven_details(app: &App) -> Vec<String> {
-    let provider = &app.wallhaven_summary;
-    let key = if provider.api_key_present {
-        "present"
-    } else {
-        "missing"
-    };
-    let mut details = vec![
-        format!("enabled: {}", provider.enabled),
-        format!("api key: {key}"),
-        format!("prefer: {}", provider.prefer),
-        format!("search: q={}", provider.query),
-        format!(
-            "categories: {}",
-            app::format_wallhaven_categories(&provider.categories)
-        ),
-        format!(
-            "purity: {}",
-            app::format_wallhaven_purity(&provider.purity, provider.api_key_present)
-        ),
-        format!(
-            "sort: {} {} minimum {}",
-            provider.sorting, provider.order, provider.atleast
-        ),
-    ];
-
-    if provider.collections.is_empty() {
-        details.push("collections: none".into());
-    } else {
-        details.push(format!("collections: {}", provider.collections.len()));
-        details.extend(
-            provider
-                .collections
-                .iter()
-                .enumerate()
-                .map(|(index, collection)| format!("{}. {}", index + 1, collection)),
-        );
-    }
-
-    details.extend(provider.warnings.iter().cloned());
-    details
 }
 
 fn library_details(app: &App) -> Vec<String> {
@@ -1706,10 +1668,12 @@ mod tests {
 
         let text = render_text(&app, 80, 24);
 
-        assert!(text.contains("> [on] Sources"), "{text}");
-        // now rendered via sources_details (full providers list, including Wallhaven)
-        assert!(text.contains("1. [on]"), "{text}");
-        assert!(text.contains("2. [on] Wallhaven (wallhaven)"), "{text}");
+        assert!(
+            text.contains("> [on] Sources - 2 active · 2 total"),
+            "{text}"
+        );
+        assert!(text.contains("Local folder"), "{text}");
+        assert!(text.contains("Wallhaven"), "{text}");
         assert!(!text.contains("on start: false"), "{text}");
     }
 
@@ -1738,15 +1702,15 @@ mod tests {
 
         let text = render_text(&app, 120, 30);
 
-        // now Sources block uses full sources_details (no "candidates" in this view)
-        assert!(text.contains("7 configured, 6 enabled"), "{text}");
-        assert!(text.contains("1. [on] Favorites (favorites)"), "{text}");
-        assert!(text.contains("2. [on] Fetched (fetched)"), "{text}");
-        assert!(text.contains("3. [on] Wallpapers (folder)"), "{text}");
-        assert!(text.contains("4. [on] Single (image)"), "{text}");
-        assert!(text.contains("5. [off] Disabled (folder)"), "{text}");
-        assert!(text.contains("6. [on] Missing (folder)"), "{text}");
-        assert!(text.contains("7. [on] Wallhaven (wallhaven)"), "{text}");
+        assert!(text.contains("6 active · 7 total"), "{text}");
+        assert!(text.contains("Favorites"), "{text}");
+        assert!(text.contains("Fetched"), "{text}");
+        assert!(text.contains("Wallpapers"), "{text}");
+        assert!(text.contains("Single"), "{text}");
+        assert!(text.contains("Missing"), "{text}");
+        assert!(text.contains("Wallhaven"), "{text}");
+        assert!(!text.contains("Disabled"), "{text}");
+        assert!(text.contains("1 disabled source"), "{text}");
     }
 
     #[test]
@@ -1915,9 +1879,9 @@ mod tests {
         let text = render_text(&app, 42, 14);
 
         assert!(text.contains("Config"), "{text}");
-        assert!(text.contains("> 2. [on] Wallhaven"), "{text}");
+        assert!(text.contains("▸ Wallhaven"), "{text}");
         assert!(text.contains("enabled: true"), "{text}");
-        assert!(text.contains("Esc back | j/k | e edit"), "{text}");
+        assert!(text.contains("Esc back | j/k"), "{text}");
     }
 
     #[test]
@@ -1946,19 +1910,17 @@ mod tests {
 
         let text = render_text(&app, 120, 30);
 
-        assert!(
-            text.contains("> 1. [on] Wallhaven (wallhaven) - online on, no key, 1 col"),
-            "{text}"
-        );
+        assert!(text.contains("▸ Wallhaven"), "{text}");
+        assert!(text.contains("query mountains"), "{text}");
         assert!(text.contains("api key: missing"), "{text}");
-        assert!(text.contains("search: q=mountains"), "{text}");
+        assert!(text.contains("search query: mountains"), "{text}");
         assert!(text.contains("categories: general, people"), "{text}");
         assert!(text.contains("purity: SFW"), "{text}");
         assert!(
             text.contains("sort: toplist desc minimum 2560x1440"),
             "{text}"
         );
-        assert!(text.contains("1. Abstract: alice/42"), "{text}");
+        assert!(text.contains("Abstract: alice/42"), "{text}");
         assert!(
             text.contains("warning: API key missing; search and downloads are unavailable"),
             "{text}"
@@ -1984,13 +1946,11 @@ mod tests {
 
         let text = render_text(&app, 120, 30);
 
-        assert!(
-            text.contains("> 1. [on] Wallhaven (wallhaven) - online on, key"),
-            "{text}"
-        );
+        assert!(text.contains("▸ Wallhaven"), "{text}");
+        assert!(text.contains("API key"), "{text}");
         assert!(text.contains("api key: present"), "{text}");
-        assert!(text.contains("prefer: SearchOnly"), "{text}");
-        assert!(text.contains("search: q=forest"), "{text}");
+        assert!(text.contains("prefer: search only"), "{text}");
+        assert!(text.contains("search query: forest"), "{text}");
         assert!(
             text.contains("categories: general, anime, people"),
             "{text}"
@@ -2024,7 +1984,8 @@ mod tests {
         app.reload_ctx().expect("reload");
 
         let text = render_text(&app, 120, 30);
-        assert!(text.contains("> 1. [off] Wallhaven (wallhaven)"), "{text}");
+        assert!(text.contains("▸ Wallhaven"), "{text}");
+        assert!(text.contains(" off · "), "{text}");
         assert!(text.contains("enabled: false"), "{text}");
     }
 
@@ -2734,14 +2695,13 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().expect("rt");
         update(&mut app, UiAction::MoveDown, rt.handle()).ok();
         let text = render_text(&app, 80, 24);
-        // should highlight the selected sub with >
         assert!(
-            text.contains("> 2. [off] the one (json)"),
-            "sub item should be highlighted with > marker; got: {}",
+            text.contains("▸ the one"),
+            "sub item should be highlighted with marker; got: {}",
             text
         );
         assert!(
-            !text.contains("> 1. [on] folder"),
+            !text.contains("▸ Local folder"),
             "only selected sub highlighted"
         );
     }
