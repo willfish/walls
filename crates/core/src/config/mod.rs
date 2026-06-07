@@ -10,7 +10,9 @@ mod reddit;
 mod unsplash;
 mod wallhaven;
 
-pub use apply::{ApplyBackendSetting, ApplyConfig, CosmicApplyConfig, CosmicMethod};
+pub use apply::{
+    ApplyBackendSetting, ApplyConfig, CosmicApplyConfig, CosmicBackgroundEntryConfig, CosmicMethod,
+};
 pub use display::{DisplayConfig, DisplayFiltersConfig, ImageMagickFilterConfig};
 pub use reddit::{
     normalize_reddit_source, reddit_listing_url, reddit_sort_needs_time, reddit_sort_value,

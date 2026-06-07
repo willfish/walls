@@ -24,7 +24,11 @@
     "cosmic": {
       "method": "cosmic-config",
       "config_path": "~/.config/cosmic/com.system76.CosmicBackground/v1/all",
-      "use_original_path": false
+      "use_original_path": false,
+      "entry": {
+        "rotation_frequency": 0,
+        "filter_by_theme": false
+      }
     },
     "custom_script": null
   },

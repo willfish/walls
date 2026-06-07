@@ -9,7 +9,7 @@ mod summary;
 mod wlroots;
 mod xfce;
 
-pub use cosmic::{patch_wallpaper_path, CosmicConfigApplier};
+pub use cosmic::{patch_cosmic_background, patch_wallpaper_path, CosmicConfigApplier};
 pub use detect::{detect_desktop, detect_desktop_from_env, Desktop};
 pub use feh_nitrogen::FehNitrogenApplier;
 pub use fill_mode::{ApplyTrigger, FillMode};
