@@ -220,8 +220,10 @@ mod tests {
 
     #[test]
     fn explicit_backend_skips_auto_resolution() {
-        let mut apply = ApplyConfig::default();
-        apply.backend = ApplyBackendSetting::CustomScript;
+        let apply = ApplyConfig {
+            backend: ApplyBackendSetting::CustomScript,
+            ..ApplyConfig::default()
+        };
         let summary = ApplyEnvironmentSummary::from_env(&apply, Some("COSMIC".into()), None, None);
         assert_eq!(summary.resolved_backend, ApplyBackendSetting::CustomScript);
         assert!(!summary.uses_feh_fallback);
