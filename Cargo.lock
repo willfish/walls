@@ -3876,6 +3876,7 @@ name = "walls-tray"
 version = "0.8.0"
 dependencies = [
  "anyhow",
+ "fs2",
  "image",
  "tempfile",
  "tracing",
