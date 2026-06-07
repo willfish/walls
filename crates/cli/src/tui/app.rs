@@ -114,6 +114,7 @@ pub(crate) const ROTATION_BLOCK_FIELDS: &[&str] = &[
 ];
 
 pub(crate) const WALLHAVEN_BLOCK_FIELDS: &[&str] = &[
+    "enabled",
     "prefer",
     "search_q",
     "category_general",
@@ -202,6 +203,7 @@ fn wallhaven_block_draft(
 ) -> std::collections::HashMap<String, String> {
     let search = &config.wallhaven.search;
     let mut vals = std::collections::HashMap::new();
+    vals.insert("enabled".into(), config.wallhaven.enabled.to_string());
     vals.insert(
         "prefer".into(),
         wallhaven_prefer_label(config.wallhaven.prefer),
@@ -271,6 +273,7 @@ pub(crate) fn block_field_label(block: usize, key: &str) -> String {
             other => other.into(),
         },
         2 => match key {
+            "enabled" => "Enabled".into(),
             "prefer" => "Prefer".into(),
             "search_q" => "Search query".into(),
             "category_general" => "Category: General".into(),
@@ -297,6 +300,7 @@ pub(crate) fn block_field_kind(block: usize, key: &str) -> EditFieldKind {
             _ => EditFieldKind::Text,
         },
         2 => match key {
+            "enabled" => EditFieldKind::Bool,
             "prefer" => EditFieldKind::Choice(&[
                 "collections_then_search",
                 "search_only",
@@ -441,6 +445,7 @@ fn block_field_value_at(
             _ => String::new(),
         },
         2 => match *key {
+            "enabled" => config.wallhaven.enabled.to_string(),
             "prefer" => wallhaven_prefer_label(config.wallhaven.prefer),
             "search_q" => config.wallhaven.search.q.clone(),
             "category_general" => {
@@ -523,6 +528,9 @@ fn apply_wallhaven_block_draft(
     draft: &std::collections::HashMap<String, String>,
     api_key_present: bool,
 ) {
+    if let Some(v) = draft.get("enabled") {
+        config.wallhaven.enabled = App::parse_bool_like(v).unwrap_or(config.wallhaven.enabled);
+    }
     if let Some(v) = draft.get("prefer") {
         if let Some(prefer) = parse_wallhaven_prefer(v) {
             config.wallhaven.prefer = prefer;
@@ -612,6 +620,7 @@ pub struct LocalSourceSummary {
 }
 
 pub struct WallhavenProviderSummary {
+    pub enabled: bool,
     pub internet_enabled: bool,
     pub api_key_present: bool,
     pub prefer: String,
@@ -623,12 +632,6 @@ pub struct WallhavenProviderSummary {
     pub order: String,
     pub atleast: String,
     pub warnings: Vec<String>,
-}
-
-impl WallhavenProviderSummary {
-    pub fn usable(&self) -> bool {
-        self.internet_enabled && self.api_key_present
-    }
 }
 
 pub struct App {
@@ -993,6 +996,17 @@ impl App {
 
     pub fn toggle_focused_config_value(&mut self) -> anyhow::Result<Option<String>> {
         let mut config = self.ctx.config.clone();
+        if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
+            let idx = self.config_sub_cursor;
+            if self.is_wallhaven_subnav_index(idx) {
+                config.wallhaven.enabled = !config.wallhaven.enabled;
+                save_config_atomic(&self.ctx.paths.config_file, &config)?;
+                return Ok(Some(format!(
+                    "config saved: wallhaven enabled={}",
+                    config.wallhaven.enabled
+                )));
+            }
+        }
         let message = match self.config_cursor {
             0 => {
                 config.change.enabled = !config.change.enabled;
@@ -1862,6 +1876,7 @@ fn summarize_wallhaven_provider(ctx: &WallsCtx) -> WallhavenProviderSummary {
     }
 
     WallhavenProviderSummary {
+        enabled: ctx.config.wallhaven.enabled,
         internet_enabled: ctx.config.change.internet_enabled,
         api_key_present,
         prefer: format!("{:?}", ctx.config.wallhaven.prefer),

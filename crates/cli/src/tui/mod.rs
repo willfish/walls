@@ -835,7 +835,7 @@ fn config_lines(app: &App) -> Vec<String> {
     );
     // Sources block lists configured providers plus Wallhaven (nested edit with j/k pick + e)
     let sources = &app.ctx.config.sources;
-    let wallhaven_enabled = app.wallhaven_summary.usable();
+    let wallhaven_enabled = app.wallhaven_summary.enabled;
     let sources_enabled = sources.iter().any(|s| s.enabled) || wallhaven_enabled;
     let enabled_count =
         sources.iter().filter(|s| s.enabled).count() + usize::from(wallhaven_enabled);
@@ -971,7 +971,7 @@ fn sources_details(app: &App) -> Vec<String> {
     }
 
     let wallhaven_index = sources.len();
-    let wallhaven_state = if app.wallhaven_summary.usable() {
+    let wallhaven_state = if app.wallhaven_summary.enabled {
         "on"
     } else {
         "off"
@@ -1063,6 +1063,7 @@ fn wallhaven_details(app: &App) -> Vec<String> {
         "missing"
     };
     let mut details = vec![
+        format!("enabled: {}", provider.enabled),
         format!("api key: {key}"),
         format!("prefer: {}", provider.prefer),
         format!("search: q={}", provider.query),
@@ -1670,7 +1671,7 @@ mod tests {
         assert!(text.contains("> [on] Sources"), "{text}");
         // now rendered via sources_details (full providers list, including Wallhaven)
         assert!(text.contains("1. [on]"), "{text}");
-        assert!(text.contains("2. [off] Wallhaven (wallhaven)"), "{text}");
+        assert!(text.contains("2. [on] Wallhaven (wallhaven)"), "{text}");
         assert!(!text.contains("on start: false"), "{text}");
     }
 
@@ -1700,14 +1701,14 @@ mod tests {
         let text = render_text(&app, 120, 30);
 
         // now Sources block uses full sources_details (no "candidates" in this view)
-        assert!(text.contains("7 configured, 5 enabled"), "{text}");
+        assert!(text.contains("7 configured, 6 enabled"), "{text}");
         assert!(text.contains("1. [on] Favorites (favorites)"), "{text}");
         assert!(text.contains("2. [on] Fetched (fetched)"), "{text}");
         assert!(text.contains("3. [on] Wallpapers (folder)"), "{text}");
         assert!(text.contains("4. [on] Single (image)"), "{text}");
         assert!(text.contains("5. [off] Disabled (folder)"), "{text}");
         assert!(text.contains("6. [on] Missing (folder)"), "{text}");
-        assert!(text.contains("7. [off] Wallhaven (wallhaven)"), "{text}");
+        assert!(text.contains("7. [on] Wallhaven (wallhaven)"), "{text}");
     }
 
     #[test]
@@ -1876,8 +1877,8 @@ mod tests {
         let text = render_text(&app, 42, 14);
 
         assert!(text.contains("Config"), "{text}");
-        assert!(text.contains("> 2. [off] Wallhaven"), "{text}");
-        assert!(text.contains("api key: missing"), "{text}");
+        assert!(text.contains("> 2. [on] Wallhaven"), "{text}");
+        assert!(text.contains("enabled: true"), "{text}");
         assert!(text.contains("Esc back | j/k | e edit"), "{text}");
     }
 
@@ -1908,7 +1909,7 @@ mod tests {
         let text = render_text(&app, 120, 30);
 
         assert!(
-            text.contains("> 1. [off] Wallhaven (wallhaven) - online on, no key, 1 col"),
+            text.contains("> 1. [on] Wallhaven (wallhaven) - online on, no key, 1 col"),
             "{text}"
         );
         assert!(text.contains("api key: missing"), "{text}");
@@ -1963,6 +1964,30 @@ mod tests {
             "{text}"
         );
         assert!(!text.contains("super-secret-token"), "{text}");
+    }
+
+    #[test]
+    fn wallhaven_subnav_t_key_toggles_enabled() {
+        let mut app = test_app_with_wallhaven(
+            true,
+            serde_json::json!({
+                "enabled": true,
+                "search": { "q": "forest", "purity": "100" }
+            }),
+            serde_json::json!({ "wallhaven_api_key": "key" }),
+        );
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = app.ctx.config.sources.len();
+
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+        update(&mut app, UiAction::ToggleConfigValue, rt.handle())
+            .expect("toggle wallhaven enabled");
+        app.reload_ctx().expect("reload");
+
+        let text = render_text(&app, 120, 30);
+        assert!(text.contains("> 1. [off] Wallhaven (wallhaven)"), "{text}");
+        assert!(text.contains("enabled: false"), "{text}");
     }
 
     #[test]
@@ -2063,7 +2088,7 @@ mod tests {
 
         // Navigate to NSFW field (index 7) and try toggling — should stay unavailable.
         let rt = tokio::runtime::Runtime::new().expect("rt");
-        for _ in 0..7 {
+        for _ in 0..8 {
             update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
         }
         update(
@@ -2095,8 +2120,8 @@ mod tests {
         app.start_edit_for_current();
         let rt = tokio::runtime::Runtime::new().expect("rt");
 
-        // sorting follows prefer, search_q, and six category/purity toggles
-        for _ in 0..8 {
+        // sorting follows enabled, prefer, search_q, and six category/purity toggles
+        for _ in 0..9 {
             update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
         }
         assert_eq!(

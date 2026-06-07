@@ -166,6 +166,11 @@ fn wallhaven_descriptor_preserves_existing_enablement_rules() {
 
     secrets.wallhaven_api_key.clear();
     assert!(!wallhaven_provider(&test_config(true), &secrets).enabled);
+
+    secrets.wallhaven_api_key = "key".into();
+    let mut config = test_config(true);
+    config.wallhaven.enabled = false;
+    assert!(!wallhaven_provider(&config, &secrets).enabled);
 }
 
 #[test]

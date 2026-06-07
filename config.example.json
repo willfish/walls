@@ -125,6 +125,7 @@
     }
   ],
   "wallhaven": {
+    "enabled": true,
     "collections": [],
     "search": {
       "q": "",

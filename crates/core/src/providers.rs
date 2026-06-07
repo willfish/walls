@@ -100,7 +100,9 @@ pub fn wallhaven_provider(config: &Config, secrets: &Secrets) -> ProviderDescrip
     ProviderDescriptor {
         id: "wallhaven".into(),
         kind: ProviderKind::Wallhaven,
-        enabled: config.change.internet_enabled && !secrets.wallhaven_api_key.is_empty(),
+        enabled: config.wallhaven.enabled
+            && config.change.internet_enabled
+            && !secrets.wallhaven_api_key.is_empty(),
         capabilities: capabilities_for_kind(ProviderKind::Wallhaven),
     }
 }
