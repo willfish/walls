@@ -105,9 +105,7 @@ pub fn run(startup_message: Option<String>, tray_owns_rotation: bool) -> anyhow:
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
     let _restore = TerminalRestore;
 
-    let mut app = App::new(WallsCtx::load().context(
-        "failed to load ~/.config/walls/config.json — copy config.example.json to get started",
-    )?)?;
+    let mut app = App::new(WallsCtx::load().context("failed to load walls config")?)?;
     if let Some(message) = startup_message {
         app.message = message;
     }
@@ -835,18 +833,17 @@ fn config_lines(app: &App) -> Vec<String> {
         ),
         rotation_details(app),
     );
-    // Sources block now lists *all* providers (for nested edit with j/k pick + e)
+    // Sources block lists configured providers plus Wallhaven (nested edit with j/k pick + e)
     let sources = &app.ctx.config.sources;
-    let sources_enabled = sources.iter().any(|s| s.enabled);
-    let sources_summary = if sources.is_empty() {
-        "no sources configured".to_string()
-    } else {
-        format!(
-            "{} configured, {} enabled",
-            sources.len(),
-            sources.iter().filter(|s| s.enabled).count()
-        )
-    };
+    let wallhaven_enabled = app.wallhaven_summary.usable();
+    let sources_enabled = sources.iter().any(|s| s.enabled) || wallhaven_enabled;
+    let enabled_count =
+        sources.iter().filter(|s| s.enabled).count() + usize::from(wallhaven_enabled);
+    let sources_summary = format!(
+        "{} configured, {} enabled",
+        sources.len() + 1,
+        enabled_count
+    );
     push_config_block(
         &mut lines,
         1,
@@ -860,15 +857,6 @@ fn config_lines(app: &App) -> Vec<String> {
         &mut lines,
         2,
         app.config_cursor,
-        "Wallhaven",
-        app.wallhaven_summary.usable(),
-        wallhaven_summary(app),
-        wallhaven_details(app),
-    );
-    push_config_block(
-        &mut lines,
-        3,
-        app.config_cursor,
         "Library",
         app.ctx.config.quota.enabled,
         format!(
@@ -881,7 +869,7 @@ fn config_lines(app: &App) -> Vec<String> {
     );
     push_config_block(
         &mut lines,
-        4,
+        3,
         app.config_cursor,
         "Apply/display",
         true,
@@ -946,38 +934,56 @@ fn local_source_details(app: &App) -> Vec<String> {
 
 fn sources_details(app: &App) -> Vec<String> {
     let sources = &app.ctx.config.sources;
-    if sources.is_empty() {
-        return vec!["no sources configured".into()];
-    }
     let in_sub = app.config_in_subnav && app.is_sources_list_block(app.config_cursor);
     let sub_sel = if in_sub {
         Some(app.config_sub_cursor)
     } else {
         None
     };
-    sources
-        .iter()
-        .enumerate()
-        .map(|(index, src)| {
-            let state = if src.enabled { "on" } else { "off" };
-            let key = src
-                .path
-                .as_deref()
-                .or(src.url.as_deref())
-                .or(src.query.as_deref())
-                .unwrap_or("(no key)");
-            let label = src.label.as_deref().unwrap_or(&src.source_type);
-            let marker = if sub_sel == Some(index) { "> " } else { "  " };
-            format!(
-                "{}{}. [{state}] {} ({}) - {}",
-                marker,
-                index + 1,
-                label,
-                src.source_type,
-                key
-            )
-        })
-        .collect()
+    let mut lines = Vec::new();
+    for (index, src) in sources.iter().enumerate() {
+        let state = if src.enabled { "on" } else { "off" };
+        let key = src
+            .path
+            .as_deref()
+            .or(src.url.as_deref())
+            .or(src.query.as_deref())
+            .unwrap_or("(no key)");
+        let label = src.label.as_deref().unwrap_or(&src.source_type);
+        let marker = if sub_sel == Some(index) { "> " } else { "  " };
+        lines.push(format!(
+            "{}{}. [{state}] {} ({}) - {}",
+            marker,
+            index + 1,
+            label,
+            src.source_type,
+            key
+        ));
+    }
+
+    let wallhaven_index = sources.len();
+    let wallhaven_state = if app.wallhaven_summary.usable() {
+        "on"
+    } else {
+        "off"
+    };
+    let marker = if sub_sel == Some(wallhaven_index) {
+        "> "
+    } else {
+        "  "
+    };
+    lines.push(format!(
+        "{}{}. [{wallhaven_state}] Wallhaven (wallhaven) - {}",
+        marker,
+        wallhaven_index + 1,
+        wallhaven_summary(app)
+    ));
+    if sub_sel == Some(wallhaven_index) {
+        for detail in wallhaven_details(app) {
+            lines.push(format!("      {detail}"));
+        }
+    }
+    lines
 }
 
 fn rotation_details(app: &App) -> Vec<String> {
@@ -1216,7 +1222,7 @@ fn edit_target_title(app: &App) -> String {
     if let Some(sess) = &app.editing {
         match &sess.target {
             EditTarget::Block(0) => "Edit Rotation".to_string(),
-            EditTarget::Block(2) => "Edit Wallhaven".to_string(),
+            EditTarget::Wallhaven => "Edit Wallhaven".to_string(),
             EditTarget::Block(b) => format!("Edit block {}", b),
             EditTarget::Source(i) => {
                 if let Some(ref src) = sess.draft_source {
@@ -1274,43 +1280,51 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
                 let v = app::App::get_source_field(src, &name);
                 fields.push((label, v, app::source_field_kind(&name)));
             }
+        } else if let EditTarget::Wallhaven = &sess.target {
+            for k in app::WALLHAVEN_BLOCK_FIELDS {
+                if let Some(v) = sess.draft_block_values.get(*k) {
+                    let label = if *k == "purity_nsfw" && !app.wallhaven_block_field_locked(k) {
+                        "Purity: NSFW".to_string()
+                    } else {
+                        app::block_field_label(app::WALLHAVEN_FIELDS_BLOCK, k)
+                    };
+                    fields.push((
+                        label,
+                        v.clone(),
+                        app::block_field_kind(app::WALLHAVEN_FIELDS_BLOCK, k),
+                    ));
+                }
+            }
+            fields.push((
+                "API key".into(),
+                "(edit ~/.config/walls/secrets.json)".into(),
+                app::EditFieldKind::Text,
+            ));
+            fields.push((
+                "Collections".into(),
+                "(edit config.json for now)".into(),
+                app::EditFieldKind::Text,
+            ));
         } else if let EditTarget::Block(block) = &sess.target {
             let keys = match block {
                 0 => app::ROTATION_BLOCK_FIELDS,
-                2 => app::WALLHAVEN_BLOCK_FIELDS,
                 _ => &[],
             };
             for k in keys {
                 if let Some(v) = sess.draft_block_values.get(*k) {
-                    let label = if *block == 2
-                        && *k == "purity_nsfw"
-                        && !app.wallhaven_block_field_locked(k)
-                    {
-                        "Purity: NSFW".to_string()
-                    } else {
-                        app::block_field_label(*block, k)
-                    };
-                    fields.push((label, v.clone(), app::block_field_kind(*block, k)));
+                    fields.push((
+                        app::block_field_label(*block, k),
+                        v.clone(),
+                        app::block_field_kind(*block, k),
+                    ));
                 }
-            }
-            if *block == 2 {
-                fields.push((
-                    "API key".into(),
-                    "(edit ~/.config/walls/secrets.json)".into(),
-                    app::EditFieldKind::Text,
-                ));
-                fields.push((
-                    "Collections".into(),
-                    "(edit config.json for now)".into(),
-                    app::EditFieldKind::Text,
-                ));
             }
         }
         // Right-aligned labels within a capped column for a tight, modern form look (avoids huge gaps on short labels like "Type").
         // Values stay in a clean column. Cap prevents sparse layout on small forms.
         let max_label = fields.iter().map(|(l, _, _)| l.len()).max().unwrap_or(0);
         let pad = std::cmp::min(max_label, 28);
-        let wallhaven_keys = if let EditTarget::Block(2) = &sess.target {
+        let wallhaven_keys = if matches!(&sess.target, EditTarget::Wallhaven) {
             app::WALLHAVEN_BLOCK_FIELDS
         } else {
             &[] as &[&str]
@@ -1606,7 +1620,7 @@ mod tests {
         assert!(text.contains("Config"), "{text}");
         assert!(text.contains("> [on] Rotation"), "{text}");
         assert!(text.contains("  [on] Sources"), "{text}");
-        assert!(text.contains("  [off] Wallhaven"), "{text}");
+        assert!(!text.contains("  [off] Wallhaven"), "{text}");
         assert!(text.contains("  [on] Library"), "{text}");
         assert!(text.contains("  [on] Apply/display"), "{text}");
         assert!(text.contains("on start: false"), "{text}");
@@ -1627,8 +1641,9 @@ mod tests {
         let text = render_text(&app, 80, 24);
 
         assert!(text.contains("> [on] Sources"), "{text}");
-        // now rendered via sources_details (full providers list)
+        // now rendered via sources_details (full providers list, including Wallhaven)
         assert!(text.contains("1. [on]"), "{text}");
+        assert!(text.contains("2. [off] Wallhaven (wallhaven)"), "{text}");
         assert!(!text.contains("on start: false"), "{text}");
     }
 
@@ -1658,13 +1673,14 @@ mod tests {
         let text = render_text(&app, 120, 30);
 
         // now Sources block uses full sources_details (no "candidates" in this view)
-        assert!(text.contains("6 configured, 5 enabled"), "{text}");
+        assert!(text.contains("7 configured, 5 enabled"), "{text}");
         assert!(text.contains("1. [on] Favorites (favorites)"), "{text}");
         assert!(text.contains("2. [on] Fetched (fetched)"), "{text}");
         assert!(text.contains("3. [on] Wallpapers (folder)"), "{text}");
         assert!(text.contains("4. [on] Single (image)"), "{text}");
         assert!(text.contains("5. [off] Disabled (folder)"), "{text}");
         assert!(text.contains("6. [on] Missing (folder)"), "{text}");
+        assert!(text.contains("7. [off] Wallhaven (wallhaven)"), "{text}");
     }
 
     #[test]
@@ -1730,7 +1746,7 @@ mod tests {
             }),
             serde_json::json!({}),
         );
-        app.config_cursor = 3;
+        app.config_cursor = 2;
 
         let text = render_text(&app, 120, 32);
 
@@ -1787,7 +1803,7 @@ mod tests {
             }),
             serde_json::json!({}),
         );
-        app.config_cursor = 4;
+        app.config_cursor = 3;
 
         let text = render_text(&app, 120, 34);
 
@@ -1826,14 +1842,16 @@ mod tests {
     #[test]
     fn narrow_config_screen_keeps_focused_block_and_navigation_visible() {
         let mut app = test_app();
-        app.config_cursor = 2;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = app.ctx.config.sources.len();
 
         let text = render_text(&app, 42, 14);
 
         assert!(text.contains("Config"), "{text}");
-        assert!(text.contains("> [off] Wallhaven"), "{text}");
+        assert!(text.contains("> 2. [off] Wallhaven"), "{text}");
         assert!(text.contains("api key: missing"), "{text}");
-        assert!(text.contains("j/k | Enter sub | e edit"), "{text}");
+        assert!(text.contains("Esc back | j/k | e edit"), "{text}");
     }
 
     #[test]
@@ -1856,12 +1874,14 @@ mod tests {
             }),
             serde_json::json!({}),
         );
-        app.config_cursor = 2;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = app.ctx.config.sources.len();
 
         let text = render_text(&app, 120, 30);
 
         assert!(
-            text.contains("> [off] Wallhaven - online on, no key, 1 col"),
+            text.contains("> 1. [off] Wallhaven (wallhaven) - online on, no key, 1 col"),
             "{text}"
         );
         assert!(text.contains("api key: missing"), "{text}");
@@ -1892,11 +1912,16 @@ mod tests {
             }),
             serde_json::json!({ "wallhaven_api_key": "super-secret-token" }),
         );
-        app.config_cursor = 2;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = app.ctx.config.sources.len();
 
         let text = render_text(&app, 120, 30);
 
-        assert!(text.contains("> [on] Wallhaven - online on, key"), "{text}");
+        assert!(
+            text.contains("> 1. [on] Wallhaven (wallhaven) - online on, key"),
+            "{text}"
+        );
         assert!(text.contains("api key: present"), "{text}");
         assert!(text.contains("prefer: SearchOnly"), "{text}");
         assert!(text.contains("search: q=forest"), "{text}");
@@ -1931,7 +1956,9 @@ mod tests {
             serde_json::json!({ "wallhaven_api_key": "key" }),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 2;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = app.ctx.config.sources.len();
         app.start_edit_for_current();
 
         let text = render_text(&app, 120, 32);
@@ -1998,7 +2025,9 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 2;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = app.ctx.config.sources.len();
         app.start_edit_for_current();
 
         let text = render_text(&app, 120, 36);
@@ -2036,7 +2065,9 @@ mod tests {
             serde_json::json!({ "wallhaven_api_key": "key" }),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 2;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = app.ctx.config.sources.len();
         app.start_edit_for_current();
         let rt = tokio::runtime::Runtime::new().expect("rt");
 
@@ -2275,7 +2306,7 @@ mod tests {
     fn config_cycle_persists_enum_like_value_and_reloads_context() {
         let mut app = test_app();
         let rt = tokio::runtime::Runtime::new().expect("runtime");
-        app.config_cursor = 3;
+        app.config_cursor = 2;
         app.tab = Tab::Config;
 
         assert_eq!(

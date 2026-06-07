@@ -69,7 +69,11 @@ pub enum InputMode {
 pub enum EditTarget {
     Block(usize),
     Source(usize),
+    Wallhaven,
 }
+
+/// Internal block index for shared Wallhaven field metadata helpers.
+pub(crate) const WALLHAVEN_FIELDS_BLOCK: usize = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EditFieldKind {
@@ -656,6 +660,7 @@ impl App {
         Ok(app)
     }
 
+    /// Reload config/state from disk. Recreates `config.json` with defaults if it was removed.
     pub fn reload_ctx(&mut self) -> anyhow::Result<()> {
         let paths = self.ctx.paths.clone();
         self.ctx = WallsCtx::load_with_paths(paths)?;
@@ -678,12 +683,20 @@ impl App {
         Ok(())
     }
 
+    pub fn sources_subnav_len(&self) -> usize {
+        self.ctx.config.sources.len() + 1
+    }
+
+    pub fn is_wallhaven_subnav_index(&self, idx: usize) -> bool {
+        idx == self.ctx.config.sources.len()
+    }
+
     pub fn move_down(&mut self) {
         if self.tab == Tab::Config
             && self.config_in_subnav
             && self.is_sources_list_block(self.config_cursor)
         {
-            let len = self.ctx.config.sources.len();
+            let len = self.sources_subnav_len();
             if len > 0 {
                 self.config_sub_cursor = (self.config_sub_cursor + 1).min(len - 1);
             }
@@ -736,7 +749,7 @@ impl App {
         match self.tab {
             Tab::Config => {
                 if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
-                    self.ctx.config.sources.len()
+                    self.sources_subnav_len()
                 } else {
                     Self::config_block_count()
                 }
@@ -750,7 +763,7 @@ impl App {
     }
 
     pub fn config_block_count() -> usize {
-        5
+        4
     }
 
     fn active_cursor_mut(&mut self) -> &mut usize {
@@ -940,11 +953,11 @@ impl App {
                 config.change.enabled = !config.change.enabled;
                 format!("config saved: rotation enabled={}", config.change.enabled)
             }
-            3 => {
+            2 => {
                 config.quota.enabled = !config.quota.enabled;
                 format!("config saved: quota enabled={}", config.quota.enabled)
             }
-            4 => {
+            3 => {
                 config.display.auto_rotate = !config.display.auto_rotate;
                 format!("config saved: auto rotate={}", config.display.auto_rotate)
             }
@@ -958,7 +971,7 @@ impl App {
     pub fn cycle_focused_config_value(&mut self) -> anyhow::Result<Option<String>> {
         let mut config = self.ctx.config.clone();
         let message = match self.config_cursor {
-            3 => {
+            2 => {
                 config.selection.strategy = match config.selection.strategy {
                     SelectionStrategy::Random => SelectionStrategy::Sequential,
                     SelectionStrategy::Sequential => SelectionStrategy::Random,
@@ -980,6 +993,26 @@ impl App {
         // Support subnav for Sources block: if in subnav, target the sub item
         if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
             let idx = self.config_sub_cursor;
+            if self.is_wallhaven_subnav_index(idx) {
+                let session = EditSession {
+                    target: EditTarget::Wallhaven,
+                    draft_source: None,
+                    draft_block_values: wallhaven_block_draft(
+                        &self.ctx.config,
+                        wallhaven_api_key_present(&self.ctx.secrets),
+                    ),
+                    field_cursor: 0,
+                    field_buffer: String::new(),
+                    validation_errors: vec![],
+                };
+                self.editing = Some(session);
+                let new_buf = self.current_edit_field_value();
+                if let Some(s) = &mut self.editing {
+                    s.field_buffer = new_buf;
+                }
+                self.message.clear();
+                return;
+            }
             if idx < self.ctx.config.sources.len() {
                 let target = EditTarget::Source(idx);
                 let session = EditSession {
@@ -1025,7 +1058,7 @@ impl App {
                 field_buffer: String::new(),
                 validation_errors: vec![],
             },
-            EditTarget::Block(2) => EditSession {
+            EditTarget::Wallhaven => EditSession {
                 target: target.clone(),
                 draft_source: None,
                 draft_block_values: wallhaven_block_draft(
@@ -1069,11 +1102,9 @@ impl App {
                     .unwrap_or(&self.ctx.config.sources[*i]);
                 Self::source_editable_fields(src).len()
             }
-            EditTarget::Block(block) => match block {
-                0 => ROTATION_BLOCK_FIELDS.len(),
-                2 => WALLHAVEN_BLOCK_FIELDS.len(),
-                _ => 0,
-            },
+            EditTarget::Block(0) => ROTATION_BLOCK_FIELDS.len(),
+            EditTarget::Block(_) => 0,
+            EditTarget::Wallhaven => WALLHAVEN_BLOCK_FIELDS.len(),
             _ => 0,
         }
     }
@@ -1098,11 +1129,17 @@ impl App {
             EditTarget::Block(block) => {
                 let keys = match block {
                     0 => ROTATION_BLOCK_FIELDS,
-                    2 => WALLHAVEN_BLOCK_FIELDS,
                     _ => &[] as &[&str],
                 };
                 if let Some(key) = keys.get(sess.field_cursor) {
                     block_field_kind(*block, key)
+                } else {
+                    EditFieldKind::Text
+                }
+            }
+            EditTarget::Wallhaven => {
+                if let Some(key) = WALLHAVEN_BLOCK_FIELDS.get(sess.field_cursor) {
+                    block_field_kind(WALLHAVEN_FIELDS_BLOCK, key)
                 } else {
                     EditFieldKind::Text
                 }
@@ -1119,7 +1156,7 @@ impl App {
         let Some(sess) = &self.editing else {
             return false;
         };
-        if let EditTarget::Block(2) = &sess.target {
+        if let EditTarget::Wallhaven = &sess.target {
             if let Some(key) = WALLHAVEN_BLOCK_FIELDS.get(sess.field_cursor) {
                 return self.wallhaven_block_field_locked(key);
             }
@@ -1327,6 +1364,14 @@ impl App {
                     .unwrap_or_default();
                 block_field_value_at(&self.ctx.config, *block, &draft, idx)
             }
+            EditTarget::Wallhaven => {
+                let draft = self
+                    .editing
+                    .as_ref()
+                    .map(|sess| sess.draft_block_values.clone())
+                    .unwrap_or_default();
+                block_field_value_at(&self.ctx.config, WALLHAVEN_FIELDS_BLOCK, &draft, idx)
+            }
             _ => String::new(),
         }
     }
@@ -1355,6 +1400,12 @@ impl App {
                 EditTarget::Block(block) => {
                     block_field_value_at(&self.ctx.config, *block, &sess.draft_block_values, idx)
                 }
+                EditTarget::Wallhaven => block_field_value_at(
+                    &self.ctx.config,
+                    WALLHAVEN_FIELDS_BLOCK,
+                    &sess.draft_block_values,
+                    idx,
+                ),
                 _ => String::new(),
             }
         } else {
@@ -1403,7 +1454,7 @@ impl App {
                 EditTarget::Block(0) => {
                     apply_rotation_block_draft(&mut temp, &sess.draft_block_values);
                 }
-                EditTarget::Block(2) => {
+                EditTarget::Wallhaven => {
                     apply_wallhaven_block_draft(
                         &mut temp,
                         &sess.draft_block_values,
@@ -1424,7 +1475,7 @@ impl App {
                             || e.contains("url")
                             || e.contains("key")
                     }
-                    EditTarget::Block(2) => {
+                    EditTarget::Wallhaven => {
                         e.contains("wallhaven") || e.contains("NSFW") || e.contains("purity")
                     }
                     _ => true,
@@ -1451,6 +1502,14 @@ impl App {
                 EditTarget::Block(block) => {
                     commit_block_field_buffer(
                         *block,
+                        field_idx,
+                        &buf,
+                        &mut sess.draft_block_values,
+                    );
+                }
+                EditTarget::Wallhaven => {
+                    commit_block_field_buffer(
+                        WALLHAVEN_FIELDS_BLOCK,
                         field_idx,
                         &buf,
                         &mut sess.draft_block_values,
@@ -1494,7 +1553,7 @@ impl App {
                 apply_rotation_block_draft(&mut config, &sess.draft_block_values);
                 success_msg = "config saved: rotation".into();
             }
-            EditTarget::Block(2) => {
+            EditTarget::Wallhaven => {
                 apply_wallhaven_block_draft(
                     &mut config,
                     &sess.draft_block_values,
