@@ -2059,10 +2059,7 @@ mod tests {
 
         let text = render_text(&app, 120, 36);
         assert!(text.contains("Purity: NSFW (requires API key)"), "{text}");
-        assert!(
-            text.contains("unavailable (set wallhaven_api_key in secrets.json)"),
-            "{text}"
-        );
+        assert!(text.contains("unavailable (no API key)"), "{text}");
 
         // Navigate to NSFW field (index 7) and try toggling — should stay unavailable.
         let rt = tokio::runtime::Runtime::new().expect("rt");
@@ -2077,7 +2074,7 @@ mod tests {
         .ok();
         let text = render_text(&app, 120, 36);
         assert!(
-            text.contains("unavailable (set wallhaven_api_key in secrets.json)"),
+            text.contains("unavailable (no API key)"),
             "Space should not enable NSFW without API key: {text}"
         );
     }

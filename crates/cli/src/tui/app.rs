@@ -1245,7 +1245,7 @@ impl App {
         kind: EditFieldKind,
     ) -> String {
         if self.wallhaven_block_field_locked(key) {
-            return "unavailable (set wallhaven_api_key in secrets.json)".into();
+            return "unavailable (no API key)".into();
         }
         choice_display_value(kind, value)
     }
