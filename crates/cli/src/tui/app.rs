@@ -653,6 +653,7 @@ pub struct App {
     pub(crate) wallhaven_summary: WallhavenProviderSummary,
     pub(crate) config_warnings: Vec<String>,
     pub color_mode: ColorMode,
+    pub pending_nuke_confirm: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -703,6 +704,7 @@ impl App {
             wallhaven_summary,
             config_warnings,
             color_mode: ColorMode::from_env(),
+            pending_nuke_confirm: false,
         };
         app.refresh_local_candidates()?;
         Ok(app)
@@ -992,6 +994,54 @@ impl App {
     pub fn trash_current(&mut self) -> anyhow::Result<String> {
         self.ctx.trash_current()?;
         Ok("trashed current wallpaper".into())
+    }
+
+    pub fn nuke_downloads_prompt(&self) -> String {
+        let plan = self.ctx.plan_nuke_downloads();
+        match plan.mode {
+            walls_core::downloads::NukeDownloadsMode::ClearQueue => format!(
+                "nuke: clear {} queued provider item{}? Shift+X confirm, Esc cancel",
+                plan.queue_len,
+                if plan.queue_len == 1 { "" } else { "s" }
+            ),
+            walls_core::downloads::NukeDownloadsMode::PurgeProviderFiles => format!(
+                "nuke: delete {} cache + {} downloaded provider file{}? Shift+X confirm, Esc cancel",
+                plan.cache_files,
+                plan.download_files,
+                if plan.cache_files + plan.download_files == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            ),
+            walls_core::downloads::NukeDownloadsMode::Nothing => {
+                "nuke: queue empty and no provider downloads to delete".into()
+            }
+        }
+    }
+
+    pub fn nuke_downloads(&mut self) -> anyhow::Result<String> {
+        let result = self.ctx.nuke_downloads()?;
+        Ok(match result.mode {
+            walls_core::downloads::NukeDownloadsMode::ClearQueue => format!(
+                "nuke: cleared {} queued provider item{}",
+                result.queue_cleared,
+                if result.queue_cleared == 1 { "" } else { "s" }
+            ),
+            walls_core::downloads::NukeDownloadsMode::PurgeProviderFiles => format!(
+                "nuke: removed {} cache + {} downloaded provider file{}",
+                result.cache_removed,
+                result.download_removed,
+                if result.cache_removed + result.download_removed == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            ),
+            walls_core::downloads::NukeDownloadsMode::Nothing => {
+                "nuke: queue empty and no provider downloads to delete".into()
+            }
+        })
     }
 
     pub fn toggle_focused_config_value(&mut self) -> anyhow::Result<Option<String>> {
@@ -1769,6 +1819,9 @@ impl App {
             };
             return format!("edit: ↑/↓ fields | {choice_hint} | Enter save | Esc cancel | q");
         }
+        if self.pending_nuke_confirm {
+            return "Shift+X confirm nuke | Esc cancel | q quit".into();
+        }
         let keys = match self.input_mode {
             InputMode::Command => format!(":{}_ | Enter run Esc cancel", self.cmd_line),
             InputMode::SearchInput => {
@@ -1788,7 +1841,10 @@ impl App {
                         "1 Config | j/k | e edit | t toggle | n/p | space pause | : cmd".into()
                     }
                 }
-                _ => "1-6 tabs | n/p next/prev | f favorite d trash | space pause | : cmd".into(),
+                _ => {
+                    "1-6 tabs | n/p next/prev | f favorite d trash | Shift+X nuke | space pause | : cmd"
+                        .into()
+                }
             },
         };
         format!("{keys} | q quit")

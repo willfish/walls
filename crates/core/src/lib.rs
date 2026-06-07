@@ -17,6 +17,7 @@ pub mod apply;
 pub mod bin_resolve;
 pub mod config;
 pub mod ctx;
+pub mod downloads;
 pub mod error;
 pub mod library;
 pub mod lock;

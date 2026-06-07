@@ -9,7 +9,7 @@ use crate::tui::app::EditTarget;
 use anyhow::Context;
 use app::{App, InputMode, Tab};
 use ratatui::backend::CrosstermBackend;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -182,6 +182,9 @@ enum UiAction {
     Prev,
     Favorite,
     Trash,
+    NukeDownloadsRequest,
+    NukeDownloadsConfirm,
+    CancelNuke,
     TogglePause,
     ToggleConfigValue,
     #[allow(dead_code)]
@@ -241,7 +244,19 @@ fn handle_key(app: &mut App, key: KeyEvent, rt: &tokio::runtime::Handle) -> anyh
     Ok(effect == UpdateEffect::Quit)
 }
 
+fn is_shift_x(key: KeyEvent) -> bool {
+    matches!(key.code, KeyCode::Char('X' | 'x')) && key.modifiers.contains(KeyModifiers::SHIFT)
+}
+
 fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
+    if app.pending_nuke_confirm {
+        return match key.code {
+            KeyCode::Esc => UiAction::CancelNuke,
+            _ if is_shift_x(key) => UiAction::NukeDownloadsConfirm,
+            _ => UiAction::Ignore,
+        };
+    }
+
     match app.input_mode {
         InputMode::Command => {
             return match key.code {
@@ -291,6 +306,7 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
         KeyCode::Char('p') => UiAction::Prev,
         KeyCode::Char('f') => UiAction::Favorite,
         KeyCode::Char('d') => UiAction::Trash,
+        _ if is_shift_x(key) => UiAction::NukeDownloadsRequest,
         KeyCode::Char(' ') => UiAction::TogglePause,
         KeyCode::Char('t') if app.tab == Tab::Config => UiAction::ToggleConfigValue,
         KeyCode::Char('e') if app.tab == Tab::Config => UiAction::EditConfigItem,
@@ -386,6 +402,28 @@ fn update(
             }
             Err(e) => app.message = format!("trash error: {e}"),
         },
+        UiAction::NukeDownloadsRequest => {
+            let prompt = app.nuke_downloads_prompt();
+            if prompt.contains("Shift+X confirm") {
+                app.pending_nuke_confirm = true;
+            }
+            app.message = prompt;
+        }
+        UiAction::NukeDownloadsConfirm => match app.nuke_downloads() {
+            Ok(msg) => {
+                app.pending_nuke_confirm = false;
+                app.message = msg;
+                return Ok(UpdateEffect::Reload);
+            }
+            Err(e) => {
+                app.pending_nuke_confirm = false;
+                app.message = format!("nuke error: {e}");
+            }
+        },
+        UiAction::CancelNuke => {
+            app.pending_nuke_confirm = false;
+            app.message = "nuke cancelled".into();
+        }
         UiAction::TogglePause => match app.ctx.toggle_pause() {
             Ok(()) => app.message = format!("paused: {}", app.ctx.state.paused),
             Err(e) => app.message = format!("pause error: {e}"),
@@ -769,7 +807,7 @@ fn footer_keys(app: &App, width: u16) -> String {
                     "Esc back | j/k | e edit | t | n/p | sp | : | q".into()
                 }
                 Tab::Config => "j/k | Enter sub | e edit | t | n/p | sp | : | q".into(),
-                _ => "1-5 | n/p | f/d | sp | : | q".into(),
+                _ => "1-5 | n/p | f/d | Shift+X | sp | : | q".into(),
             },
         };
     }
@@ -2706,6 +2744,47 @@ mod tests {
             !text.contains("> 1. [on] folder"),
             "only selected sub highlighted"
         );
+    }
+
+    #[test]
+    fn shift_x_nuke_requires_confirmation_then_clears_queue() {
+        use ratatui::crossterm::event::KeyModifiers;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(tmp.path().join("cache")).expect("cache");
+        fs::create_dir_all(tmp.path().join("downloaded")).expect("downloaded");
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "internet_enabled": false },
+                "paths": {
+                    "cache_dir": tmp.path().join("cache").display().to_string(),
+                    "download_dir": tmp.path().join("downloaded").display().to_string(),
+                    "favorites_dir": tmp.path().join("favorites").display().to_string(),
+                    "fetched_dir": tmp.path().join("fetched").display().to_string(),
+                    "compose_dir": tmp.path().join("compose").display().to_string(),
+                },
+                "sources": []
+            }),
+            serde_json::json!({}),
+        );
+        app.ctx.state.cache_queue = vec!["wh1".into(), "wh2".into()];
+        app.ctx.save_state().expect("save state");
+
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+        let shift_x = KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT);
+
+        let request = action_for_key(&app, shift_x);
+        assert_eq!(request, UiAction::NukeDownloadsRequest);
+        update(&mut app, request, rt.handle()).expect("request nuke");
+        assert!(app.pending_nuke_confirm);
+        assert!(app.message.contains("clear 2 queued provider items"));
+
+        let confirm = action_for_key(&app, shift_x);
+        assert_eq!(confirm, UiAction::NukeDownloadsConfirm);
+        update(&mut app, confirm, rt.handle()).expect("confirm nuke");
+        assert!(!app.pending_nuke_confirm);
+        assert!(app.message.contains("cleared 2 queued provider items"));
+        assert!(app.ctx.state.cache_queue.is_empty());
     }
 
     #[test]
