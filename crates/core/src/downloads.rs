@@ -35,7 +35,17 @@ pub fn is_provider_cache_file_name(name: &str) -> bool {
         .unwrap_or(name);
     stem.starts_with("wallhaven-")
         || stem.starts_with("unsplash-")
-        || matches!(stem, "bing-daily" | "json-feed" | "mediarss")
+        || matches!(
+            stem,
+            "bing-daily"
+                | "json-feed"
+                | "mediarss"
+                | "reddit-fetch"
+                | "apod-daily"
+                | "pixabay-fetch"
+                | "immich-fetch"
+                | "attribution-fetch"
+        )
 }
 
 pub fn plan_nuke_downloads(paths: &WallsPaths, state: &State) -> NukeDownloadsPlan {

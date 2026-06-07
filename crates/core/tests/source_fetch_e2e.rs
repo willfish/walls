@@ -305,105 +305,201 @@ async fn e2e_unsplash_source_refills_and_downloads_via_mock() {
     );
 }
 
-// --- Config-only sources (classified but fetch not wired yet) ---
+// --- Newly wired inline providers ---
 
 #[tokio::test]
-async fn e2e_reddit_source_is_classified_but_not_fetched_yet() {
-    assert_unimplemented_online_source(
-        "reddit",
-        json!({ "enabled": true, "type": "reddit", "query": "wallpapers", "sort": "hot" }),
-        ProviderKind::Reddit,
-    )
-    .await;
-}
+async fn e2e_reddit_source_fetches_via_mock_listing() {
+    let server = MockServer::start().await;
+    let image_url = format!("{}/reddit-wall.jpg", server.uri());
+    let listing = serde_json::json!({
+        "data": {
+            "children": [{
+                "data": {
+                    "title": "Test wallpaper",
+                    "author": "alice",
+                    "permalink": "/r/wallpapers/comments/abc123/test/",
+                    "over_18": false,
+                    "url": image_url
+                }
+            }]
+        }
+    });
+    Mock::given(method("GET"))
+        .and(path("/r/wallpapers/.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(listing))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/reddit-wall.jpg"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"reddit-jpeg"))
+        .mount(&server)
+        .await;
+    std::env::set_var("REDDIT_API_BASE", server.uri());
 
-#[tokio::test]
-async fn e2e_apod_source_is_classified_but_not_fetched_yet() {
-    assert_unimplemented_online_source(
-        "apod",
-        json!({ "enabled": true, "type": "apod", "label": "NASA APOD" }),
-        ProviderKind::Apod,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn e2e_pixabay_source_is_classified_but_not_fetched_yet() {
-    assert_unimplemented_online_source(
-        "pixabay",
-        json!({ "enabled": true, "type": "pixabay", "query": "nature", "api_key": "demo" }),
-        ProviderKind::Pixabay,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn e2e_immich_source_is_classified_but_not_fetched_yet() {
-    assert_unimplemented_online_source(
-        "immich",
-        json!({
-            "enabled": true,
-            "type": "immich",
-            "url": "https://immich.example.com",
-            "api_key": "demo"
-        }),
-        ProviderKind::Immich,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn e2e_attribution_source_is_classified_but_not_fetched_yet() {
-    assert_unimplemented_online_source(
-        "attribution",
-        json!({
-            "enabled": true,
-            "type": "attribution",
-            "url": "https://example.com/wall.jpg"
-        }),
-        ProviderKind::Attribution,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn e2e_spotlight_source_is_classified_but_not_fetched_yet() {
-    assert_unimplemented_online_source(
-        "spotlight",
-        json!({ "enabled": true, "type": "spotlight", "label": "Spotlight" }),
-        ProviderKind::Spotlight,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn e2e_weighting_source_is_classified_but_not_fetched_yet() {
-    assert_unimplemented_online_source(
-        "weighting",
-        json!({ "enabled": true, "type": "weighting", "query": "high" }),
-        ProviderKind::Weighting,
-    )
-    .await;
-}
-
-async fn assert_unimplemented_online_source(
-    label: &str,
-    source: serde_json::Value,
-    expected_kind: ProviderKind,
-) {
     let harness = FetchHarness::new();
-    harness.write_config(harness.base_config(true, json!([source])));
+    harness.write_config(harness.base_config(
+        true,
+        json!([{ "enabled": true, "type": "reddit", "query": "wallpapers", "sort": "hot" }]),
+    ));
     harness.write_secrets(json!({}));
 
-    let ctx = harness.load_ctx();
-    let providers = configured_source_providers(&ctx.config.sources);
-    assert_eq!(providers.len(), 1, "{label} should have one provider");
-    assert_eq!(providers[0].kind, expected_kind, "{label} kind");
+    let applied = advance_expect_applied(harness.load_ctx()).await;
+    assert!(applied.ends_with("reddit-fetch.jpg"));
+}
 
-    let mut ctx = ctx;
+#[tokio::test]
+async fn e2e_apod_source_fetches_via_mock_api() {
+    let server = MockServer::start().await;
+    let image_url = format!("{}/apod.jpg", server.uri());
+    Mock::given(method("GET"))
+        .and(path("/planetary/apod"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "title": "Pillars of Creation",
+            "url": image_url,
+            "media_type": "image"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/apod.jpg"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"apod-jpeg"))
+        .mount(&server)
+        .await;
+    std::env::set_var("NASA_API_BASE", server.uri());
+
+    let harness = FetchHarness::new();
+    harness.write_config(harness.base_config(
+        true,
+        json!([{ "enabled": true, "type": "apod", "label": "NASA APOD" }]),
+    ));
+    harness.write_secrets(json!({}));
+
+    let applied = advance_expect_applied(harness.load_ctx()).await;
+    assert!(applied.ends_with("apod-daily.jpg"));
+}
+
+#[tokio::test]
+async fn e2e_pixabay_source_fetches_via_mock_api() {
+    let server = MockServer::start().await;
+    let image_url = format!("{}/pixabay.jpg", server.uri());
+    Mock::given(method("GET"))
+        .and(path("/api/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "hits": [{ "largeImageURL": image_url, "pageURL": "https://pixabay.com/photo/1", "user": "bob", "tags": "forest" }]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/pixabay.jpg"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"pixabay-jpeg"))
+        .mount(&server)
+        .await;
+    std::env::set_var("PIXABAY_API_BASE", server.uri());
+
+    let harness = FetchHarness::new();
+    harness.write_config(harness.base_config(
+        true,
+        json!([{ "enabled": true, "type": "pixabay", "query": "nature", "api_key": "demo-key" }]),
+    ));
+    harness.write_secrets(json!({}));
+
+    let applied = advance_expect_applied(harness.load_ctx()).await;
+    assert!(applied.ends_with("pixabay-fetch.jpg"));
+}
+
+#[tokio::test]
+async fn e2e_immich_source_fetches_via_mock_api() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/search/random"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": "asset-42", "originalFileName": "holiday.jpg" }
+        ])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/assets/asset-42/original"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"immich-jpeg"))
+        .mount(&server)
+        .await;
+
+    let harness = FetchHarness::new();
+    harness.write_config(harness.base_config(
+        true,
+        json!([{
+            "enabled": true,
+            "type": "immich",
+            "url": server.uri(),
+            "api_key": "immich-key"
+        }]),
+    ));
+    harness.write_secrets(json!({}));
+
+    let applied = advance_expect_applied(harness.load_ctx()).await;
+    assert!(applied.ends_with("immich-fetch.jpg"));
+}
+
+#[tokio::test]
+async fn e2e_attribution_source_fetches_direct_url() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/wall.jpg"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"attr-jpeg"))
+        .mount(&server)
+        .await;
+
+    let harness = FetchHarness::new();
+    harness.write_config(harness.base_config(
+        true,
+        json!([{
+            "enabled": true,
+            "type": "attribution",
+            "label": "Example",
+            "url": format!("{}/wall.jpg", server.uri())
+        }]),
+    ));
+    harness.write_secrets(json!({}));
+
+    let applied = advance_expect_applied(harness.load_ctx()).await;
+    assert!(applied.ends_with("attribution-fetch.jpg"));
+}
+
+#[tokio::test]
+async fn e2e_spotlight_source_picks_from_configured_folder() {
+    let harness = FetchHarness::new();
+    let image = common::write_image(harness.path(), "spotlight-cache/wall.jpg", b"spotlight");
+    harness.write_config(harness.base_config(
+        false,
+        json!([{
+            "enabled": true,
+            "type": "spotlight",
+            "label": "Spotlight",
+            "path": image.parent().unwrap().display().to_string()
+        }]),
+    ));
+    harness.write_secrets(json!({}));
+
+    let applied = advance_expect_applied(harness.load_ctx()).await;
+    assert_eq!(applied, image);
+}
+
+// Weighting is a selection modifier, not a fetch source.
+#[tokio::test]
+async fn e2e_weighting_source_does_not_fetch_by_itself() {
+    let harness = FetchHarness::new();
+    harness.write_config(harness.base_config(
+        true,
+        json!([{ "enabled": true, "type": "weighting", "query": "high" }]),
+    ));
+    harness.write_secrets(json!({}));
+
+    let providers = configured_source_providers(&harness.load_ctx().config.sources);
+    assert_eq!(providers[0].kind, ProviderKind::Weighting);
+
+    let mut ctx = harness.load_ctx();
     let applied = ctx.advance_next().await.unwrap();
     assert!(
         applied.is_none(),
-        "{label} fetch is not implemented yet; advance_next should return None"
+        "weighting should not fetch wallpapers by itself"
     );
 }

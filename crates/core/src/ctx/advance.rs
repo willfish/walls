@@ -116,6 +116,25 @@ impl<'ctx> AdvanceNext<'ctx> {
             return Ok(Some(path));
         }
 
+        if let Some(path) = crate::inline_providers::try_reddit(self.ctx).await? {
+            return Ok(Some(path));
+        }
+        if let Some(path) = crate::inline_providers::try_apod(self.ctx).await? {
+            return Ok(Some(path));
+        }
+        if let Some(path) = crate::inline_providers::try_pixabay(self.ctx).await? {
+            return Ok(Some(path));
+        }
+        if let Some(path) = crate::inline_providers::try_immich(self.ctx).await? {
+            return Ok(Some(path));
+        }
+        if let Some(path) = crate::inline_providers::try_attribution(self.ctx).await? {
+            return Ok(Some(path));
+        }
+        if let Some(path) = crate::inline_providers::try_spotlight(self.ctx).await? {
+            return Ok(Some(path));
+        }
+
         self.apply_local_candidate()
     }
 

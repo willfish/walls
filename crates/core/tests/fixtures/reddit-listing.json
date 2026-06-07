@@ -1,0 +1,15 @@
+{
+  "data": {
+    "children": [
+      {
+        "data": {
+          "title": "Test wallpaper",
+          "author": "alice",
+          "permalink": "/r/wallpapers/comments/abc123/test/",
+          "over_18": false,
+          "url": "https://example.com/wall.jpg"
+        }
+      }
+    ]
+  }
+}

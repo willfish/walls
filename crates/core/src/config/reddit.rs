@@ -48,6 +48,19 @@ pub fn reddit_subreddit(entry: &SourceEntry) -> String {
         .unwrap_or_default()
 }
 
+/// Public JSON listing URL (Variety-compatible) for the Reddit downloader.
+pub fn reddit_json_url(entry: &SourceEntry) -> Option<String> {
+    let listing = reddit_listing_url(entry)?;
+    if let Some((base, query)) = listing.split_once('?') {
+        Some(format!(
+            "{base}.json?{query}{}limit=100",
+            if query.is_empty() { "" } else { "&" }
+        ))
+    } else {
+        Some(format!("{listing}.json?limit=100"))
+    }
+}
+
 /// Variety-compatible listing URL used by the Reddit downloader.
 pub fn reddit_listing_url(entry: &SourceEntry) -> Option<String> {
     let sub = reddit_subreddit(entry);
@@ -182,9 +195,16 @@ fn parse_reddit_url(url: &str) -> (String, String, String) {
     (sub, sort, time)
 }
 
+fn reddit_origin() -> String {
+    std::env::var("REDDIT_API_BASE")
+        .unwrap_or_else(|_| "https://www.reddit.com".to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
 fn build_listing_url(subreddit: &str, sort: &str, time: &str) -> String {
     let sub = subreddit.trim().trim_start_matches("r/").trim_matches('/');
-    let base = format!("https://www.reddit.com/r/{sub}/");
+    let base = format!("{}/r/{sub}/", reddit_origin());
     match sort {
         "new" => format!("{base}new/"),
         "rising" => format!("{base}rising/"),
@@ -216,6 +236,15 @@ mod tests {
             sort: None,
             time: None,
         }
+    }
+
+    #[test]
+    fn json_url_appends_limit_query() {
+        let entry = reddit_entry("wallpapers");
+        assert_eq!(
+            reddit_json_url(&entry).as_deref(),
+            Some("https://www.reddit.com/r/wallpapers/.json?limit=100")
+        );
     }
 
     #[test]

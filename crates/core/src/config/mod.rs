@@ -15,8 +15,9 @@ pub use apply::{
 };
 pub use display::{DisplayConfig, DisplayFiltersConfig, ImageMagickFilterConfig};
 pub use reddit::{
-    normalize_reddit_source, reddit_listing_url, reddit_sort_needs_time, reddit_sort_value,
-    reddit_subreddit, reddit_summary, reddit_time_value, REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
+    normalize_reddit_source, reddit_json_url, reddit_listing_url, reddit_sort_needs_time,
+    reddit_sort_value, reddit_subreddit, reddit_summary, reddit_time_value, REDDIT_SORT_CHOICES,
+    REDDIT_TIME_CHOICES,
 };
 pub use unsplash::UnsplashSourceConfig;
 pub use wallhaven::{WallhavenCollection, WallhavenConfig, WallhavenPrefer, WallhavenSearch};
