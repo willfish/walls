@@ -162,9 +162,27 @@ impl Default for SelectionConfig {
     }
 }
 
+/// Default configuration for a fresh install (matches `config.example.json` at repo root).
+pub fn default_config() -> anyhow::Result<Config> {
+    Ok(serde_json::from_str(include_str!(
+        "../../../../config.example.json"
+    ))?)
+}
+
 pub fn load_config(path: &Path) -> anyhow::Result<Config> {
     let data = fs::read_to_string(path)?;
     Ok(serde_json::from_str(&data)?)
+}
+
+/// Load config from disk, writing [`default_config`] first when the file is missing.
+pub fn load_or_create_config(path: &Path) -> anyhow::Result<Config> {
+    if path.exists() {
+        return load_config(path);
+    }
+    let config = default_config()?;
+    save_config_atomic(path, &config)?;
+    tracing::info!("created default config at {}", path.display());
+    Ok(config)
 }
 
 pub fn save_config_atomic(path: &Path, config: &Config) -> anyhow::Result<()> {
@@ -231,6 +249,18 @@ mod tests {
             }
         }))
         .expect("config")
+    }
+
+    #[test]
+    fn load_or_create_config_writes_default_when_missing() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("config.json");
+
+        let loaded = super::load_or_create_config(&path).expect("create default config");
+
+        assert!(path.is_file());
+        assert!(loaded.change.enabled);
+        assert_eq!(loaded.paths.compose_dir, "~/.local/share/walls/wallpaper");
     }
 
     #[test]

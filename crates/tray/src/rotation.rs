@@ -33,6 +33,7 @@ impl RotationLoop {
     }
 
     /// Called from the tray main loop (~200ms). Reloads `config.json` and state each tick.
+    /// Missing `config.json` is recreated with defaults (see `load_or_create_config` in core).
     pub fn poll(&mut self) {
         let outcome = runtime().block_on(async {
             let mut ctx = WallsCtx::load()?;

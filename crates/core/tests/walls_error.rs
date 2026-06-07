@@ -7,21 +7,15 @@ use walls_core::state::{CurrentWall, State};
 use walls_core::{RefreshLevel, WallsCtx, WallsError};
 
 #[test]
-fn load_from_reports_missing_config_as_typed_error() {
+fn load_from_creates_default_config_when_missing() {
     let root = tempfile::tempdir().unwrap();
+    let config_path = root.path().join("config.json");
 
-    let err = load_error(root.path());
+    let ctx = WallsCtx::load_from(root.path()).expect("missing config should be created");
 
-    match err {
-        WallsError::ConfigLoad { path, .. } => {
-            assert_eq!(path, root.path().join("config.json"));
-        }
-        other => panic!("expected ConfigLoad, got {other:?}"),
-    }
-    assert!(err_string_contains(
-        &load_error(root.path()),
-        "failed to load"
-    ));
+    assert!(config_path.is_file(), "config.json should be written");
+    assert!(ctx.config.change.enabled);
+    assert_eq!(ctx.config.paths.cache_dir, "~/.local/share/walls/cache");
 }
 
 #[test]
@@ -101,10 +95,6 @@ fn refresh_current_reports_missing_original_as_typed_error() {
         }
         other => panic!("expected CurrentOriginalMissing, got {other:?}"),
     }
-}
-
-fn err_string_contains(err: &WallsError, needle: &str) -> bool {
-    err.to_string().contains(needle)
 }
 
 fn load_error(root: &std::path::Path) -> WallsError {
