@@ -55,7 +55,6 @@ impl StateLock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
 
     #[test]
     fn process_lock_acquire_and_try_acquire_work() {
