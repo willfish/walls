@@ -28,11 +28,10 @@ pub fn resolve_tray_bin_from(tray_bin_env: Option<&str>, current_exe: Option<&Pa
 }
 
 /// Ensure the tray is running (fire-and-forget spawn of walls-tray if not already).
-/// (Idempotent because tray binary itself is singleton via lock.)
+/// Idempotent because the tray binary itself enforces singleton via lock.
 #[allow(dead_code)]
 pub fn ensure_tray_running() {
     let tray = resolve_tray_bin();
-    // fire and forget; tray binary handles if already running.
     let _ = std::process::Command::new(tray).spawn();
 }
 

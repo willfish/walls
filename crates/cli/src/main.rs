@@ -129,7 +129,7 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Tui) | None => {
             bin_utils::ensure_tray_running();
             return tui::run().context("tui failed");
-        },
+        }
         #[cfg(not(feature = "tui"))]
         None => {
             eprintln!("walls: no command specified (try `walls apply <path>`)");
