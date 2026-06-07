@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use walls_core::apply::ApplyTrigger;
 use walls_core::config::{
+    normalize_reddit_source, reddit_sort_needs_time, reddit_sort_value, reddit_time_value,
     save_config_atomic, Config, SelectionStrategy, SourceEntry, WallhavenPrefer,
+    REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
 };
 use walls_core::expand_home;
 use walls_core::sources::list_images_with_paths;
@@ -322,7 +324,50 @@ pub(crate) fn source_field_kind(name: &str) -> EditFieldKind {
         "enabled" => EditFieldKind::Bool,
         "type" => EditFieldKind::Choice(SOURCE_TYPE_CHOICES),
         "orientation" => EditFieldKind::Choice(&["", "landscape", "portrait", "squarish"]),
+        "sort" => EditFieldKind::Choice(REDDIT_SORT_CHOICES),
+        "time" => EditFieldKind::Choice(REDDIT_TIME_CHOICES),
         _ => EditFieldKind::Text,
+    }
+}
+
+pub(crate) fn source_field_kind_for(src: &SourceEntry, name: &str) -> EditFieldKind {
+    if src.source_type == "reddit" {
+        return source_field_kind(name);
+    }
+    match name {
+        "sort" | "time" => EditFieldKind::Text,
+        _ => source_field_kind(name),
+    }
+}
+
+pub(crate) fn reddit_time_field_locked(src: &SourceEntry) -> bool {
+    src.source_type == "reddit" && !reddit_sort_needs_time(reddit_sort_value(src))
+}
+
+pub(crate) fn source_field_label(src: &SourceEntry, name: &str) -> String {
+    if src.source_type == "reddit" {
+        return match name {
+            "enabled" => "Enabled".into(),
+            "query" => "Subreddit".into(),
+            "sort" => "Sort".into(),
+            "time" => "Time period".into(),
+            other => other.into(),
+        };
+    }
+    match name {
+        "enabled" => "Enabled".into(),
+        "type" => "Type".into(),
+        "label" => "Label".into(),
+        "url" => "URL".into(),
+        "path" => "Path".into(),
+        "image_path" => "Image path (JSONPath)".into(),
+        "query" => "Query".into(),
+        "api_key" => "API key".into(),
+        "collection" => "Collection".into(),
+        "user" => "User".into(),
+        "topic" => "Topic".into(),
+        "orientation" => "Orientation".into(),
+        other => other.into(),
     }
 }
 
@@ -1015,9 +1060,13 @@ impl App {
             }
             if idx < self.ctx.config.sources.len() {
                 let target = EditTarget::Source(idx);
+                let mut draft = self.ctx.config.sources[idx].clone();
+                if draft.source_type == "reddit" {
+                    normalize_reddit_source(&mut draft);
+                }
                 let session = EditSession {
                     target,
-                    draft_source: Some(self.ctx.config.sources[idx].clone()),
+                    draft_source: Some(draft),
                     draft_block_values: std::collections::HashMap::new(),
                     field_cursor: 0,
                     field_buffer: String::new(),
@@ -1041,9 +1090,13 @@ impl App {
         let session = match &target {
             EditTarget::Source(i) if *i < self.ctx.config.sources.len() => {
                 let idx = *i;
+                let mut draft = self.ctx.config.sources[idx].clone();
+                if draft.source_type == "reddit" {
+                    normalize_reddit_source(&mut draft);
+                }
                 EditSession {
                     target: target.clone(),
-                    draft_source: Some(self.ctx.config.sources[idx].clone()),
+                    draft_source: Some(draft),
                     draft_block_values: std::collections::HashMap::new(),
                     field_cursor: 0,
                     field_buffer: String::new(),
@@ -1121,7 +1174,7 @@ impl App {
                     .unwrap_or(&self.ctx.config.sources[*i]);
                 let names = Self::source_editable_fields(src);
                 if sess.field_cursor < names.len() {
-                    source_field_kind(&names[sess.field_cursor])
+                    source_field_kind_for(src, &names[sess.field_cursor])
                 } else {
                     EditFieldKind::Text
                 }
@@ -1161,7 +1214,28 @@ impl App {
                 return self.wallhaven_block_field_locked(key);
             }
         }
+        if let EditTarget::Source(_) = &sess.target {
+            if let Some(draft) = &sess.draft_source {
+                let names = Self::source_editable_fields(draft);
+                if let Some(name) = names.get(sess.field_cursor) {
+                    return name == "time" && reddit_time_field_locked(draft);
+                }
+            }
+        }
         false
+    }
+
+    pub(crate) fn reddit_field_display_value(
+        &self,
+        src: &SourceEntry,
+        key: &str,
+        value: &str,
+        kind: EditFieldKind,
+    ) -> String {
+        if key == "time" && reddit_time_field_locked(src) {
+            return "n/a (top/controversial only)".into();
+        }
+        Self::choice_display_for_current_field(value, kind)
     }
 
     pub(crate) fn wallhaven_field_display_value(
@@ -1224,12 +1298,20 @@ impl App {
     /// Omits attribution's "source"/"author" (present in some example but not modeled in SourceEntry).
     #[allow(dead_code)]
     pub fn source_editable_fields(src: &walls_core::config::SourceEntry) -> Vec<String> {
+        let t = src.source_type.as_str();
+        if t == "reddit" {
+            return vec![
+                "enabled".into(),
+                "query".into(),
+                "sort".into(),
+                "time".into(),
+            ];
+        }
         let mut f = vec![
             "enabled".to_string(),
             "type".to_string(),
             "label".to_string(),
         ];
-        let t = src.source_type.as_str();
         match t {
             "folder" | "image" | "favorites" | "fetched" => {
                 f.push("path".into());
@@ -1252,7 +1334,7 @@ impl App {
                 f.push("topic".into());
                 f.push("orientation".into());
             }
-            "reddit" | "weighting" => {
+            "weighting" => {
                 f.push("query".into());
             }
             "pixabay" => {
@@ -1284,6 +1366,14 @@ impl App {
             "user" => src.user.clone().unwrap_or_default(),
             "topic" => src.topic.clone().unwrap_or_default(),
             "orientation" => src.orientation.clone().unwrap_or_default(),
+            "sort" => reddit_sort_value(src).to_string(),
+            "time" => {
+                if reddit_sort_needs_time(reddit_sort_value(src)) {
+                    reddit_time_value(src).to_string()
+                } else {
+                    String::new()
+                }
+            }
             _ => String::new(),
         }
     }
@@ -1324,6 +1414,25 @@ impl App {
             "user" => draft.user = v,
             "topic" => draft.topic = v,
             "orientation" => draft.orientation = v,
+            "sort" if !trimmed.is_empty() && REDDIT_SORT_CHOICES.contains(&trimmed) => {
+                draft.sort = Some(trimmed.to_string());
+                if !reddit_sort_needs_time(trimmed) {
+                    draft.time = None;
+                } else if draft
+                    .time
+                    .as_deref()
+                    .is_none_or(|t| !REDDIT_TIME_CHOICES.contains(&t))
+                {
+                    draft.time = Some("week".into());
+                }
+            }
+            "time"
+                if !trimmed.is_empty()
+                    && REDDIT_TIME_CHOICES.contains(&trimmed)
+                    && reddit_sort_needs_time(reddit_sort_value(draft)) =>
+            {
+                draft.time = Some(trimmed.to_string());
+            }
             _ => {}
         }
     }
@@ -1545,8 +1654,16 @@ impl App {
         match &sess.target {
             EditTarget::Source(i) if *i < config.sources.len() => {
                 if let Some(d) = &sess.draft_source {
-                    config.sources[*i] = d.clone();
-                    success_msg = format!("config saved: source #{} type={}", i, d.source_type);
+                    let mut saved = d.clone();
+                    if saved.source_type == "reddit" {
+                        normalize_reddit_source(&mut saved);
+                    }
+                    config.sources[*i] = saved;
+                    success_msg = if d.source_type == "reddit" {
+                        format!("config saved: reddit source #{i}")
+                    } else {
+                        format!("config saved: source #{} type={}", i, d.source_type)
+                    };
                 }
             }
             EditTarget::Block(0) => {
@@ -1619,7 +1736,16 @@ impl App {
     pub fn footer_keys(&self) -> String {
         if self.is_editing() {
             let choice_hint = if self.current_edit_field_locked() {
-                "requires API key"
+                if self
+                    .editing
+                    .as_ref()
+                    .and_then(|s| s.draft_source.as_ref())
+                    .is_some_and(|src| src.source_type == "reddit")
+                {
+                    "top/controversial only"
+                } else {
+                    "requires API key"
+                }
             } else {
                 match self.current_edit_field_kind() {
                     EditFieldKind::Text => "type/Backspace",

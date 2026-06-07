@@ -216,6 +216,8 @@ fn failure_scope_names_provider_and_operation() {
         api_key: None,
         image_path: None,
         title_path: None,
+        sort: None,
+        time: None,
     }])
     .remove(0);
 

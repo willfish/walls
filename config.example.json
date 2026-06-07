@@ -69,8 +69,8 @@
     {
       "enabled": false,
       "type": "reddit",
-      "label": "Reddit wallpapers",
-      "query": "wallpapers"
+      "query": "wallpapers",
+      "sort": "hot"
     },
     {
       "enabled": false,

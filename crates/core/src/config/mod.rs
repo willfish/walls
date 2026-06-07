@@ -6,11 +6,16 @@ use serde::{Deserialize, Serialize};
 
 mod apply;
 mod display;
+mod reddit;
 mod unsplash;
 mod wallhaven;
 
 pub use apply::{ApplyBackendSetting, ApplyConfig, CosmicApplyConfig, CosmicMethod};
 pub use display::{DisplayConfig, DisplayFiltersConfig, ImageMagickFilterConfig};
+pub use reddit::{
+    normalize_reddit_source, reddit_listing_url, reddit_sort_needs_time, reddit_sort_value,
+    reddit_subreddit, reddit_summary, reddit_time_value, REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
+};
 pub use unsplash::UnsplashSourceConfig;
 pub use wallhaven::{WallhavenCollection, WallhavenConfig, WallhavenPrefer, WallhavenSearch};
 
@@ -118,6 +123,12 @@ pub struct SourceEntry {
     pub image_path: Option<String>,
     #[serde(default)]
     pub title_path: Option<String>,
+    /// Reddit listing sort (`hot`, `new`, `top`, `rising`, `controversial`).
+    #[serde(default)]
+    pub sort: Option<String>,
+    /// Reddit time window for `top`/`controversial` (`hour`, `day`, `week`, `month`, `year`, `all`).
+    #[serde(default)]
+    pub time: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

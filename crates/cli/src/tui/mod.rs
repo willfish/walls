@@ -21,7 +21,7 @@ use ratatui::widgets::{Clear, List, ListItem, Paragraph, Tabs};
 use walls_core::apply::{
     backend_setting_label, summarize_apply_environment, ApplyEnvironmentSummary,
 };
-use walls_core::config::{ApplyBackendSetting, CosmicMethod};
+use walls_core::config::{reddit_summary, ApplyBackendSetting, CosmicMethod};
 use walls_core::WallsCtx;
 
 use std::io;
@@ -943,6 +943,16 @@ fn sources_details(app: &App) -> Vec<String> {
     let mut lines = Vec::new();
     for (index, src) in sources.iter().enumerate() {
         let state = if src.enabled { "on" } else { "off" };
+        let marker = if sub_sel == Some(index) { "> " } else { "  " };
+        if src.source_type == "reddit" {
+            lines.push(format!(
+                "{}{}. [{state}] Reddit - {}",
+                marker,
+                index + 1,
+                reddit_summary(src)
+            ));
+            continue;
+        }
         let key = src
             .path
             .as_deref()
@@ -950,7 +960,6 @@ fn sources_details(app: &App) -> Vec<String> {
             .or(src.query.as_deref())
             .unwrap_or("(no key)");
         let label = src.label.as_deref().unwrap_or(&src.source_type);
-        let marker = if sub_sel == Some(index) { "> " } else { "  " };
         lines.push(format!(
             "{}{}. [{state}] {} ({}) - {}",
             marker,
@@ -1226,10 +1235,14 @@ fn edit_target_title(app: &App) -> String {
             EditTarget::Block(b) => format!("Edit block {}", b),
             EditTarget::Source(i) => {
                 if let Some(ref src) = sess.draft_source {
-                    let lab = src.label.clone().unwrap_or_else(|| src.source_type.clone());
-                    format!("Edit Source #{}: {} ({})", i, lab, src.source_type)
+                    if src.source_type == "reddit" {
+                        format!("Edit Reddit #{}", i + 1)
+                    } else {
+                        let lab = src.label.clone().unwrap_or_else(|| src.source_type.clone());
+                        format!("Edit Source #{}: {} ({})", i + 1, lab, src.source_type)
+                    }
                 } else {
-                    format!("Edit source #{}", i)
+                    format!("Edit source #{}", i + 1)
                 }
             }
         }
@@ -1262,23 +1275,9 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
         if let Some(ref src) = sess.draft_source {
             // Use the single source of truth for necessary fields per type (no dups, no unused like title_path)
             for name in app::App::source_editable_fields(src) {
-                let label = match name.as_str() {
-                    "enabled" => "Enabled".to_string(),
-                    "type" => "Type".to_string(),
-                    "label" => "Label".to_string(),
-                    "url" => "URL".to_string(),
-                    "path" => "Path".to_string(),
-                    "image_path" => "Image path (JSONPath)".to_string(),
-                    "query" => "Query".to_string(),
-                    "api_key" => "API key".to_string(),
-                    "collection" => "Collection".to_string(),
-                    "user" => "User".to_string(),
-                    "topic" => "Topic".to_string(),
-                    "orientation" => "Orientation".to_string(),
-                    _ => name.clone(),
-                };
+                let label = app::source_field_label(src, &name);
                 let v = app::App::get_source_field(src, &name);
-                fields.push((label, v, app::source_field_kind(&name)));
+                fields.push((label, v, app::source_field_kind_for(src, &name)));
             }
         } else if let EditTarget::Wallhaven = &sess.target {
             for k in app::WALLHAVEN_BLOCK_FIELDS {
@@ -1329,20 +1328,48 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
         } else {
             &[] as &[&str]
         };
+        let source_names = sess
+            .draft_source
+            .as_ref()
+            .map(app::App::source_editable_fields);
         for (i, (k, v, kind)) in fields.iter().enumerate() {
             let padded = format!("{:>width$}", k, width = pad);
-            let field_key = wallhaven_keys.get(i).copied().unwrap_or("");
+            let field_key = source_names
+                .as_ref()
+                .and_then(|names| names.get(i).map(String::as_str))
+                .or_else(|| wallhaven_keys.get(i).copied())
+                .unwrap_or("");
             let val = if i == sess.field_cursor {
                 match kind {
                     app::EditFieldKind::Text => format!("{}|", sess.field_buffer),
                     app::EditFieldKind::Bool | app::EditFieldKind::Choice(_) => format!(
                         "‹ {} ›",
-                        if field_key.is_empty() {
+                        if let Some(src) = &sess.draft_source {
+                            if src.source_type == "reddit" {
+                                app.reddit_field_display_value(
+                                    src,
+                                    field_key,
+                                    &sess.field_buffer,
+                                    *kind,
+                                )
+                            } else {
+                                app::App::choice_display_for_current_field(
+                                    &sess.field_buffer,
+                                    *kind,
+                                )
+                            }
+                        } else if field_key.is_empty() {
                             app::App::choice_display_for_current_field(&sess.field_buffer, *kind)
                         } else {
                             app.wallhaven_field_display_value(field_key, &sess.field_buffer, *kind)
                         }
                     ),
+                }
+            } else if let Some(src) = &sess.draft_source {
+                if src.source_type == "reddit" {
+                    app.reddit_field_display_value(src, field_key, v, *kind)
+                } else {
+                    app::App::choice_display_for_current_field(v, *kind)
                 }
             } else if field_key.is_empty() {
                 app::App::choice_display_for_current_field(v, *kind)
@@ -2460,7 +2487,7 @@ mod tests {
             serde_json::json!({
                 "change": { "enabled": true },
                 "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
-                "sources": [ { "enabled": true, "type": "reddit", "label": "r", "query": "cats" } ]
+                "sources": [ { "enabled": true, "type": "reddit", "query": "cats", "sort": "hot" } ]
             }),
             serde_json::json!({}),
         );
@@ -2469,11 +2496,8 @@ mod tests {
         app.start_edit_for_current();
         assert!(app.is_editing());
         let rt = tokio::runtime::Runtime::new().expect("rt");
-        // fields for reddit: 0=enabled,1=type,2=label,3=query
-        // move cursor to query field (3 downs from 0)
-        for _ in 0..3 {
-            update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
-        }
+        // fields for reddit: 0=enabled, 1=query (subreddit)
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
         // prefill should have loaded the query value via name-based current_edit
         let initial = app.editing.as_ref().unwrap().field_buffer.clone();
         assert_eq!(
@@ -2498,6 +2522,55 @@ mod tests {
             "must not have polluted url field; url={:?}",
             draft.url
         );
+    }
+
+    #[test]
+    fn reddit_edit_form_lists_subreddit_sort_and_time_without_label_or_type() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [ { "enabled": true, "type": "reddit", "query": "wallpapers", "sort": "top", "time": "month" } ]
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = 0;
+        app.start_edit_for_current();
+
+        let text = render_text(&app, 100, 28);
+        assert!(text.contains("Edit Reddit"), "{text}");
+        assert!(text.contains("Subreddit"), "{text}");
+        assert!(text.contains("wallpapers"), "{text}");
+        assert!(text.contains("Sort"), "{text}");
+        assert!(text.contains("Time period"), "{text}");
+        assert!(text.contains("month"), "{text}");
+        assert!(!text.contains("Label"), "{text}");
+        assert!(!text.contains("Type"), "{text}");
+    }
+
+    #[test]
+    fn reddit_time_unavailable_when_sort_is_hot() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [ { "enabled": true, "type": "reddit", "query": "pics", "sort": "hot" } ]
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.start_edit_for_current();
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+        for _ in 0..3 {
+            update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
+        }
+        let text = render_text(&app, 100, 28);
+        assert!(text.contains("n/a (top/controversial only)"), "{text}");
     }
 
     #[test]
@@ -2858,7 +2931,7 @@ mod tests {
                 "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
                 "sources": [
                     { "enabled": true, "type": "wallhaven", "label": "wallhaven space", "query": "space" },
-                    { "enabled": false, "type": "reddit", "label": "r", "query": "wallpapers" }
+                    { "enabled": false, "type": "reddit", "query": "wallpapers", "sort": "top", "time": "month" }
                 ]
             }),
             serde_json::json!({}),
