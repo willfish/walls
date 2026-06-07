@@ -64,7 +64,7 @@ fn cli_status_json_shows_paused_flag() {
 }
 
 #[test]
-fn cli_toggle_pause_and_next_noop() {
+fn cli_manual_next_works_when_paused() {
     let tmp = tempfile::tempdir().unwrap();
     let (config_home, state_home) = setup_xdg_home(tmp.path());
 
@@ -75,6 +75,14 @@ fn cli_toggle_pause_and_next_noop() {
         .assert()
         .success()
         .stdout(predicate::str::contains("paused: true"));
+
+    walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["next", "--manual"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("images/a.jpg"));
 
     walls_cmd()
         .env("XDG_CONFIG_HOME", &config_home)

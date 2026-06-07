@@ -1,5 +1,5 @@
 # Example home-manager module for walls.
-# Timer interval is configured here (not duplicated in config.json).
+# Rotation interval is in config.json (change.interval_secs); walls-tray runs the scheduler.
 { pkgs, ... }:
 {
   home.packages = [
@@ -31,13 +31,7 @@
     installConfig.WantedBy = [ "graphical-session.target" ];
   };
 
-  systemd.user.timers.walls = {
-    description = "walls wallpaper rotation";
-    timerConfig = {
-      OnBootSec = "3min";
-      OnUnitActiveSec = "30min";
-      Persistent = true;
-    };
-    installConfig.WantedBy = [ "timers.target" ];
-  };
+  # Optional: legacy systemd timer if you cannot run walls-tray (headless cron-style rotation).
+  # Prefer change.interval_secs in config.json + walls-tray.service for graphical sessions.
+  # systemd.user.timers.walls = { ... };
 }

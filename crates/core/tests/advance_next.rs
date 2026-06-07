@@ -62,6 +62,52 @@ async fn advance_next_writes_state() {
 }
 
 #[tokio::test]
+async fn advance_next_manual_runs_when_paused() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    fs::create_dir_all(&images).unwrap();
+    fs::write(images.join("wall.jpg"), b"fake jpeg").unwrap();
+    let noop = root.path().join("noop.sh");
+    fs::write(&noop, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&noop, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    write_test_config(root.path(), &images, &noop);
+
+    let mut ctx = WallsCtx::load_from(root.path()).unwrap();
+    ctx.set_paused(true).unwrap();
+    let applied = ctx
+        .advance_next_manual()
+        .await
+        .unwrap()
+        .expect("manual next should apply even when paused");
+    assert!(applied.ends_with("wall.jpg"));
+}
+
+#[tokio::test]
+async fn advance_next_skips_when_paused() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    fs::create_dir_all(&images).unwrap();
+    fs::write(images.join("wall.jpg"), b"fake jpeg").unwrap();
+    let noop = root.path().join("noop.sh");
+    fs::write(&noop, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&noop, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    write_test_config(root.path(), &images, &noop);
+
+    let mut ctx = WallsCtx::load_from(root.path()).unwrap();
+    ctx.set_paused(true).unwrap();
+    let applied = ctx.advance_next().await.unwrap();
+    assert!(applied.is_none());
+}
+
+#[tokio::test]
 async fn advance_next_returns_none_when_local_sources_are_empty() {
     let root = tempfile::tempdir().unwrap();
     let images = root.path().join("images");

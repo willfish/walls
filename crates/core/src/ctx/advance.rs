@@ -35,10 +35,20 @@ impl WallsCtx {
         Ok(())
     }
 
+    /// Automatic rotation — respects pause and `change.enabled`.
     pub async fn advance_next(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        self.advance_next_mode(AdvanceMode::Auto).await
+    }
+
+    /// Explicit user action (tray, CLI, TUI) — runs even when paused or rotation is off.
+    pub async fn advance_next_manual(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        self.advance_next_mode(AdvanceMode::Manual).await
+    }
+
+    async fn advance_next_mode(&mut self, mode: AdvanceMode) -> anyhow::Result<Option<PathBuf>> {
         let _lock = crate::lock::StateLock::acquire(&self.paths.state_file)?;
         self.state = State::load_or_default(&self.paths.state_file)?;
-        AdvanceNext::new(self).run().await
+        AdvanceNext::new(self, mode).run().await
     }
 
     pub fn advance_prev(&mut self) -> anyhow::Result<Option<PathBuf>> {
@@ -60,13 +70,20 @@ impl WallsCtx {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdvanceMode {
+    Auto,
+    Manual,
+}
+
 struct AdvanceNext<'ctx> {
     ctx: &'ctx mut WallsCtx,
+    mode: AdvanceMode,
 }
 
 impl<'ctx> AdvanceNext<'ctx> {
-    fn new(ctx: &'ctx mut WallsCtx) -> Self {
-        Self { ctx }
+    fn new(ctx: &'ctx mut WallsCtx, mode: AdvanceMode) -> Self {
+        Self { ctx, mode }
     }
 
     async fn run(&mut self) -> anyhow::Result<Option<PathBuf>> {
@@ -103,6 +120,9 @@ impl<'ctx> AdvanceNext<'ctx> {
     }
 
     fn should_skip(&self) -> bool {
+        if self.mode == AdvanceMode::Manual {
+            return false;
+        }
         self.ctx.state.paused || !self.ctx.config.change.enabled
     }
 

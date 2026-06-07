@@ -14,6 +14,7 @@
 )]
 
 pub mod apply;
+pub mod bin_resolve;
 pub mod config;
 pub mod ctx;
 pub mod error;
@@ -23,9 +24,11 @@ pub mod paths;
 pub mod pipeline;
 pub mod providers;
 pub mod quota;
+pub mod rotation;
 pub mod selection;
 pub mod sources;
 pub mod state;
+pub mod tray;
 pub mod unsplash;
 pub mod validate;
 pub mod wallhaven;

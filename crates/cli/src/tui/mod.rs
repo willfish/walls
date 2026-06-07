@@ -18,6 +18,9 @@ use ratatui::prelude::*;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, List, ListItem, Paragraph, Tabs};
+use walls_core::apply::{
+    backend_setting_label, summarize_apply_environment, ApplyEnvironmentSummary,
+};
 use walls_core::config::{ApplyBackendSetting, CosmicMethod};
 use walls_core::WallsCtx;
 
@@ -90,7 +93,7 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CaptureWriter {
     }
 }
 
-pub fn run() -> anyhow::Result<()> {
+pub fn run(startup_message: Option<String>, tray_owns_rotation: bool) -> anyhow::Result<()> {
     require_tty()?;
     let rt = tokio::runtime::Handle::current();
 
@@ -105,9 +108,17 @@ pub fn run() -> anyhow::Result<()> {
     let mut app = App::new(WallsCtx::load().context(
         "failed to load ~/.config/walls/config.json — copy config.example.json to get started",
     )?)?;
+    if let Some(message) = startup_message {
+        app.message = message;
+    }
     IN_TUI.store(true, Ordering::Relaxed);
     #[cfg(feature = "tui-preview")]
     let mut preview = preview::ImagePreview::detect();
+    let mut auto_rotator = if tray_owns_rotation {
+        None
+    } else {
+        Some(walls_core::rotation::AutoRotator::new())
+    };
 
     loop {
         terminal.draw(|f| {
@@ -116,6 +127,15 @@ pub fn run() -> anyhow::Result<()> {
             #[cfg(not(feature = "tui-preview"))]
             draw(f, &app);
         })?;
+        if let Some(rotator) = &mut auto_rotator {
+            let outcome = rt.block_on(async {
+                let mut ctx = walls_core::WallsCtx::load()?;
+                Ok::<_, anyhow::Error>(rotator.tick(&mut ctx).await)
+            });
+            if matches!(outcome, Ok(walls_core::rotation::TickOutcome::Rotated)) {
+                app.reload_ctx()?;
+            }
+        }
         if event::poll(std::time::Duration::from_millis(200))? {
             if let Event::Key(key) = event::read()? {
                 if handle_key(&mut app, key, &rt)? {
@@ -175,6 +195,10 @@ enum UiAction {
     EditFieldCommit,
     EditFieldUp,
     EditFieldDown,
+    EditFieldCycle {
+        forward: bool,
+    },
+    ExitConfigSubnav,
     #[allow(dead_code)]
     SaveEditItem,
     SwitchTab(Tab),
@@ -251,6 +275,9 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
         return match key.code {
             KeyCode::Up => UiAction::EditFieldUp,
             KeyCode::Down => UiAction::EditFieldDown,
+            KeyCode::Left => UiAction::EditFieldCycle { forward: false },
+            KeyCode::Right => UiAction::EditFieldCycle { forward: true },
+            KeyCode::Char(' ') => UiAction::EditFieldCycle { forward: true },
             KeyCode::Esc => UiAction::CancelEdit,
             KeyCode::Backspace => UiAction::EditFieldBackspace,
             KeyCode::Enter => UiAction::EditFieldCommit,
@@ -279,6 +306,13 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
         KeyCode::Char('i') if app.tab == Tab::Search => UiAction::EditSearch,
         KeyCode::Down | KeyCode::Char('j') => UiAction::MoveDown,
         KeyCode::Up | KeyCode::Char('k') => UiAction::MoveUp,
+        KeyCode::Esc
+            if app.tab == Tab::Config
+                && app.config_in_subnav
+                && app.is_sources_list_block(app.config_cursor) =>
+        {
+            UiAction::ExitConfigSubnav
+        }
         KeyCode::Enter => UiAction::Enter,
         _ => UiAction::Ignore,
     }
@@ -324,12 +358,12 @@ fn update(
         }
         UiAction::SearchChar(c) => app.search_query.push(c),
         UiAction::Next => {
-            app.message = match tokio::task::block_in_place(|| rt.block_on(app.ctx.advance_next()))
-            {
-                Ok(Some(p)) => format!("next: {}", p.display()),
-                Ok(None) => "next: no change".into(),
-                Err(e) => format!("next error: {e}"),
-            };
+            app.message =
+                match tokio::task::block_in_place(|| rt.block_on(app.ctx.advance_next_manual())) {
+                    Ok(Some(p)) => format!("next: {}", p.display()),
+                    Ok(None) => "next: no change".into(),
+                    Err(e) => format!("next error: {e}"),
+                };
             return Ok(UpdateEffect::Reload);
         }
         UiAction::Prev => {
@@ -381,43 +415,32 @@ fn update(
             app.cancel_edit();
         }
         UiAction::EditFieldChar(c) => {
-            if let Some(sess) = &mut app.editing {
-                // For bool fields (enabled, internet etc), first char on a prefilled "true"/"false" replaces
-                // instead of appends. This makes "change true to false" direct (type f... or t...) without
-                // mandatory 4x backspace first, while keeping append model for urls/queries/labels.
-                let is_bool_field = match &sess.target {
-                    EditTarget::Block(0) => sess.field_cursor == 0 || sess.field_cursor == 2,
-                    EditTarget::Source(_) => {
-                        if let Some(d) = &sess.draft_source {
-                            let names = app::App::source_editable_fields(d);
-                            if sess.field_cursor < names.len() {
-                                matches!(names[sess.field_cursor].as_str(), "enabled" | "internet")
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    }
-                    _ => false,
-                };
-                if is_bool_field
-                    && (sess.field_buffer == "true"
-                        || sess.field_buffer == "false"
-                        || sess.field_buffer.is_empty())
-                {
-                    sess.field_buffer = c.to_string();
-                } else {
-                    sess.field_buffer.push(c);
-                }
+            if matches!(
+                app.current_edit_field_kind(),
+                app::EditFieldKind::Bool | app::EditFieldKind::Choice(_)
+            ) {
+                // Choice/bool fields use Space/arrow cycling, not free text.
+            } else if let Some(sess) = &mut app.editing {
+                sess.field_buffer.push(c);
                 app.refresh_edit_validation();
             }
         }
         UiAction::EditFieldBackspace => {
-            if let Some(sess) = &mut app.editing {
+            if matches!(
+                app.current_edit_field_kind(),
+                app::EditFieldKind::Bool | app::EditFieldKind::Choice(_)
+            ) {
+                // Choice/bool fields use Space/arrow cycling, not free text.
+            } else if let Some(sess) = &mut app.editing {
                 sess.field_buffer.pop();
                 app.refresh_edit_validation();
             }
+        }
+        UiAction::EditFieldCycle { forward } => {
+            app.cycle_current_edit_field(forward);
+        }
+        UiAction::ExitConfigSubnav => {
+            app.exit_config_subnav();
         }
         UiAction::EditFieldCommit => {
             if app.editing.is_some() {
@@ -455,14 +478,17 @@ fn update(
         UiAction::EditFieldDown => {
             // Pure field move inside edit form (triggered by arrows; letter j/k no longer do this).
             // No auto commit/persist on arrow (uncommitted typing on a field is lost if you arrow away; hit Enter to commit+save a field).
+            let max_fields = app.edit_field_count();
             let buf = if let Some(sess) = &app.editing {
-                let c = sess.field_cursor + 1;
+                let c = (sess.field_cursor + 1).min(max_fields.saturating_sub(1));
                 app.edit_field_value_at(&sess.target, c)
             } else {
                 String::new()
             };
             if let Some(sess) = &mut app.editing {
-                sess.field_cursor += 1;
+                if sess.field_cursor + 1 < max_fields {
+                    sess.field_cursor += 1;
+                }
                 sess.field_buffer = buf;
             }
         }
@@ -520,8 +546,8 @@ fn handle_enter(app: &mut App, rt: &tokio::runtime::Handle) -> anyhow::Result<Up
                 return Ok(UpdateEffect::Reload);
             }
         }
-        Tab::Config if app.is_sources_list_block(app.config_cursor) => {
-            app.toggle_config_subnav();
+        Tab::Config if app.is_sources_list_block(app.config_cursor) && !app.config_in_subnav => {
+            app.enter_config_subnav();
         }
         _ => {}
     }
@@ -651,7 +677,7 @@ fn render_tab_body(
             if app.tab == Tab::Config && app.is_editing() {
                 render_rich_edit(f, area, app, theme, &edit_target_title(app));
             } else {
-                let (title, body) = (app.tab.title().to_string(), tab_lines(app));
+                let (title, body) = (app.tab.title().to_string(), tab_lines(app, area.width));
                 render_lines(f, area, &title, body, theme);
             }
         }
@@ -670,19 +696,19 @@ fn render_tab_body(
     if app.tab == Tab::Config && app.is_editing() {
         render_rich_edit(f, area, app, theme, &edit_target_title(app));
     } else {
-        let (title, body) = (app.tab.title().to_string(), tab_lines(app));
+        let (title, body) = (app.tab.title().to_string(), tab_lines(app, area.width));
         render_lines(f, area, &title, body, theme);
     }
 }
 
-fn tab_lines(app: &App) -> Vec<String> {
+fn tab_lines(app: &App, width: u16) -> Vec<String> {
     match app.tab {
         Tab::Config => config_lines(app),
         Tab::Now => now_lines(app),
         Tab::History => app.history_lines(),
         Tab::Browse => app.browse_lines(),
         Tab::Search => app.search_lines(),
-        Tab::Logs => app.logs_lines(),
+        Tab::Logs => app.logs_lines(width),
     }
 }
 
@@ -739,6 +765,11 @@ fn footer_keys(app: &App, width: u16) -> String {
             InputMode::SearchInput => "type | Enter search | Esc | q".into(),
             InputMode::Normal => match app.tab {
                 Tab::Search => "i edit | Enter | j/k | : | q".into(),
+                Tab::Config
+                    if app.config_in_subnav && app.is_sources_list_block(app.config_cursor) =>
+                {
+                    "Esc back | j/k | e edit | t | n/p | sp | : | q".into()
+                }
                 Tab::Config => "j/k | Enter sub | e edit | t | n/p | sp | : | q".into(),
                 _ => "1-5 | n/p | f/d | sp | : | q".into(),
             },
@@ -856,7 +887,7 @@ fn config_lines(app: &App) -> Vec<String> {
         true,
         format!(
             "{} backend, {} mode, {}",
-            apply_backend_label(app.ctx.config.apply.backend),
+            apply_block_backend_summary(app),
             app.ctx.config.display.mode,
             display_target_summary(app)
         ),
@@ -1019,9 +1050,14 @@ fn wallhaven_details(app: &App) -> Vec<String> {
     let mut details = vec![
         format!("api key: {key}"),
         format!("prefer: {}", provider.prefer),
+        format!("search: q={}", provider.query),
         format!(
-            "search: q={} categories={} purity={}",
-            provider.query, provider.categories, provider.purity
+            "categories: {}",
+            app::format_wallhaven_categories(&provider.categories)
+        ),
+        format!(
+            "purity: {}",
+            app::format_wallhaven_purity(&provider.purity, provider.api_key_present)
         ),
         format!(
             "sort: {} {} minimum {}",
@@ -1067,7 +1103,22 @@ fn library_details(app: &App) -> Vec<String> {
     details
 }
 
+fn apply_environment_summary(app: &App) -> ApplyEnvironmentSummary {
+    summarize_apply_environment(&app.ctx.config.apply)
+}
+
+fn apply_block_backend_summary(app: &App) -> String {
+    let detection = apply_environment_summary(app);
+    let configured = backend_setting_label(detection.configured_backend);
+    if detection.configured_backend == ApplyBackendSetting::Auto {
+        format!("{configured} → {}", detection.effective_backend_label())
+    } else {
+        configured.to_string()
+    }
+}
+
 fn apply_display_details(app: &App) -> Vec<String> {
+    let detection = apply_environment_summary(app);
     let custom_script = app
         .ctx
         .config
@@ -1077,34 +1128,46 @@ fn apply_display_details(app: &App) -> Vec<String> {
         .filter(|path| !path.trim().is_empty())
         .unwrap_or("(not set)");
     let mut details = vec![
+        "configured (config.json):".into(),
         format!(
-            "backend: {}",
-            apply_backend_label(app.ctx.config.apply.backend)
+            "  backend: {}",
+            backend_setting_label(app.ctx.config.apply.backend)
         ),
-        format!("custom script: {custom_script}"),
+        format!("  custom script: {custom_script}"),
         format!(
-            "cosmic: {}",
+            "  cosmic method: {}",
             cosmic_method_label(app.ctx.config.apply.cosmic.method)
         ),
-        format!("cosmic config: {}", app.ctx.config.apply.cosmic.config_path),
         format!(
-            "cosmic uses original: {}",
+            "  cosmic config path: {}",
+            app.ctx.config.apply.cosmic.config_path
+        ),
+        format!(
+            "  cosmic uses original: {}",
             app.ctx.config.apply.cosmic.use_original_path
         ),
-        format!("display mode: {}", app.ctx.config.display.mode),
-        format!("auto rotate: {}", app.ctx.config.display.auto_rotate),
-        format!("target: {}", display_target_summary(app)),
+        format!("  display mode: {}", app.ctx.config.display.mode),
+        format!("  EXIF auto-rotate: {}", app.ctx.config.display.auto_rotate),
+        format!("  target: {}", display_target_summary(app)),
         format!(
-            "imagemagick: {}",
+            "  imagemagick: {}",
             app.ctx.config.display.imagemagick_command
         ),
         format!(
-            "filters: {} configured, enabled={}",
+            "  filters: {} configured, enabled={}",
             app.ctx.config.display.filters.filters.len(),
             app.ctx.config.display.filters.enabled
         ),
-        format!("filter command: {}", app.ctx.config.display.filters.command),
+        format!(
+            "  filter command: {}",
+            app.ctx.config.display.filters.command
+        ),
+        "".into(),
+        "detected (this session):".into(),
     ];
+    for line in detection.detection_detail_lines(app.ctx.config.apply.cosmic.method) {
+        details.push(format!("  {line}"));
+    }
     details.extend(config_warning_lines(app, &["apply."]));
     details
 }
@@ -1139,22 +1202,6 @@ fn config_warning_lines(app: &App, prefixes: &[&str]) -> Vec<String> {
         .collect()
 }
 
-fn apply_backend_label(backend: ApplyBackendSetting) -> &'static str {
-    match backend {
-        ApplyBackendSetting::Auto => "auto",
-        ApplyBackendSetting::Cosmic => "cosmic",
-        ApplyBackendSetting::CosmicExtBgCtl => "cosmic-ext-bg-ctl",
-        ApplyBackendSetting::Gnome => "gnome",
-        ApplyBackendSetting::Kde => "kde",
-        ApplyBackendSetting::Xfce => "xfce",
-        ApplyBackendSetting::Sway => "sway",
-        ApplyBackendSetting::Wlroots => "wlroots",
-        ApplyBackendSetting::Hyprland => "hyprland",
-        ApplyBackendSetting::Feh => "feh",
-        ApplyBackendSetting::CustomScript => "custom-script",
-    }
-}
-
 fn cosmic_method_label(method: CosmicMethod) -> &'static str {
     match method {
         CosmicMethod::CosmicConfig => "cosmic-config",
@@ -1169,6 +1216,7 @@ fn edit_target_title(app: &App) -> String {
     if let Some(sess) = &app.editing {
         match &sess.target {
             EditTarget::Block(0) => "Edit Rotation".to_string(),
+            EditTarget::Block(2) => "Edit Wallhaven".to_string(),
             EditTarget::Block(b) => format!("Edit block {}", b),
             EditTarget::Source(i) => {
                 if let Some(ref src) = sess.draft_source {
@@ -1192,7 +1240,7 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
         let mut lines: Vec<String> = vec![
             // Modern form header using box-drawing for a contemporary TUI feel (like lazygit, helix, etc.).
             // No duplicate title (chrome provides "Edit Rotation" etc.).
-            "┄─ EDIT FORM (▸ focus | ↑/↓ | type | Enter save | Esc) ─┄".into(),
+            "┄─ EDIT FORM (▸ focus | ↑/↓ | type or Space/←/→ | Enter save | Esc) ─┄".into(),
         ];
         // Validation errors inline at top (after marker) so visible immediately, with !! cue for red styling.
         // This addresses "they have no validation" and "s it just fails" (user sees *why* before or on save).
@@ -1204,7 +1252,7 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
             lines.push("".into());
         }
         // dynamic fields list with cursor + live buffer on current (same logic as before)
-        let mut fields: Vec<(String, String)> = vec![];
+        let mut fields: Vec<(String, String, app::EditFieldKind)> = vec![];
         if let Some(ref src) = sess.draft_source {
             // Use the single source of truth for necessary fields per type (no dups, no unused like title_path)
             for name in app::App::source_editable_fields(src) {
@@ -1220,50 +1268,72 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
                     "collection" => "Collection".to_string(),
                     "user" => "User".to_string(),
                     "topic" => "Topic".to_string(),
-                    "orientation" => "Orientation (landscape|portrait|squarish)".to_string(),
+                    "orientation" => "Orientation".to_string(),
                     _ => name.clone(),
                 };
                 let v = app::App::get_source_field(src, &name);
-                fields.push((label, v));
+                fields.push((label, v, app::source_field_kind(&name)));
             }
-        } else {
-            // Block(0) rotation: use fixed stable order + user-friendly labels (hashmap iter order not guaranteed)
-            // Expose the *full* ChangeConfig (previously only 3 fields were wired for edit; now all so rotation is fully configurable).
-            let keys_in_order = [
-                "enabled",
-                "on_start",
-                "interval",
-                "internet",
-                "safe_mode",
-                "change_lock_screen",
-                "download_preference_ratio",
-            ];
-            for k in keys_in_order {
-                if let Some(v) = sess.draft_block_values.get(k) {
-                    let label = match k {
-                        "enabled" => "Enabled",
-                        "on_start" => "On start",
-                        "interval" => "Interval (seconds)",
-                        "internet" => "Internet enabled",
-                        "safe_mode" => "Safe mode",
-                        "change_lock_screen" => "Change lock screen",
-                        "download_preference_ratio" => "Download preference ratio (0.0-1.0)",
-                        _ => k,
+        } else if let EditTarget::Block(block) = &sess.target {
+            let keys = match block {
+                0 => app::ROTATION_BLOCK_FIELDS,
+                2 => app::WALLHAVEN_BLOCK_FIELDS,
+                _ => &[],
+            };
+            for k in keys {
+                if let Some(v) = sess.draft_block_values.get(*k) {
+                    let label = if *block == 2
+                        && *k == "purity_nsfw"
+                        && !app.wallhaven_block_field_locked(k)
+                    {
+                        "Purity: NSFW".to_string()
+                    } else {
+                        app::block_field_label(*block, k)
                     };
-                    fields.push((label.to_string(), v.clone()));
+                    fields.push((label, v.clone(), app::block_field_kind(*block, k)));
                 }
+            }
+            if *block == 2 {
+                fields.push((
+                    "API key".into(),
+                    "(edit ~/.config/walls/secrets.json)".into(),
+                    app::EditFieldKind::Text,
+                ));
+                fields.push((
+                    "Collections".into(),
+                    "(edit config.json for now)".into(),
+                    app::EditFieldKind::Text,
+                ));
             }
         }
         // Right-aligned labels within a capped column for a tight, modern form look (avoids huge gaps on short labels like "Type").
         // Values stay in a clean column. Cap prevents sparse layout on small forms.
-        let max_label = fields.iter().map(|(l, _)| l.len()).max().unwrap_or(0);
+        let max_label = fields.iter().map(|(l, _, _)| l.len()).max().unwrap_or(0);
         let pad = std::cmp::min(max_label, 28);
-        for (i, (k, v)) in fields.iter().enumerate() {
+        let wallhaven_keys = if let EditTarget::Block(2) = &sess.target {
+            app::WALLHAVEN_BLOCK_FIELDS
+        } else {
+            &[] as &[&str]
+        };
+        for (i, (k, v, kind)) in fields.iter().enumerate() {
             let padded = format!("{:>width$}", k, width = pad);
+            let field_key = wallhaven_keys.get(i).copied().unwrap_or("");
             let val = if i == sess.field_cursor {
-                format!("{}|", sess.field_buffer)
+                match kind {
+                    app::EditFieldKind::Text => format!("{}|", sess.field_buffer),
+                    app::EditFieldKind::Bool | app::EditFieldKind::Choice(_) => format!(
+                        "‹ {} ›",
+                        if field_key.is_empty() {
+                            app::App::choice_display_for_current_field(&sess.field_buffer, *kind)
+                        } else {
+                            app.wallhaven_field_display_value(field_key, &sess.field_buffer, *kind)
+                        }
+                    ),
+                }
+            } else if field_key.is_empty() {
+                app::App::choice_display_for_current_field(v, *kind)
             } else {
-                v.clone()
+                app.wallhaven_field_display_value(field_key, v, *kind)
             };
             if i == sess.field_cursor {
                 lines.push(format!("▸ {}: {}", padded, val));
@@ -1310,47 +1380,39 @@ fn build_rich_edit_form_items(app: &App, theme: style::Theme) -> Vec<ListItem<'s
         }
         if trimmed.starts_with("▸ ") || trimmed.starts_with("  ") {
             // Field: split for rich modern styling.
-            // - Current row: label gets strong accent + underline (focus pop), value normal.
-            // - Non-current: labels muted. For bool fields (common in rotation/sources), pretty-print
-            //   with ✓/✗ + success/error colour (redundant with text, works in no-colour via modifiers).
+            // - Current row: high-contrast black-on-cyan (edit_focus_*) so labels stay readable.
+            // - Non-current: labels muted. Bool values use ✓/✗ + semantic colour.
             if let Some(colon_pos) = line.find(": ") {
                 let label_part = &line[..colon_pos];
                 let value_part = &line[colon_pos + 2..];
                 let is_cur = trimmed.starts_with("▸ ");
                 let label_st = if is_cur {
-                    theme
-                        .accent()
-                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                    theme.edit_focus_label()
                 } else {
                     theme.muted()
                 };
-                let val_st = if !is_cur && (value_part == "true" || value_part == "false") {
-                    if value_part == "true" {
-                        theme.status(style::StatusKind::Success)
-                    } else {
-                        theme.status(style::StatusKind::Error)
-                    }
-                } else {
-                    theme.normal()
-                };
-                let display_val = if !is_cur && value_part == "true" {
-                    "✓ true".to_string()
-                } else if !is_cur && value_part == "false" {
-                    "✗ false".to_string()
-                } else {
-                    value_part.to_string()
-                };
-                let row_st = if is_cur {
-                    theme.selected()
+                let val_st = if is_cur {
+                    theme.edit_focus_value()
+                } else if value_part.starts_with("✓ true") {
+                    theme.status(style::StatusKind::Success)
+                } else if value_part.starts_with("✗ false") {
+                    theme.status(style::StatusKind::Error)
                 } else {
                     theme.normal()
                 };
                 let l = Line::from(vec![
                     Span::styled(label_part.to_string(), label_st),
-                    Span::raw(": "),
-                    Span::styled(display_val, val_st),
+                    Span::styled(
+                        ": ",
+                        if is_cur {
+                            theme.edit_focus_row()
+                        } else {
+                            theme.normal()
+                        },
+                    ),
+                    Span::styled(value_part.to_string(), val_st),
                 ]);
-                items.push(ListItem::new(l).style(row_st));
+                items.push(ListItem::new(l));
                 continue;
             }
         }
@@ -1735,17 +1797,20 @@ mod tests {
             ),
             "{text}"
         );
+        assert!(text.contains("configured (config.json):"), "{text}");
+        assert!(text.contains("detected (this session):"), "{text}");
         assert!(text.contains("backend: custom-script"), "{text}");
         assert!(text.contains("custom script: (not set)"), "{text}");
-        assert!(text.contains("cosmic: cosmic-ext-bg-ctl"), "{text}");
+        assert!(text.contains("cosmic method: cosmic-ext-bg-ctl"), "{text}");
         assert!(
-            text.contains("cosmic config: /tmp/missing-cosmic-config"),
+            text.contains("cosmic config path: /tmp/missing-cosmic-config"),
             "{text}"
         );
         assert!(text.contains("cosmic uses original: true"), "{text}");
         assert!(text.contains("display mode: fill"), "{text}");
-        assert!(text.contains("auto rotate: true"), "{text}");
+        assert!(text.contains("EXIF auto-rotate: true"), "{text}");
         assert!(text.contains("target: 3840x2160 target"), "{text}");
+        assert!(text.contains("resolved backend: custom-script"), "{text}");
         assert!(
             text.contains("filters: 1 configured, enabled=true"),
             "{text}"
@@ -1800,10 +1865,9 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("api key: missing"), "{text}");
-        assert!(
-            text.contains("search: q=mountains categories=101 purity=100"),
-            "{text}"
-        );
+        assert!(text.contains("search: q=mountains"), "{text}");
+        assert!(text.contains("categories: general, people"), "{text}");
+        assert!(text.contains("purity: SFW"), "{text}");
         assert!(
             text.contains("sort: toplist desc minimum 2560x1440"),
             "{text}"
@@ -1835,16 +1899,167 @@ mod tests {
         assert!(text.contains("> [on] Wallhaven - online on, key"), "{text}");
         assert!(text.contains("api key: present"), "{text}");
         assert!(text.contains("prefer: SearchOnly"), "{text}");
+        assert!(text.contains("search: q=forest"), "{text}");
         assert!(
-            text.contains("search: q=forest categories=111 purity=111"),
+            text.contains("categories: general, anime, people"),
             "{text}"
         );
+        assert!(text.contains("purity: SFW, sketchy, NSFW"), "{text}");
         assert!(text.contains("collections: none"), "{text}");
         assert!(
             text.contains("warning: NSFW purity requires Wallhaven account access"),
             "{text}"
         );
         assert!(!text.contains("super-secret-token"), "{text}");
+    }
+
+    #[test]
+    fn wallhaven_block_edit_form_exposes_search_fields() {
+        let mut app = test_app_with_wallhaven(
+            true,
+            serde_json::json!({
+                "prefer": "search_only",
+                "search": {
+                    "q": "forest",
+                    "categories": "111",
+                    "purity": "100",
+                    "sorting": "random",
+                    "order": "desc",
+                    "atleast": "1920x1080"
+                }
+            }),
+            serde_json::json!({ "wallhaven_api_key": "key" }),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 2;
+        app.start_edit_for_current();
+
+        let text = render_text(&app, 120, 32);
+
+        assert!(text.contains("Edit Wallhaven"), "{text}");
+        assert!(text.contains("Search query"), "{text}");
+        assert!(text.contains("forest"), "{text}");
+        assert!(text.contains("search_only"), "{text}");
+        assert!(text.contains("Category: General"), "{text}");
+        assert!(text.contains("Category: Anime"), "{text}");
+        assert!(text.contains("Purity: SFW"), "{text}");
+        assert!(text.contains("secrets.json"), "{text}");
+    }
+
+    #[test]
+    fn edit_form_space_toggles_bool_field_without_typing() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "on_start": false, "interval": 3600 },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": []
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 0;
+        app.start_edit_for_current();
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+
+        assert_eq!(
+            app.editing.as_ref().unwrap().field_buffer,
+            "true",
+            "enabled field should prefill"
+        );
+        update(
+            &mut app,
+            UiAction::EditFieldCycle { forward: true },
+            rt.handle(),
+        )
+        .ok();
+        assert_eq!(
+            app.editing.as_ref().unwrap().field_buffer,
+            "false",
+            "Space should toggle enabled to false"
+        );
+        let text = render_text(&app, 100, 24);
+        assert!(
+            text.contains("Space toggle") || text.contains("Space/"),
+            "footer should hint choice controls: {text}"
+        );
+    }
+
+    #[test]
+    fn wallhaven_nsfw_unavailable_without_api_key() {
+        let mut app = test_app_with_wallhaven(
+            true,
+            serde_json::json!({
+                "search": {
+                    "q": "forest",
+                    "purity": "111",
+                    "categories": "111"
+                }
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 2;
+        app.start_edit_for_current();
+
+        let text = render_text(&app, 120, 36);
+        assert!(text.contains("Purity: NSFW (requires API key)"), "{text}");
+        assert!(
+            text.contains("unavailable (set wallhaven_api_key in secrets.json)"),
+            "{text}"
+        );
+
+        // Navigate to NSFW field (index 7) and try toggling — should stay unavailable.
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+        for _ in 0..7 {
+            update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
+        }
+        update(
+            &mut app,
+            UiAction::EditFieldCycle { forward: true },
+            rt.handle(),
+        )
+        .ok();
+        let text = render_text(&app, 120, 36);
+        assert!(
+            text.contains("unavailable (set wallhaven_api_key in secrets.json)"),
+            "Space should not enable NSFW without API key: {text}"
+        );
+    }
+
+    #[test]
+    fn edit_form_space_cycles_wallhaven_sorting_enum() {
+        let mut app = test_app_with_wallhaven(
+            true,
+            serde_json::json!({
+                "search": { "sorting": "random", "purity": "100", "categories": "111", "order": "desc", "atleast": "1920x1080" }
+            }),
+            serde_json::json!({ "wallhaven_api_key": "key" }),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 2;
+        app.start_edit_for_current();
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+
+        // sorting follows prefer, search_q, and six category/purity toggles
+        for _ in 0..8 {
+            update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
+        }
+        assert_eq!(
+            app.editing.as_ref().unwrap().field_buffer,
+            "random",
+            "should land on sorting field"
+        );
+        update(
+            &mut app,
+            UiAction::EditFieldCycle { forward: true },
+            rt.handle(),
+        )
+        .ok();
+        assert_eq!(
+            app.editing.as_ref().unwrap().field_buffer,
+            "views",
+            "Space should cycle sorting to next option after random"
+        );
     }
 
     #[test]
@@ -1919,11 +2134,7 @@ mod tests {
         let app = test_app();
         let text = render_text(&app, 80, 24);
 
-        // key row visible (may wrap/truncate on 80 cols with long config footer "Enter sub" etc)
-        assert!(
-            text.contains("Enter (sub") || text.contains("subnav"),
-            "{text}"
-        );
+        assert!(text.contains("e edit"), "{text}");
         assert!(
             text.contains("space pa") || text.contains("pause"),
             "{text}"
@@ -2302,6 +2513,44 @@ mod tests {
     }
 
     #[test]
+    fn config_subnav_enter_enters_and_esc_exits_without_enter_toggle() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [
+                    { "enabled": true, "type": "folder", "path": "/tmp" },
+                    { "enabled": false, "type": "json", "label": "the one", "url": "https://ex", "image_path": "$.x" }
+                ]
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+
+        assert!(!app.config_in_subnav);
+        update(&mut app, UiAction::Enter, rt.handle()).ok();
+        assert!(app.config_in_subnav, "Enter on Sources should enter subnav");
+
+        update(&mut app, UiAction::Enter, rt.handle()).ok();
+        assert!(
+            app.config_in_subnav,
+            "Enter while in subnav must not exit; use Esc instead"
+        );
+
+        update(&mut app, UiAction::ExitConfigSubnav, rt.handle()).ok();
+        assert!(!app.config_in_subnav, "Esc should exit subnav");
+
+        let action = action_for_key(&app, KeyEvent::from(KeyCode::Esc));
+        assert_eq!(
+            action,
+            UiAction::Ignore,
+            "Esc outside subnav should not map to exit"
+        );
+    }
+
+    #[test]
     fn config_subnav_highlights_selected_item_in_details() {
         let mut app = test_app_with_config(
             serde_json::json!({
@@ -2641,18 +2890,13 @@ mod tests {
             "enabled must be prefilled from the json config value"
         );
 
-        // Reproduce the exact user flow: change enabled true -> false, then 's' (use backspaces + chars to simulate typing, then Save which auto-commits)
-        // First ensure we are on enabled (field 0 for sources)
-        // Backspace the "true" (4 chars), then type "false"
-        for _ in 0..4 {
-            update(&mut app, UiAction::EditFieldBackspace, rt.handle()).ok();
-        }
-        for c in ['f', 'a', 'l', 's', 'e'] {
-            update(&mut app, UiAction::EditFieldChar(c), rt.handle()).ok();
-        }
-        // Now hit Enter (commit field buffer + persist/save the config, keep in edit form so user can continue with other fields or Esc).
-        // This satisfies "type false and hit enter" to save without separate save key, and "enter ... should just save the config".
-        update(&mut app, UiAction::EditFieldCommit, rt.handle()).ok();
+        // Reproduce the user flow: change enabled true -> false via Space toggle (bool fields are pickers, not free text).
+        update(
+            &mut app,
+            UiAction::EditFieldCycle { forward: true },
+            rt.handle(),
+        )
+        .ok();
         let after_enter_msg = app.message.clone();
         let still_editing = app.is_editing();
         eprintln!(
@@ -2676,7 +2920,7 @@ mod tests {
             });
         assert!(
             draft_enabled_false,
-            "after backspace+type 'false' + Enter (commit + save), the draft must have enabled=false; msg={}",
+            "after Space toggle on enabled, the draft must have enabled=false; msg={}",
             after_enter_msg
         );
         assert!(
