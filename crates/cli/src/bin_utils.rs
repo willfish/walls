@@ -200,12 +200,12 @@ fn is_walls_tray_process(pid: u32) -> bool {
     #[cfg(target_os = "linux")]
     {
         if let Ok(exe) = fs::read_link(format!("/proc/{pid}/exe")) {
-            return exe
-                .file_name()
+            exe.file_name()
                 .and_then(|name| name.to_str())
-                .is_some_and(|name| name == "walls-tray");
+                .is_some_and(|name| name == "walls-tray")
+        } else {
+            false
         }
-        return false;
     }
     #[cfg(not(target_os = "linux"))]
     {
