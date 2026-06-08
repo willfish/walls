@@ -16,19 +16,52 @@ terminal event -> UiAction -> update App -> UpdateEffect -> render App
 - Render helpers in `crates/cli/src/tui/mod.rs` project the model into widgets. They should not read files, call APIs, mutate state, or inspect real time.
 - Optional image rendering lives in `crates/cli/src/tui/preview.rs` and must stay a progressive enhancement. Metadata and controls must remain useful without graphics support.
 
-## Styles
+## Design Language
+
+The TUI is a daily-driver wallpaper control surface. It should feel like a compact operational dashboard: dense, calm, predictable, and fast to scan. It is not a marketing screen, a splash page, or a decorative demo surface.
+
+Keep the first screen useful:
+
+- Show current wallpaper state, source health, queue/cache state, and available actions before ornamental content.
+- Prefer persistent footer/status affordances over instructional prose inside the tab body.
+- Keep tab bodies compact enough that narrow terminals still expose the focused block and the quit path.
+- Use decoration only when it improves parsing, such as borders, separators, selected-row markers, or status labels.
+
+Use this hierarchy:
+
+- Chrome: top-level tabs, footer keys, and persistent frame elements.
+- Tab body: operational content for the active tab.
+- Focus: the selected row, active edit field, or command/search input target.
+- Secondary metadata: paths, counts, hints, provider details, and fallback text.
+- Validation/status: errors, warnings, success, and neutral progress or result messages.
+
+Shape language:
+
+- Borders frame chrome and tab bodies; avoid nested decorative boxes.
+- Separators group dense edit forms and lists when spacing alone is too expensive.
+- Markers such as `▸` identify focus; do not rely on colour alone.
+- Unicode is appropriate for compact operational symbols (`▸`, `✓`, `✗`, separators) when the plain text remains understandable in PTY output and tests.
+- Align repeated labels and values so list scanning does not depend on colour.
+
+## Style Tokens
 
 Use semantic styles from `crates/cli/src/tui/style.rs`.
 
-- `Theme::chrome_block` for top/footer chrome.
-- `Theme::content_block` for tab bodies and preview panes.
-- `Theme::selected` for selected rows and tabs.
-- `Theme::status` for neutral, success, warning, and error states.
-- `Theme::key_hint` for compact keyboard affordances.
+- `Theme::chrome_block` frames persistent chrome such as top tabs and footers.
+- `Theme::content_block` frames the active tab body, preview panes, and focused tool surfaces.
+- `Theme::normal` is ordinary readable body content.
+- `Theme::muted` is secondary metadata, unavailable text, separators, and low-priority hints.
+- `Theme::accent` highlights titles and primary labels that establish hierarchy.
+- `Theme::heading` is a colour-neutral strong label for enabled names and compact section text.
+- `Theme::selected` is for selected list rows, tabs, and command targets.
+- `Theme::edit_focus_row`, `Theme::edit_focus_label`, and `Theme::edit_focus_value` are only for the active edit-form row.
+- `Theme::border` is the default border treatment for blocks.
+- `Theme::key_hint` is for compact keyboard affordances in chrome or status areas.
+- `Theme::status` is for neutral, success, warning, and error states.
 
-Do not add raw Ratatui colours in render code unless the semantic style module cannot express the state yet. Extend the style module first.
+Do not add raw Ratatui colours in render code unless the semantic style module cannot express the state yet. Extend `Theme` first, then update this section so future render code has a named purpose to reuse. One-off `Style::default()` usage is acceptable only for unstyled normal text or inside the style module itself.
 
-`WALLS_TUI_COLOR=never` disables colour. Important states must remain legible through labels and modifiers, not colour alone.
+`WALLS_TUI_COLOR=never` disables colour. Important states must remain legible through labels, markers, and modifiers, not colour alone. Any new token must define a no-colour representation before it is used.
 
 ## Layout Contracts
 
