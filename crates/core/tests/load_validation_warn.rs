@@ -1,5 +1,6 @@
-#[allow(dead_code)]
-mod common;
+mod common {
+    include!("common/minimal.rs");
+}
 
 use walls_core::validate::{secrets_file_permission_warnings, validate_config};
 use walls_core::WallsCtx;

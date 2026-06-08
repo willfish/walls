@@ -3,8 +3,9 @@
 //! Hermetic tests use wiremock or local fixtures so CI stays offline-safe.
 //! Live network smoke tests remain in `advance_next.rs` (`#[ignore]`).
 
-#[allow(dead_code)]
-mod common;
+mod common {
+    include!("common/harness.rs");
+}
 
 use std::fs;
 
@@ -235,6 +236,20 @@ async fn e2e_wallhaven_source_refills_and_downloads_via_mock() {
         }
     }));
     harness.write_secrets(json!({ "wallhaven_api_key": "test-key" }));
+
+    let applied = advance_expect_applied(harness.load_ctx()).await;
+    assert!(applied.ends_with("wallhaven-94x38z.jpg"));
+}
+
+#[tokio::test]
+async fn e2e_wallhaven_applies_preseeded_cached_file_without_network() {
+    let harness = FetchHarness::new();
+    harness.write_offline_empty_sources_config();
+    harness.write_cache_file("wallhaven-94x38z.jpg", b"jpeg");
+    harness.write_state(json!({
+        "cache_queue": ["94x38z"],
+        "history": [],
+    }));
 
     let applied = advance_expect_applied(harness.load_ctx()).await;
     assert!(applied.ends_with("wallhaven-94x38z.jpg"));

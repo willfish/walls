@@ -1,5 +1,6 @@
-#[allow(dead_code)]
-mod common;
+mod common {
+    include!("common/minimal.rs");
+}
 
 use std::fs;
 
