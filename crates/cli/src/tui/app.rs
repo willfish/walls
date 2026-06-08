@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 use walls_core::apply::ApplyTrigger;
 use walls_core::config::{
-    normalize_reddit_source, persist_config, reddit_sort_needs_time, reddit_sort_value,
-    reddit_time_value, Config, SelectionStrategy, SourceEntry, WallhavenPrefer,
-    REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
+    normalize_source_entry, persist_config, reddit_sort_needs_time, reddit_sort_value,
+    reddit_time_value, source_editable_fields as core_source_editable_fields, Config,
+    SelectionStrategy, SourceEntry, WallhavenPrefer, REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
 };
 use walls_core::expand_home;
 use walls_core::sources::list_images_with_paths;
@@ -1190,9 +1190,7 @@ impl App {
             if idx < self.ctx.config.sources.len() {
                 let target = EditTarget::Source(idx);
                 let mut draft = self.ctx.config.sources[idx].clone();
-                if draft.source_type == "reddit" {
-                    normalize_reddit_source(&mut draft);
-                }
+                normalize_source_entry(&mut draft);
                 let session = EditSession {
                     target,
                     draft_source: Some(draft),
@@ -1220,9 +1218,7 @@ impl App {
             EditTarget::Source(i) if *i < self.ctx.config.sources.len() => {
                 let idx = *i;
                 let mut draft = self.ctx.config.sources[idx].clone();
-                if draft.source_type == "reddit" {
-                    normalize_reddit_source(&mut draft);
-                }
+                normalize_source_entry(&mut draft);
                 EditSession {
                     target: target.clone(),
                     draft_source: Some(draft),
@@ -1419,65 +1415,12 @@ impl App {
         choice_display_value(kind, value)
     }
 
-    /// Ordered list of editable field names for a given source type.
-    /// This is the single source of truth for "100% necessary fields per config item".
-    /// Includes only fields that are part of SourceEntry, appear in example.json or tests for the type,
-    /// or are actively read by core (local path, json url+image_path, mediarss url, unsplash params, etc).
-    /// Omits title_path (serde compat only, never used in logic).
-    /// Omits attribution's "source"/"author" (present in some example but not modeled in SourceEntry).
     #[allow(dead_code)]
     pub fn source_editable_fields(src: &walls_core::config::SourceEntry) -> Vec<String> {
-        let t = src.source_type.as_str();
-        if t == "reddit" {
-            return vec![
-                "enabled".into(),
-                "query".into(),
-                "sort".into(),
-                "time".into(),
-            ];
-        }
-        let mut f = vec![
-            "enabled".to_string(),
-            "type".to_string(),
-            "label".to_string(),
-        ];
-        match t {
-            "folder" | "image" | "favorites" | "fetched" => {
-                f.push("path".into());
-            }
-            "json" => {
-                f.push("url".into());
-                f.push("image_path".into());
-            }
-            "mediarss" => {
-                f.push("url".into());
-            }
-            "attribution" => {
-                f.push("url".into());
-            }
-            "unsplash" => {
-                f.push("url".into());
-                f.push("query".into());
-                f.push("collection".into());
-                f.push("user".into());
-                f.push("topic".into());
-                f.push("orientation".into());
-            }
-            "weighting" => {
-                f.push("query".into());
-            }
-            "pixabay" => {
-                f.push("query".into());
-                f.push("api_key".into());
-            }
-            "immich" => {
-                f.push("url".into());
-                f.push("api_key".into());
-            }
-            // bing, apod, spotlight, wallhaven (global), others: no per-source extras beyond common
-            _ => {}
-        }
-        f
+        core_source_editable_fields(src)
+            .into_iter()
+            .map(str::to_string)
+            .collect()
     }
 
     #[allow(dead_code)]
@@ -1729,6 +1672,9 @@ impl App {
                             || e.contains("path")
                             || e.contains("url")
                             || e.contains("key")
+                            || e.contains("secrets")
+                            || e.contains("unsplash")
+                            || e.contains("reddit")
                     }
                     EditTarget::Wallhaven => {
                         e.contains("wallhaven") || e.contains("NSFW") || e.contains("purity")
@@ -1750,7 +1696,11 @@ impl App {
                         let names = Self::source_editable_fields(draft);
                         if field_idx < names.len() {
                             let name = &names[field_idx];
+                            let prev_type = draft.source_type.clone();
                             Self::set_source_field(draft, name, &buf);
+                            if name == "type" && draft.source_type != prev_type {
+                                normalize_source_entry(draft);
+                            }
                         }
                     }
                 }
@@ -1801,9 +1751,7 @@ impl App {
             EditTarget::Source(i) if *i < config.sources.len() => {
                 if let Some(d) = &sess.draft_source {
                     let mut saved = d.clone();
-                    if saved.source_type == "reddit" {
-                        normalize_reddit_source(&mut saved);
-                    }
+                    normalize_source_entry(&mut saved);
                     config.sources[*i] = saved;
                     success_msg = if d.source_type == "reddit" {
                         format!("config saved: reddit source #{i}")

@@ -40,7 +40,7 @@ On Linux, `walls-tray` needs GTK/libappindicator (see `flake.nix` `linuxTrayDeps
 ```bash
 mkdir -p ~/.config/walls
 cp config.example.json ~/.config/walls/config.json
-cp secrets.example.json ~/.config/walls/secrets.json   # optional wallhaven_api_key (NSFW purity)
+cp secrets.example.json ~/.config/walls/secrets.json   # API keys: wallhaven (optional), unsplash/reddit (required when enabled)
 ```
 
 ## Architecture
