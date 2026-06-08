@@ -53,6 +53,9 @@ Use semantic styles from `crates/cli/src/tui/style.rs`.
 - `Theme::muted` is secondary metadata, unavailable text, separators, and low-priority hints.
 - `Theme::accent` highlights titles and primary labels that establish hierarchy.
 - `Theme::heading` is a colour-neutral strong label for enabled names and compact section text.
+- `Theme::active_state` and `Theme::inactive_state` are for enabled/off availability state, not operation outcomes.
+- `Theme::boolean_true` and `Theme::boolean_false` are for config boolean values; `false` must not imply an error.
+- `Theme::unavailable` is for unavailable but actionable states such as locked fields or missing capabilities.
 - `Theme::selected` is for selected list rows, tabs, and command targets.
 - `Theme::edit_focus_row`, `Theme::edit_focus_label`, and `Theme::edit_focus_value` are only for the active edit-form row.
 - `Theme::border` is the default border treatment for blocks.
