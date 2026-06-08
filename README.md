@@ -79,6 +79,15 @@ cp config.example.json ~/.config/walls/config.json
 cp secrets.example.json ~/.config/walls/secrets.json   # API keys: wallhaven (optional), unsplash/reddit (required when enabled)
 ```
 
+Machine-readable JSON schemas are checked in for editor validation and
+declarative config tooling:
+
+- [`docs/schemas/config.schema.json`](docs/schemas/config.schema.json)
+- [`docs/schemas/secrets.schema.json`](docs/schemas/secrets.schema.json)
+
+Keep the example `$schema` paths when copying from the repo, or replace them with
+raw GitHub URLs when managing config outside the checkout.
+
 ## Architecture
 
 Component flow (source: [`docs/diagrams/architecture.mmd`](docs/diagrams/architecture.mmd)):
@@ -173,7 +182,7 @@ walls-tray         # tray menu → walls prev/next/toggle-pause
 | `walls favorite` | Works |
 | `walls fetch <paths...> [--move]` | Works |
 | `walls trash` | Works |
-| `walls config validate` | Works |
+| `walls config validate [--json]` | Works |
 | `walls config sync` | Reconcile tray autostart desktop entry with `config.json` |
 | `walls pause` / `walls resume` / `walls toggle-pause` | Works |
 | `walls next [--manual] [--refresh <level>]` / `walls prev` | Works (auto `next` respects pause/rotation-off; `--manual` for explicit changes; refresh levels: `all`, `filters-and-texts`, `texts`, `clock-only`) |
