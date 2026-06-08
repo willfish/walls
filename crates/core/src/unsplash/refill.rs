@@ -6,7 +6,9 @@ use crate::state::State;
 use super::cache::queue_id;
 use super::client::UnsplashClient;
 
-pub fn enabled_unsplash_sources(sources: &[SourceEntry]) -> impl Iterator<Item = &SourceEntry> {
+pub(crate) fn enabled_unsplash_sources(
+    sources: &[SourceEntry],
+) -> impl Iterator<Item = &SourceEntry> {
     sources.iter().filter(|source| {
         source.enabled && SourceKind::parse(&source.source_type) == SourceKind::Unsplash
     })

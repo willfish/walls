@@ -180,7 +180,7 @@ impl<'ctx> AdvanceNext<'ctx> {
 
     fn wallhaven_client(&self) -> anyhow::Result<crate::wallhaven::WallhavenClient> {
         crate::wallhaven::WallhavenClient::new(
-            crate::wallhaven::client::api_base(),
+            crate::wallhaven::api_base(),
             &self.ctx.secrets.wallhaven_api_key,
         )
     }
@@ -256,7 +256,7 @@ impl<'ctx> AdvanceNext<'ctx> {
 
     fn unsplash_client(&self) -> anyhow::Result<crate::unsplash::UnsplashClient> {
         crate::unsplash::UnsplashClient::new(
-            crate::unsplash::client::api_base(),
+            crate::unsplash::api_base(),
             &self.ctx.secrets.unsplash_access_key,
         )
     }
