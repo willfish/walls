@@ -85,9 +85,9 @@ and validation work, consistent with the rest of the repo.
 
 ## Tooling Gates
 
-- Keep `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --
-  -D warnings`, and `cargo test --workspace` green before publishing code
-  changes.
+- Keep the standard workspace gates green before publishing code changes:
+  `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+  and `cargo test --workspace`.
 - If a change touches optional features, run the relevant feature gate, such as
   `cargo clippy -p walls --features tui-preview --all-targets -- -D warnings`
   and `cargo test -p walls --features tui-preview`.
