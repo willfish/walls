@@ -53,8 +53,19 @@ impl TrayAccentPalette {
         }
     }
 
+    /// Monochrome white palette for dark panels (COSMIC symbolic tray icon style).
+    pub fn white() -> Self {
+        Self {
+            primary: [255, 255, 255],
+            secondary: [210, 210, 218],
+            highlight: [255, 255, 255],
+            border: [235, 235, 242],
+        }
+    }
+
     pub fn from_accent(accent: TrayAccent) -> Self {
         match accent {
+            TrayAccent::White => Self::white(),
             TrayAccent::Green => Self::green(),
             TrayAccent::Pink => Self::pink(),
             TrayAccent::Purple => Self::purple(),
@@ -111,6 +122,7 @@ pub fn resolve_tray_palette(config: &Config, wallpaper_path: Option<&Path>) -> T
 pub fn tray_accent_label(accent: TrayAccent) -> &'static str {
     match accent {
         TrayAccent::Blue => "blue",
+        TrayAccent::White => "white",
         TrayAccent::Cosmic => "cosmic",
         TrayAccent::Green => "green",
         TrayAccent::Pink => "pink",
@@ -123,6 +135,7 @@ pub fn tray_accent_label(accent: TrayAccent) -> &'static str {
 pub fn parse_tray_accent(value: &str) -> Option<TrayAccent> {
     match value.trim().to_ascii_lowercase().as_str() {
         "blue" => Some(TrayAccent::Blue),
+        "white" => Some(TrayAccent::White),
         "cosmic" => Some(TrayAccent::Cosmic),
         "green" => Some(TrayAccent::Green),
         "pink" => Some(TrayAccent::Pink),
@@ -132,9 +145,17 @@ pub fn parse_tray_accent(value: &str) -> Option<TrayAccent> {
     }
 }
 
-const TRAY_ACCENT_CHOICES_BASE: &[&str] = &["blue", "green", "pink", "purple", "wallpaper"];
-const TRAY_ACCENT_CHOICES_WITH_COSMIC: &[&str] =
-    &["blue", "cosmic", "green", "pink", "purple", "wallpaper"];
+const TRAY_ACCENT_CHOICES_BASE: &[&str] =
+    &["blue", "white", "green", "pink", "purple", "wallpaper"];
+const TRAY_ACCENT_CHOICES_WITH_COSMIC: &[&str] = &[
+    "blue",
+    "white",
+    "cosmic",
+    "green",
+    "pink",
+    "purple",
+    "wallpaper",
+];
 
 /// Tray accent values offered in config editors on this session.
 pub fn tray_accent_choices() -> &'static [&'static str] {
@@ -225,6 +246,7 @@ mod tests {
     #[test]
     fn parse_tray_accent_accepts_config_values() {
         assert_eq!(parse_tray_accent("Blue"), Some(TrayAccent::Blue));
+        assert_eq!(parse_tray_accent("white"), Some(TrayAccent::White));
         assert_eq!(parse_tray_accent("cosmic"), Some(TrayAccent::Cosmic));
         assert_eq!(parse_tray_accent("wallpaper"), Some(TrayAccent::Wallpaper));
         assert_eq!(parse_tray_accent("magenta"), None);
@@ -236,6 +258,15 @@ mod tests {
         assert_eq!(rgb_hex(palette.primary), BRAND_PRIMARY_HEX);
         assert_eq!(rgb_hex(palette.secondary), BRAND_SECONDARY_HEX);
         assert_eq!(rgb_hex(palette.highlight), BRAND_HIGHLIGHT_HEX);
+    }
+
+    #[test]
+    fn white_palette_tints_to_monochrome() {
+        let svg = "<path fill=\"#5B9AE8\"/><circle fill=\"#A8CFFF\"/><rect stroke=\"#4A90D9\"/>";
+        let tinted = tint_brand_svg(svg, &TrayAccentPalette::white());
+        assert!(tinted.contains("#FFFFFF"));
+        assert!(tinted.contains("#D2D2DA"));
+        assert!(!tinted.contains("#4A90D9"));
     }
 
     #[test]
