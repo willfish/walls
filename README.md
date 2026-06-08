@@ -157,7 +157,7 @@ walls-tray         # tray menu → walls prev/next/toggle-pause
 3. `xdg-terminal-exec` — system default terminal when on `PATH` (typical on modern Linux desktops)
 4. `alacritty` — last-resort fallback
 
-The **desktop launcher** (`walls.desktop`, installed on Linux via Nix) uses `Terminal=true`, so your desktop’s default terminal emulator runs `walls tui` — no extra config.
+The **desktop launcher** (`walls.desktop`, installed on Linux via Nix) runs `xdg-terminal-exec --app-id=walls … tui`, so your configured default terminal opens the TUI with a stable app id — same mechanism as tray “Open TUI” when `xdg-terminal-exec` is on `PATH`.
 
 Tray/desktop icon SVGs live under `assets/icons/` (`walls-tray.svg` for launchers and the active tray icon, `walls-tray-paused.svg` when rotation is inactive). Rebuild `walls-tray` after editing. Set `WALLS_TRAY_WALLPAPER_THUMBNAIL=1` to restore the old live-wallpaper thumbnail icon (paused still uses the paused brand icon).
 

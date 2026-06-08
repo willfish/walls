@@ -7,7 +7,7 @@
     pkgs.walls-tray
   ];
 
-  # Optional: pin the terminal used by tray “Open TUI” (desktop launcher uses Terminal=true instead).
+  # Optional: pin the terminal used by tray “Open TUI” (desktop launcher uses xdg-terminal-exec via walls.desktop).
   # xdg-desktop-portal provides xdg-terminal-exec on many desktops; otherwise set TERMINAL.
   # systemd.user.services.walls-tray.serviceConfig.Environment = [ "TERMINAL=ghostty" ];
 

@@ -4,8 +4,7 @@ Type=Application
 Name=walls
 GenericName=Wallpaper manager
 Comment=Rotate and manage wallpapers
-Exec=@walls@ tui
+Exec=@xdg-terminal-exec@ --app-id=walls @walls@ tui
 Icon=walls
-Terminal=true
 Categories=Utility;
 StartupNotify=true
