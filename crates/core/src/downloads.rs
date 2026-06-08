@@ -1,8 +1,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::paths::WallsPaths;
 use crate::state::State;
+
+static ATOMIC_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NukeDownloadsMode {
@@ -25,6 +29,48 @@ pub struct NukeDownloadsResult {
     pub queue_cleared: usize,
     pub cache_removed: usize,
     pub download_removed: usize,
+}
+
+pub async fn write_file_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    let tmp = atomic_tmp_path(path);
+    let result = async {
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        tokio::fs::write(&tmp, bytes).await?;
+        let file = tokio::fs::OpenOptions::new().write(true).open(&tmp).await?;
+        file.sync_all().await?;
+        drop(file);
+        tokio::fs::rename(&tmp, path).await?;
+        Ok(())
+    }
+    .await;
+
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(&tmp).await;
+    }
+    result
+}
+
+pub async fn copy_file_atomic(from: &Path, to: &Path) -> anyhow::Result<()> {
+    let tmp = atomic_tmp_path(to);
+    let result = async {
+        if let Some(parent) = to.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        tokio::fs::copy(from, &tmp).await?;
+        let file = tokio::fs::OpenOptions::new().write(true).open(&tmp).await?;
+        file.sync_all().await?;
+        drop(file);
+        tokio::fs::rename(&tmp, to).await?;
+        Ok(())
+    }
+    .await;
+
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(&tmp).await;
+    }
+    result
 }
 
 /// Returns true when `name` is a provider-fetched artifact stored under `cache_dir`.
@@ -184,4 +230,19 @@ fn prune_state_after_provider_purge(paths: &WallsPaths, state: &mut State) {
 
 fn is_under_provider_storage(paths: &WallsPaths, path: &Path) -> bool {
     path.starts_with(&paths.cache_dir) || path.starts_with(&paths.download_dir)
+}
+
+fn atomic_tmp_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("file");
+    let counter = ATOMIC_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    path.with_file_name(format!(
+        ".{file_name}.tmp-{}-{nanos}-{counter}",
+        std::process::id()
+    ))
 }

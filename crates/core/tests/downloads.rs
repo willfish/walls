@@ -1,6 +1,7 @@
 use std::fs;
 use walls_core::downloads::{
-    is_provider_cache_file_name, nuke_downloads, plan_nuke_downloads, NukeDownloadsMode,
+    copy_file_atomic, is_provider_cache_file_name, nuke_downloads, plan_nuke_downloads,
+    write_file_atomic, NukeDownloadsMode,
 };
 use walls_core::paths::WallsPaths;
 use walls_core::state::State;
@@ -26,6 +27,47 @@ fn provider_cache_file_name_detection() {
     assert!(is_provider_cache_file_name("bing-daily.jpg"));
     assert!(!is_provider_cache_file_name("my-folder-shot.png"));
     assert!(!is_provider_cache_file_name("favorite-copy.jpg"));
+}
+
+#[tokio::test]
+async fn write_file_atomic_writes_final_file() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dest = tmp.path().join("cache").join("wallhaven-abc.jpg");
+
+    write_file_atomic(&dest, b"complete")
+        .await
+        .expect("atomic write");
+
+    assert_eq!(fs::read(&dest).expect("read final"), b"complete");
+    assert_no_temp_files(tmp.path());
+}
+
+#[tokio::test]
+async fn write_file_atomic_does_not_replace_existing_directory_or_leave_temp() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dest = tmp.path().join("cache").join("wallhaven-abc.jpg");
+    fs::create_dir_all(&dest).expect("directory at final path");
+
+    let err = write_file_atomic(&dest, b"complete")
+        .await
+        .expect_err("rename over directory should fail");
+
+    assert!(err.to_string().contains("Is a directory") || err.to_string().contains("directory"));
+    assert!(dest.is_dir(), "existing final directory should remain");
+    assert_no_temp_files(tmp.path());
+}
+
+#[tokio::test]
+async fn copy_file_atomic_writes_final_copy() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path().join("source.jpg");
+    let dest = tmp.path().join("downloaded").join("source.jpg");
+    fs::write(&src, b"cached").expect("source");
+
+    copy_file_atomic(&src, &dest).await.expect("atomic copy");
+
+    assert_eq!(fs::read(&dest).expect("read copied"), b"cached");
+    assert_no_temp_files(tmp.path());
 }
 
 #[test]
@@ -104,4 +146,15 @@ fn nuke_purges_provider_files_when_queue_empty() {
     assert!(state.current.is_none());
     assert_eq!(state.history.len(), 1);
     assert!(state.history[0].ends_with("imported.jpg"));
+}
+
+fn assert_no_temp_files(root: &std::path::Path) {
+    for entry in walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+    {
+        let name = entry.file_name().to_string_lossy();
+        assert!(!name.contains(".tmp-"), "unexpected temp file: {name}");
+    }
 }

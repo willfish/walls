@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::apply::ApplyTrigger;
 use crate::ctx::WallsCtx;
+use crate::downloads::write_file_atomic;
 use crate::inline_providers::common::{download_bytes, first_enabled_source, provider_for};
 use crate::state::CurrentWallMetadata;
 
@@ -26,8 +27,7 @@ pub async fn try_attribution(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBu
     let bytes = download_bytes(&client, image_url, &provider, "attribution image download").await?;
 
     let dest = ctx.paths.cache_dir.join("attribution-fetch.jpg");
-    tokio::fs::create_dir_all(&ctx.paths.cache_dir).await.ok();
-    tokio::fs::write(&dest, &bytes).await?;
+    write_file_atomic(&dest, &bytes).await?;
 
     let label = src.label.clone().unwrap_or_else(|| "attribution".into());
     ctx.apply_file_inner_with_metadata(
