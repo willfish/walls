@@ -1,6 +1,5 @@
 //! Sources block layout for the Config tab.
 
-use ratatui::prelude::*;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::ListItem;
 use walls_core::config::{reddit_summary, source_secrets_detail_lines, SourceEntry};
@@ -181,7 +180,7 @@ fn row_spans(row: &SourceRow, theme: Theme) -> Line<'static> {
     let label_style = if row.selected {
         theme.selected()
     } else if row.enabled {
-        Style::default().add_modifier(Modifier::BOLD)
+        theme.heading()
     } else {
         theme.muted()
     };
