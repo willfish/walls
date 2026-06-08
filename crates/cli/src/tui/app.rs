@@ -430,9 +430,9 @@ fn choice_display_value(kind: EditFieldKind, value: &str) -> String {
     match kind {
         EditFieldKind::Bool => {
             if App::parse_bool_like(value) == Some(true) {
-                "✓ true".into()
+                "true".into()
             } else {
-                "✗ false".into()
+                "false".into()
             }
         }
         EditFieldKind::Choice(options) => {

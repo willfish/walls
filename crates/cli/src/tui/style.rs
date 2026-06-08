@@ -83,6 +83,35 @@ impl Theme {
         Style::default().add_modifier(Modifier::BOLD)
     }
 
+    /// Active/enabled state, distinct from successful operation feedback.
+    pub fn active_state(self) -> Style {
+        let style = Style::default().add_modifier(Modifier::BOLD);
+        match self.color_mode {
+            ColorMode::Auto => style.fg(Color::Cyan),
+            ColorMode::Never => style,
+        }
+    }
+
+    /// Inactive/off state, distinct from failed operation feedback.
+    pub fn inactive_state(self) -> Style {
+        self.muted()
+    }
+
+    /// Boolean true value in config forms. This is state, not success.
+    pub fn boolean_true(self) -> Style {
+        self.active_state()
+    }
+
+    /// Boolean false value in config forms. This is state, not error.
+    pub fn boolean_false(self) -> Style {
+        self.inactive_state()
+    }
+
+    /// Unavailable-but-actionable state. Reserve error styling for failures and validation errors.
+    pub fn unavailable(self) -> Style {
+        self.status(StatusKind::Warning)
+    }
+
     /// Selected list row, tab, or command target.
     pub fn selected(self) -> Style {
         let style = Style::default().add_modifier(Modifier::BOLD | Modifier::REVERSED);
@@ -198,7 +227,17 @@ mod tests {
 
         assert_eq!(theme.border().fg, None);
         assert_eq!(theme.key_hint().fg, None);
+        assert_eq!(theme.active_state().fg, None);
+        assert_eq!(theme.inactive_state().fg, None);
+        assert_eq!(theme.boolean_true().fg, None);
+        assert_eq!(theme.boolean_false().fg, None);
+        assert_eq!(theme.unavailable().fg, None);
         assert!(theme.selected().add_modifier.contains(Modifier::REVERSED));
+        assert!(theme.active_state().add_modifier.contains(Modifier::BOLD));
+        assert!(theme.inactive_state().add_modifier.contains(Modifier::DIM));
+        assert!(theme.boolean_true().add_modifier.contains(Modifier::BOLD));
+        assert!(theme.boolean_false().add_modifier.contains(Modifier::DIM));
+        assert!(theme.unavailable().add_modifier.contains(Modifier::BOLD));
         assert_eq!(
             theme.status(StatusKind::Error),
             Style::default().add_modifier(Modifier::BOLD | Modifier::REVERSED)
@@ -212,6 +251,16 @@ mod tests {
         assert_eq!(theme.status(StatusKind::Success).fg, Some(Color::Green));
         assert_eq!(theme.status(StatusKind::Warning).fg, Some(Color::Yellow));
         assert_eq!(theme.status(StatusKind::Error).fg, Some(Color::Red));
+        assert_eq!(theme.active_state().fg, Some(Color::Cyan));
+        assert_eq!(theme.inactive_state().fg, Some(Color::DarkGray));
+        assert_eq!(theme.boolean_true().fg, Some(Color::Cyan));
+        assert_eq!(theme.boolean_false().fg, Some(Color::DarkGray));
+        assert_eq!(theme.unavailable().fg, Some(Color::Yellow));
+        assert_ne!(theme.boolean_false().fg, theme.status(StatusKind::Error).fg);
+        assert_ne!(
+            theme.boolean_true().fg,
+            theme.status(StatusKind::Success).fg
+        );
         assert!(theme
             .status(StatusKind::Error)
             .add_modifier

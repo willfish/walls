@@ -1489,7 +1489,7 @@ fn build_rich_edit_form_items(app: &App, theme: style::Theme) -> Vec<ListItem<'s
         if trimmed.starts_with("▸ ") || trimmed.starts_with("  ") {
             // Field: split for rich modern styling.
             // - Current row: high-contrast black-on-cyan (edit_focus_*) so labels stay readable.
-            // - Non-current: labels muted. Bool values use ✓/✗ + semantic colour.
+            // - Non-current: labels muted. Bool values use state styles, not success/error.
             if let Some(colon_pos) = line.find(": ") {
                 let label_part = &line[..colon_pos];
                 let value_part = &line[colon_pos + 2..];
@@ -1501,10 +1501,12 @@ fn build_rich_edit_form_items(app: &App, theme: style::Theme) -> Vec<ListItem<'s
                 };
                 let val_st = if is_cur {
                     theme.edit_focus_value()
-                } else if value_part.starts_with("✓ true") {
-                    theme.status(style::StatusKind::Success)
-                } else if value_part.starts_with("✗ false") {
-                    theme.status(style::StatusKind::Error)
+                } else if value_part == "true" {
+                    theme.boolean_true()
+                } else if value_part == "false" {
+                    theme.boolean_false()
+                } else if value_part.starts_with("unavailable") {
+                    theme.unavailable()
                 } else {
                     theme.normal()
                 };
