@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crate::apply::ApplyTrigger;
+use crate::config::SourceKind;
 use crate::ctx::WallsCtx;
 use crate::downloads::write_file_atomic;
 use crate::inline_providers::common::{download_bytes, first_enabled_source, provider_for};
@@ -9,7 +10,7 @@ use crate::state::CurrentWallMetadata;
 pub async fn try_attribution(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
     let Some(src) = first_enabled_source(
         &ctx.config.sources,
-        "attribution",
+        SourceKind::Attribution,
         true,
         ctx.config.change.internet_enabled,
     ) else {
