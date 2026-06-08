@@ -122,7 +122,7 @@ jobs:
       - name: cargo deny
         run: nix develop -c cargo deny check
       - name: trufflehog
-        uses: trufflesecurity/trufflehog@v3.95.3
+        uses: trufflesecurity/trufflehog@v3.95.5
         with:
           extra_args: --only-verified
 
