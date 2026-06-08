@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/willfish/walls/main/docs/schemas/config.schema.json",
+  "title": "walls config.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["paths"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "change": { "$ref": "#/$defs/change" },
+    "paths": { "$ref": "#/$defs/paths" },
+    "quota": { "$ref": "#/$defs/quota" },
+    "apply": { "$ref": "#/$defs/apply" },
+    "display": { "$ref": "#/$defs/display" },
+    "selection": { "$ref": "#/$defs/selection" },
+    "tray": { "$ref": "#/$defs/tray" },
+    "sources": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/source" }
+    },
+    "wallhaven": { "$ref": "#/$defs/wallhaven" }
+  },
+  "$defs": {
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "on_start": { "type": "boolean" },
+        "interval_secs": { "type": "integer", "minimum": 0 },
+        "internet_enabled": { "type": "boolean" },
+        "safe_mode": { "type": "boolean" },
+        "change_lock_screen": { "type": "boolean" },
+        "download_preference_ratio": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cache_dir", "download_dir", "favorites_dir", "fetched_dir", "compose_dir"],
+      "properties": {
+        "cache_dir": { "type": "string", "minLength": 1 },
+        "download_dir": { "type": "string", "minLength": 1 },
+        "favorites_dir": { "type": "string", "minLength": 1 },
+        "fetched_dir": { "type": "string", "minLength": 1 },
+        "compose_dir": { "type": "string", "minLength": 1 }
+      }
+    },
+    "quota": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "size_mb": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "apply": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": ["auto", "cosmic", "cosmic-ext-bg-ctl", "gnome", "kde", "xfce", "sway", "wlroots", "hyprland", "feh", "custom-script"]
+        },
+        "cosmic": { "$ref": "#/$defs/cosmicApply" },
+        "custom_script": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "backend": { "const": "custom-script" } }, "required": ["backend"] },
+          "then": { "required": ["custom_script"] }
+        }
+      ]
+    },
+    "cosmicApply": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": { "type": "string", "enum": ["cosmic-config", "cosmic-ext-bg-ctl"] },
+        "config_path": { "type": "string" },
+        "use_original_path": { "type": "boolean" },
+        "entry": { "$ref": "#/$defs/cosmicBackgroundEntry" }
+      }
+    },
+    "cosmicBackgroundEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rotation_frequency": { "type": "integer", "minimum": 0 },
+        "filter_by_theme": { "type": "boolean" }
+      }
+    },
+    "display": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "type": "string", "enum": ["os", "center", "fill", "fit", "stretch", "tile", "zoom", "blur-pad"] },
+        "auto_rotate": { "type": "boolean" },
+        "imagemagick_command": { "type": "string" },
+        "target_width": { "type": ["integer", "null"], "minimum": 1 },
+        "target_height": { "type": ["integer", "null"], "minimum": 1 },
+        "filters": { "$ref": "#/$defs/displayFilters" }
+      }
+    },
+    "displayFilters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "command": { "type": "string" },
+        "filters": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/imageMagickFilter" }
+        }
+      }
+    },
+    "imageMagickFilter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "use_landscape_enabled": { "type": "boolean" },
+        "avoid_recent": { "type": "integer", "minimum": 0 },
+        "refetch_when_cache_below": { "type": "integer", "minimum": 0 },
+        "strategy": { "type": "string", "enum": ["random", "sequential"] }
+      }
+    },
+    "tray": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "accent": { "type": "string", "enum": ["blue", "white", "cosmic", "green", "pink", "purple", "wallpaper"] },
+        "autostart": { "$ref": "#/$defs/trayAutostart" }
+      }
+    },
+    "trayAutostart": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "desktops": {
+          "type": "object",
+          "additionalProperties": { "type": "boolean" }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "type"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "type": {
+          "type": "string",
+          "enum": ["folder", "image", "favorites", "fetched", "unsplash", "reddit", "bing", "apod", "mediarss", "attribution", "json", "pixabay", "immich", "spotlight", "weighting"]
+        },
+        "label": { "type": "string" },
+        "path": { "type": "string" },
+        "query": { "type": "string" },
+        "url": { "type": "string" },
+        "collection": { "type": "string" },
+        "user": { "type": "string" },
+        "topic": { "type": "string" },
+        "orientation": { "type": "string", "enum": ["landscape", "portrait", "squarish"] },
+        "api_key": { "type": "string" },
+        "image_path": { "type": "string", "pattern": "^\\$(\\..*)?$" },
+        "title_path": { "type": "string" },
+        "sort": { "type": "string", "enum": ["hot", "new", "top", "rising", "controversial"] },
+        "time": { "type": "string", "enum": ["hour", "day", "week", "month", "year", "all"] },
+        "source": { "type": "string" },
+        "author": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "enabled": { "const": true }, "type": { "enum": ["folder", "image"] } },
+            "required": ["enabled", "type"]
+          },
+          "then": { "required": ["path"] }
+        },
+        {
+          "if": {
+            "properties": { "enabled": { "const": true }, "type": { "const": "reddit" } },
+            "required": ["enabled", "type"]
+          },
+          "then": { "required": ["query"] }
+        },
+        {
+          "if": {
+            "properties": { "enabled": { "const": true }, "type": { "enum": ["json", "mediarss", "attribution"] } },
+            "required": ["enabled", "type"]
+          },
+          "then": { "required": ["url"] }
+        },
+        {
+          "if": {
+            "properties": { "enabled": { "const": true }, "type": { "enum": ["pixabay"] } },
+            "required": ["enabled", "type"]
+          },
+          "then": { "required": ["api_key"] }
+        },
+        {
+          "if": {
+            "properties": { "enabled": { "const": true }, "type": { "const": "immich" } },
+            "required": ["enabled", "type"]
+          },
+          "then": { "required": ["url", "api_key"] }
+        },
+        {
+          "if": {
+            "properties": { "enabled": { "const": true }, "type": { "const": "weighting" } },
+            "required": ["enabled", "type"]
+          },
+          "then": { "required": ["query"] }
+        }
+      ]
+    },
+    "wallhaven": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "collections": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/wallhavenCollection" }
+        },
+        "search": { "$ref": "#/$defs/wallhavenSearch" },
+        "prefer": { "type": "string", "enum": ["collections_then_search", "search_only", "collections_only"] }
+      }
+    },
+    "wallhavenCollection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["username", "id"],
+      "properties": {
+        "username": { "type": "string", "minLength": 1 },
+        "id": { "type": "integer", "minimum": 1 },
+        "label": { "type": ["string", "null"] }
+      }
+    },
+    "wallhavenSearch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "q": { "type": "string" },
+        "categories": { "type": "string", "pattern": "^[01]{3}$" },
+        "purity": { "type": "string", "pattern": "^[01]{3}$" },
+        "sorting": { "type": "string", "enum": ["date", "relevance", "random", "views", "favorites", "toplist"] },
+        "order": { "type": "string", "enum": ["desc", "asc"] },
+        "atleast": { "type": "string", "pattern": "^[1-9][0-9]*x[1-9][0-9]*$" }
+      }
+    }
+  }
+}

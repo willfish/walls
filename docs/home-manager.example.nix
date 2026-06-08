@@ -11,6 +11,9 @@
   # xdg-desktop-portal provides xdg-terminal-exec on many desktops; otherwise set TERMINAL.
   # systemd.user.services.walls-tray.serviceConfig.Environment = [ "TERMINAL=ghostty" ];
 
+  # JSON schemas for editor/declarative validation:
+  # - docs/schemas/config.schema.json
+  # - docs/schemas/secrets.schema.json
   xdg.configFile."walls/config.json".source = ./walls-config.json;
   # Prefer sops-nix for secrets:
   xdg.configFile."walls/secrets.json".source = ./walls-secrets.json;

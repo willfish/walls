@@ -1,4 +1,5 @@
 {
+  "$schema": "docs/schemas/config.schema.json",
   "change": {
     "enabled": true,
     "on_start": false,
