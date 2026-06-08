@@ -13,7 +13,7 @@ use walls_core::validate::{
 };
 use walls_core::WallsCtx;
 
-use super::style::ColorMode;
+use super::style::{ColorMode, StatusKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -700,6 +700,7 @@ pub struct App {
     pub config_in_subnav: bool,
     pub config_sub_cursor: usize,
     pub message: String,
+    pub message_kind: StatusKind,
     pub input_mode: InputMode,
     #[allow(dead_code)]
     pub editing: Option<EditSession>,
@@ -752,6 +753,7 @@ impl App {
             config_in_subnav: false,
             config_sub_cursor: 0,
             message: String::new(),
+            message_kind: StatusKind::Neutral,
             input_mode: InputMode::Normal,
             editing: None,
             cmd_line: String::new(),
@@ -766,6 +768,16 @@ impl App {
         };
         app.refresh_local_candidates()?;
         Ok(app)
+    }
+
+    pub fn set_message(&mut self, kind: StatusKind, message: impl Into<String>) {
+        self.message = message.into();
+        self.message_kind = kind;
+    }
+
+    pub fn clear_message(&mut self) {
+        self.message.clear();
+        self.message_kind = StatusKind::Neutral;
     }
 
     /// Reload config/state from disk. Recreates `config.json` with defaults if it was removed.
@@ -1186,7 +1198,7 @@ impl App {
                 if let Some(s) = &mut self.editing {
                     s.field_buffer = new_buf;
                 }
-                self.message.clear();
+                self.clear_message();
                 return;
             }
             if idx < self.ctx.config.sources.len() {
@@ -1206,7 +1218,7 @@ impl App {
                 if let Some(s) = &mut self.editing {
                     s.field_buffer = new_buf;
                 }
-                self.message.clear();
+                self.clear_message();
                 return;
             }
         }
@@ -1256,13 +1268,13 @@ impl App {
         if let Some(s) = &mut self.editing {
             s.field_buffer = new_buf;
         }
-        self.message.clear();
+        self.clear_message();
     }
 
     #[allow(dead_code)]
     pub fn cancel_edit(&mut self) {
         self.editing = None;
-        self.message = "edit cancelled".into();
+        self.set_message(StatusKind::Neutral, "edit cancelled");
     }
 
     #[allow(dead_code)]
@@ -1786,11 +1798,14 @@ impl App {
             if let Some(s) = &mut self.editing {
                 s.validation_errors = issues.clone();
             }
-            self.message = format!("config validation failed: {}", issues.join("; "));
+            self.set_message(
+                StatusKind::Error,
+                format!("config validation failed: {}", issues.join("; ")),
+            );
             return Ok(());
         }
         persist_config(&self.ctx.paths.config_file, &config)?;
-        self.message = success_msg;
+        self.set_message(StatusKind::Success, success_msg);
         // reload will happen via effect if we return it, but for simplicity here reload
         self.reload_ctx()?;
         if exit_on_success {
@@ -1799,37 +1814,47 @@ impl App {
         Ok(())
     }
 
-    pub fn run_command(&mut self, rt: &tokio::runtime::Handle) -> anyhow::Result<Option<String>> {
-        let msg = match ParsedCommand::parse(&self.cmd_line) {
+    pub fn run_command(
+        &mut self,
+        rt: &tokio::runtime::Handle,
+    ) -> anyhow::Result<Option<(String, StatusKind)>> {
+        let message = match ParsedCommand::parse(&self.cmd_line) {
             ParsedCommand::Next => {
                 match tokio::task::block_in_place(|| rt.block_on(self.ctx.advance_next_manual())) {
-                    Ok(Some(p)) => format!("next: {}", p.display()),
-                    Ok(None) => "next: no change".into(),
-                    Err(e) => format!("next error: {e}"),
+                    Ok(Some(p)) => (format!("next: {}", p.display()), StatusKind::Success),
+                    Ok(None) => ("next: no change".into(), StatusKind::Neutral),
+                    Err(e) => (format!("next error: {e}"), StatusKind::Error),
                 }
             }
             ParsedCommand::Prev => match self.ctx.advance_prev() {
-                Ok(Some(p)) => format!("prev: {}", p.display()),
-                Ok(None) => "prev: none".into(),
-                Err(e) => format!("prev error: {e}"),
+                Ok(Some(p)) => (format!("prev: {}", p.display()), StatusKind::Success),
+                Ok(None) => ("prev: none".into(), StatusKind::Neutral),
+                Err(e) => (format!("prev error: {e}"), StatusKind::Error),
             },
             ParsedCommand::TogglePause => {
                 self.ctx.toggle_pause()?;
-                format!("paused: {}", self.ctx.state.paused)
+                (
+                    format!("paused: {}", self.ctx.state.paused),
+                    StatusKind::Success,
+                )
             }
-            ParsedCommand::Status => format!(
-                "paused={} history={} queue={}",
-                self.ctx.state.paused,
-                self.ctx.state.history.len(),
-                self.ctx.state.cache_queue.len()
+            ParsedCommand::Status => (
+                format!(
+                    "paused={} history={} queue={}",
+                    self.ctx.state.paused,
+                    self.ctx.state.history.len(),
+                    self.ctx.state.cache_queue.len()
+                ),
+                StatusKind::Neutral,
             ),
             ParsedCommand::Quit => return Ok(None),
-            ParsedCommand::Empty => "(empty command)".into(),
-            ParsedCommand::Unknown(other) => {
-                format!("unknown command: {other} (try :next :prev :pause :status :quit)")
-            }
+            ParsedCommand::Empty => ("(empty command)".into(), StatusKind::Warning),
+            ParsedCommand::Unknown(other) => (
+                format!("unknown command: {other} (try :next :prev :pause :status :quit)"),
+                StatusKind::Error,
+            ),
         };
-        Ok(Some(msg))
+        Ok(Some(message))
     }
 
     pub fn footer_keys(&self) -> String {
