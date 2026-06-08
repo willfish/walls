@@ -997,7 +997,7 @@ impl App {
 
     pub async fn run_search(&mut self) -> anyhow::Result<()> {
         let client = walls_core::wallhaven::WallhavenClient::new(
-            walls_core::wallhaven::client::api_base(),
+            walls_core::wallhaven::api_base(),
             &self.ctx.secrets.wallhaven_api_key,
         )?;
         let mut params = self.ctx.config.wallhaven.search.clone();
@@ -1020,7 +1020,7 @@ impl App {
             return Ok(None);
         };
         let client = walls_core::wallhaven::WallhavenClient::new(
-            walls_core::wallhaven::client::api_base(),
+            walls_core::wallhaven::api_base(),
             &self.ctx.secrets.wallhaven_api_key,
         )?;
         let wp = client.fetch_wallpaper(&hit.id).await?;

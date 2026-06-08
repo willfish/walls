@@ -188,7 +188,7 @@ async fn pipe_limited_body(mut response: Response, max_bytes: u64) -> anyhow::Re
 }
 
 /// Anonymous Wallhaven access ignores NSFW purity; strip that bit when no API key is set.
-pub fn purity_for_request(purity: &str, api_key: &str) -> String {
+fn purity_for_request(purity: &str, api_key: &str) -> String {
     if !api_key.trim().is_empty() {
         return purity.to_string();
     }
@@ -198,4 +198,16 @@ pub fn purity_for_request(purity: &str, api_key: &str) -> String {
     }
     chars[2] = '0';
     chars.into_iter().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn purity_for_request_strips_nsfw_without_api_key() {
+        assert_eq!(purity_for_request("111", ""), "110");
+        assert_eq!(purity_for_request("101", ""), "100");
+        assert_eq!(purity_for_request("111", "key"), "111");
+    }
 }
