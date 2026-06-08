@@ -132,7 +132,8 @@
             mkdir -p $out/share/icons/hicolor/scalable/apps $out/share/applications
             cp assets/icons/walls-tray.svg $out/share/icons/hicolor/scalable/apps/walls.svg
             substitute ${./assets/applications/walls.desktop.in} $out/share/applications/walls.desktop \
-              --replace-fail '@walls@' "$out/bin/walls"
+              --replace-fail '@walls@' "$out/bin/walls" \
+              --replace-fail '@xdg-terminal-exec@' "${pkgs.xdg-terminal-exec}/bin/xdg-terminal-exec"
           '';
 
           meta = with lib; {
