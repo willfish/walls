@@ -48,6 +48,26 @@ pub fn reddit_subreddit(entry: &SourceEntry) -> String {
         .unwrap_or_default()
 }
 
+/// OAuth API listing URL (`oauth.reddit.com`) when credentials are configured.
+pub fn reddit_oauth_listing_url(entry: &SourceEntry) -> Option<String> {
+    let sub = reddit_subreddit(entry);
+    if sub.is_empty() {
+        return None;
+    }
+    let sub = sub.trim().trim_start_matches("r/").trim_matches('/');
+    let sort = reddit_sort_value(entry);
+    let time = reddit_time_value(entry);
+    let base = reddit_oauth_origin();
+    let url = match sort {
+        "new" => format!("{base}/r/{sub}/new.json?limit=100"),
+        "rising" => format!("{base}/r/{sub}/rising.json?limit=100"),
+        "top" => format!("{base}/r/{sub}/top.json?t={time}&limit=100"),
+        "controversial" => format!("{base}/r/{sub}/controversial.json?t={time}&limit=100"),
+        _ => format!("{base}/r/{sub}/hot.json?limit=100"),
+    };
+    Some(url)
+}
+
 /// Public JSON listing URL (Variety-compatible) for the Reddit downloader.
 pub fn reddit_json_url(entry: &SourceEntry) -> Option<String> {
     let listing = reddit_listing_url(entry)?;
@@ -202,6 +222,13 @@ fn reddit_origin() -> String {
         .to_string()
 }
 
+fn reddit_oauth_origin() -> String {
+    std::env::var("REDDIT_OAUTH_API_BASE")
+        .unwrap_or_else(|_| "https://oauth.reddit.com".to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
 fn build_listing_url(subreddit: &str, sort: &str, time: &str) -> String {
     let sub = subreddit.trim().trim_start_matches("r/").trim_matches('/');
     let base = format!("{}/r/{sub}/", reddit_origin());
@@ -244,6 +271,15 @@ mod tests {
         assert_eq!(
             reddit_json_url(&entry).as_deref(),
             Some("https://www.reddit.com/r/wallpapers/.json?limit=100")
+        );
+    }
+
+    #[test]
+    fn oauth_listing_url_for_hot_subreddit() {
+        let entry = reddit_entry("wallpapers");
+        assert_eq!(
+            reddit_oauth_listing_url(&entry).as_deref(),
+            Some("https://oauth.reddit.com/r/wallpapers/hot.json?limit=100")
         );
     }
 

@@ -15,9 +15,9 @@ pub use apply::{
 };
 pub use display::{DisplayConfig, DisplayFiltersConfig, ImageMagickFilterConfig};
 pub use reddit::{
-    normalize_reddit_source, reddit_json_url, reddit_listing_url, reddit_sort_needs_time,
-    reddit_sort_value, reddit_subreddit, reddit_summary, reddit_time_value, REDDIT_SORT_CHOICES,
-    REDDIT_TIME_CHOICES,
+    normalize_reddit_source, reddit_json_url, reddit_listing_url, reddit_oauth_listing_url,
+    reddit_sort_needs_time, reddit_sort_value, reddit_subreddit, reddit_summary, reddit_time_value,
+    REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
 };
 pub use unsplash::UnsplashSourceConfig;
 pub use wallhaven::{WallhavenCollection, WallhavenConfig, WallhavenPrefer, WallhavenSearch};
@@ -134,12 +134,18 @@ pub struct SourceEntry {
     pub time: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Secrets {
     #[serde(default)]
     pub wallhaven_api_key: String,
     #[serde(default)]
     pub unsplash_access_key: String,
+    /// Reddit API app client id (https://www.reddit.com/prefs/apps — script or installed app).
+    #[serde(default)]
+    pub reddit_client_id: String,
+    /// Reddit API app secret (empty for installed-app type).
+    #[serde(default)]
+    pub reddit_client_secret: String,
 }
 
 impl Default for ChangeConfig {
@@ -217,10 +223,7 @@ pub fn save_config_atomic(path: &Path, config: &Config) -> anyhow::Result<()> {
 
 pub fn load_secrets(path: &Path) -> anyhow::Result<Secrets> {
     if !path.exists() {
-        return Ok(Secrets {
-            wallhaven_api_key: String::new(),
-            unsplash_access_key: String::new(),
-        });
+        return Ok(Secrets::default());
     }
     let data = fs::read_to_string(path)?;
     Ok(serde_json::from_str(&data)?)
