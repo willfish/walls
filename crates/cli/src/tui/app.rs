@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use walls_core::apply::ApplyTrigger;
 use walls_core::config::{
-    normalize_reddit_source, reddit_sort_needs_time, reddit_sort_value, reddit_time_value,
-    save_config_atomic, Config, SelectionStrategy, SourceEntry, WallhavenPrefer,
+    normalize_reddit_source, persist_config, reddit_sort_needs_time, reddit_sort_value,
+    reddit_time_value, Config, SelectionStrategy, SourceEntry, WallhavenPrefer,
     REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
 };
 use walls_core::expand_home;
@@ -112,6 +112,7 @@ pub(crate) const ROTATION_BLOCK_FIELDS: &[&str] = &[
     "change_lock_screen",
     "download_preference_ratio",
     "tray_accent",
+    "tray_autostart",
 ];
 
 pub(crate) const WALLHAVEN_BLOCK_FIELDS: &[&str] = &[
@@ -198,6 +199,11 @@ fn rotation_block_draft(config: &Config) -> std::collections::HashMap<String, St
         ))
         .into(),
     );
+    let desktop = walls_core::autostart::current_autostart_desktop();
+    vals.insert(
+        "tray_autostart".into(),
+        walls_core::autostart::tray_autostart_enabled_for_desktop(config, desktop).to_string(),
+    );
     vals
 }
 
@@ -279,6 +285,9 @@ pub(crate) fn block_field_label(block: usize, key: &str) -> String {
             "change_lock_screen" => "Change lock screen".into(),
             "download_preference_ratio" => "Download preference ratio (0.0-1.0)".into(),
             "tray_accent" => "Tray icon accent".into(),
+            "tray_autostart" => walls_core::autostart::tray_autostart_field_label(
+                walls_core::autostart::current_autostart_desktop(),
+            ),
             other => other.into(),
         },
         2 => match key {
@@ -305,6 +314,15 @@ pub(crate) fn block_field_kind(block: usize, key: &str) -> EditFieldKind {
         0 => match key {
             "enabled" | "on_start" | "internet" | "safe_mode" | "change_lock_screen" => {
                 EditFieldKind::Bool
+            }
+            "tray_autostart" => {
+                if walls_core::autostart::tray_autostart_available(
+                    walls_core::autostart::current_autostart_desktop(),
+                ) {
+                    EditFieldKind::Bool
+                } else {
+                    EditFieldKind::Text
+                }
             }
             "tray_accent" => EditFieldKind::Choice(walls_core::tray_icon::tray_accent_choices()),
             _ => EditFieldKind::Text,
@@ -456,6 +474,15 @@ fn block_field_value_at(
                 walls_core::tray_icon::effective_tray_accent(config.tray.accent),
             )
             .into(),
+            "tray_autostart" => {
+                let desktop = walls_core::autostart::current_autostart_desktop();
+                if walls_core::autostart::tray_autostart_available(desktop) {
+                    walls_core::autostart::tray_autostart_enabled_for_desktop(config, desktop)
+                        .to_string()
+                } else {
+                    "unavailable".into()
+                }
+            }
             _ => String::new(),
         },
         2 => match *key {
@@ -539,6 +566,14 @@ fn apply_rotation_block_draft(
         if let Some(accent) = walls_core::tray_icon::parse_tray_accent(v) {
             if walls_core::tray_icon::tray_accent_available(accent) {
                 config.tray.accent = accent;
+            }
+        }
+    }
+    if let Some(v) = draft.get("tray_autostart") {
+        let desktop = walls_core::autostart::current_autostart_desktop();
+        if walls_core::autostart::tray_autostart_available(desktop) {
+            if let Some(enabled) = App::parse_bool_like(v) {
+                walls_core::autostart::set_tray_autostart_for_desktop(config, desktop, enabled);
             }
         }
     }
@@ -1071,7 +1106,7 @@ impl App {
             let idx = self.config_sub_cursor;
             if self.is_wallhaven_subnav_index(idx) {
                 config.wallhaven.enabled = !config.wallhaven.enabled;
-                save_config_atomic(&self.ctx.paths.config_file, &config)?;
+                persist_config(&self.ctx.paths.config_file, &config)?;
                 return Ok(Some(format!(
                     "config saved: wallhaven enabled={}",
                     config.wallhaven.enabled
@@ -1094,7 +1129,7 @@ impl App {
             _ => return Ok(None),
         };
 
-        save_config_atomic(&self.ctx.paths.config_file, &config)?;
+        persist_config(&self.ctx.paths.config_file, &config)?;
         Ok(Some(message))
     }
 
@@ -1111,7 +1146,7 @@ impl App {
             _ => return Ok(None),
         };
 
-        save_config_atomic(&self.ctx.paths.config_file, &config)?;
+        persist_config(&self.ctx.paths.config_file, &config)?;
         Ok(Some(message))
     }
 
@@ -1775,7 +1810,7 @@ impl App {
             self.message = format!("config validation failed: {}", issues.join("; "));
             return Ok(());
         }
-        save_config_atomic(&self.ctx.paths.config_file, &config)?;
+        persist_config(&self.ctx.paths.config_file, &config)?;
         self.message = success_msg;
         // reload will happen via effect if we return it, but for simplicity here reload
         self.reload_ctx()?;

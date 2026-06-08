@@ -1114,6 +1114,23 @@ fn rotation_details(app: &App) -> Vec<String> {
                 app.ctx.config.tray.accent,
             ))
         ),
+        {
+            let desktop = walls_core::autostart::current_autostart_desktop();
+            if walls_core::autostart::tray_autostart_available(desktop) {
+                format!(
+                    "tray autostart: {}",
+                    walls_core::autostart::tray_autostart_enabled_for_desktop(
+                        &app.ctx.config,
+                        desktop
+                    )
+                )
+            } else {
+                format!(
+                    "tray autostart: unavailable on {}",
+                    walls_core::tray::desktop_display_name(desktop)
+                )
+            }
+        },
     ]
 }
 

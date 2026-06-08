@@ -73,6 +73,8 @@ enum Command {
 enum ConfigSub {
     /// Validate config.json and secrets
     Validate,
+    /// Reconcile derived config artifacts (tray autostart)
+    Sync,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -127,6 +129,7 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Trash) => cmd_trash()?,
         Some(Command::Config { sub }) => match sub {
             ConfigSub::Validate => cmd_config_validate()?,
+            ConfigSub::Sync => cmd_config_sync()?,
         },
         #[cfg(feature = "tui")]
         Some(Command::Tui) | None => {
@@ -230,6 +233,22 @@ fn cmd_config_validate() -> anyhow::Result<()> {
         eprintln!("error: {err}");
     }
     std::process::exit(1);
+}
+
+fn cmd_config_sync() -> anyhow::Result<()> {
+    let ctx = WallsCtx::load()?;
+    match walls_core::autostart::sync_tray_autostart(&ctx.config)? {
+        walls_core::autostart::AutostartSyncOutcome::Written => {
+            println!("tray autostart: updated");
+        }
+        walls_core::autostart::AutostartSyncOutcome::Removed => {
+            println!("tray autostart: removed");
+        }
+        walls_core::autostart::AutostartSyncOutcome::Skipped { reason } => {
+            println!("tray autostart: skipped ({reason})");
+        }
+    }
+    Ok(())
 }
 
 fn cmd_trash() -> anyhow::Result<()> {
