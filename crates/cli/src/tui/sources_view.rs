@@ -5,7 +5,7 @@ use ratatui::widgets::ListItem;
 use walls_core::config::{reddit_summary, source_secrets_detail_lines, SourceEntry};
 
 use super::app::{App, WallhavenProviderSummary};
-use super::style::{self, Theme};
+use super::style::Theme;
 
 const SOURCE_LABEL_WIDTH: usize = 26;
 
@@ -185,9 +185,9 @@ fn row_spans(row: &SourceRow, theme: Theme) -> Line<'static> {
         theme.muted()
     };
     let state_style = if row.enabled {
-        theme.status(style::StatusKind::Success)
+        theme.active_state()
     } else {
-        theme.muted()
+        theme.inactive_state()
     };
     Line::from(vec![
         Span::raw("  "),
