@@ -1,8 +1,44 @@
 # walls
 
-Personal wallpaper manager (Rust). JSON config under `~/.config/walls`, COSMIC + Wallhaven-first.
+`walls` is a Rust wallpaper manager for Linux desktops: local folders, Wallhaven
+search/cache, a keyboard-first TUI, tray controls, and automatic rotation from a
+small JSON config under `~/.config/walls`.
 
-## Scope
+It is built around the way I actually use wallpapers: COSMIC first, Nix-friendly,
+scriptable from the CLI, and quiet enough to leave running all day.
+
+![walls CLI demo](demo/demo.gif)
+
+## What It Does
+
+- Rotates wallpapers from local folders and online providers.
+- Applies wallpapers on COSMIC, GNOME-family desktops, KDE Plasma, XFCE,
+  sway/wlroots/Hyprland, or `feh`/`nitrogen` fallback.
+- Provides the same workflow through `walls` CLI commands, `walls tui`, and
+  `walls-tray`.
+- Keeps state in predictable config/cache/state directories instead of a hidden
+  database.
+- Supports custom apply scripts as [trusted user code](docs/security.md#custom-apply-scripts).
+
+## Demo
+
+The checked-in GIF shows the isolated CLI workflow: apply an image, inspect
+status, pause rotation, and jump into the TUI entrypoint.
+
+```bash
+nix-shell -p asciinema asciinema-agg --run './demo/record-cli.sh'
+```
+
+The TUI uses the terminal alternate screen, so record it with portal-based screen
+capture instead of asciinema:
+
+```bash
+nix-shell -p gpu-screen-recorder ffmpeg --run './demo/record-tui.sh'
+```
+
+Headless TUI behaviour is covered separately by `scripts/validate-tui-pty.sh`.
+
+## Scope And Non-Goals
 
 **walls is:** a small daily-driver for rotating wallpapers — local folders, Wallhaven search/cache, CLI + TUI + tray, and an in-process rotation scheduler (Variety-style `change.interval_secs` from config). Apply targets **COSMIC** first (`cosmic-ext-bg-ctl` + RON patch), GNOME-family desktops via `gsettings`, KDE Plasma via `dbus-send`, XFCE via `xfconf-query`, sway/wlroots/Hyprland via `swaymsg` or `swaybg`, with **feh/nitrogen** fallback when detection does not find a native backend. Custom apply scripts are supported as [trusted user code](docs/security.md#custom-apply-scripts).
 
@@ -114,14 +150,6 @@ CI (GitHub Actions) runs rustfmt, clippy, `cargo test`, `cargo llvm-cov` with a 
 Rust conventions for module boundaries, errors, validation, provider I/O, and tests are documented in [`docs/rust-style.md`](docs/rust-style.md).
 
 **Local hooks** (Nix-managed, like [forte#194](https://github.com/willfish/forte/pull/194)): on `nix develop` / direnv, **commit** runs hygiene + `nixfmt` + `rustfmt` + `actionlint` + shell checks; **push** runs `clippy` and `cargo test --workspace`. Run everything with `nix fmt` or `pre-commit run -a`.
-
-## Demo
-
-CLI workflow (isolated config; `custom-script` apply). The TUI uses the terminal alternate screen — record it with [`demo/record-tui.sh`](demo/record-tui.sh) (gpu-screen-recorder), or validate headless with [`scripts/validate-tui-pty.sh`](scripts/validate-tui-pty.sh).
-
-![walls CLI demo](demo/demo.gif)
-
-Regenerate: `nix-shell -p asciinema asciinema-agg --run './demo/record-cli.sh'`
 
 ## Quick start
 
