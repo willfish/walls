@@ -55,6 +55,9 @@ impl WallsCtx {
             state,
         };
         crate::validate::warn_validation_issues(&ctx.config, &ctx.secrets, &ctx.paths);
+        if let Err(err) = crate::autostart::sync_tray_autostart(&ctx.config) {
+            tracing::warn!("tray autostart sync failed: {err:#}");
+        }
         Ok(ctx)
     }
 

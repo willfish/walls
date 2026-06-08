@@ -73,8 +73,55 @@ pub fn validate_config(config: &Config, secrets: &Secrets, paths: &WallsPaths) -
 
     validate_apply_config(config, &mut errors);
     validate_quota_config(config, &mut errors);
+    validate_tray_autostart(config, &mut errors);
 
     errors
+}
+
+fn validate_tray_autostart(config: &Config, errors: &mut Vec<String>) {
+    let Ok(config_home) = autostart_config_home() else {
+        return;
+    };
+    let tray_bin = crate::bin_resolve::resolve_binary(crate::bin_resolve::BinResolveOpts {
+        env_var: std::env::var("WALLS_TRAY_BIN").ok().as_deref(),
+        current_exe: std::env::current_exe().ok().as_deref(),
+        sibling_name: "walls-tray",
+        build_default: None,
+        path_fallback: "walls-tray",
+    });
+    let xdg_current_desktop = std::env::var("XDG_CURRENT_DESKTOP").ok();
+    let xdg_session_desktop = std::env::var("XDG_SESSION_DESKTOP").ok();
+    let desktop_startup_id = std::env::var("DESKTOP_STARTUP_ID").ok();
+    let xdg_session_type = std::env::var("XDG_SESSION_TYPE").ok();
+    let wayland_display = std::env::var("WAYLAND_DISPLAY").ok();
+    let display = std::env::var("DISPLAY").ok();
+    let opts = crate::autostart::AutostartSyncOpts {
+        config_home: &config_home,
+        tray_bin,
+        config,
+        xdg_current_desktop: xdg_current_desktop.as_deref(),
+        xdg_session_desktop: xdg_session_desktop.as_deref(),
+        desktop_startup_id: desktop_startup_id.as_deref(),
+        xdg_session_type: xdg_session_type.as_deref(),
+        wayland_display: wayland_display.as_deref(),
+        display: display.as_deref(),
+    };
+    if crate::autostart::autostart_out_of_sync(&opts) {
+        errors.push(
+            "tray autostart desktop entry is out of sync with config; run `walls config sync`"
+                .into(),
+        );
+    }
+}
+
+fn autostart_config_home() -> anyhow::Result<std::path::PathBuf> {
+    if let Ok(dir) = std::env::var("XDG_CONFIG_HOME") {
+        if !dir.is_empty() {
+            return Ok(std::path::PathBuf::from(dir));
+        }
+    }
+    let home = std::env::var("HOME")?;
+    Ok(std::path::PathBuf::from(home).join(".config"))
 }
 
 fn validate_apply_config(config: &Config, errors: &mut Vec<String>) {

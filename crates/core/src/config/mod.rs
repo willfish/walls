@@ -47,6 +47,15 @@ pub struct Config {
 pub struct TrayConfig {
     #[serde(default)]
     pub accent: TrayAccent,
+    #[serde(default)]
+    pub autostart: TrayAutostartConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct TrayAutostartConfig {
+    /// Per-desktop login autostart for `walls-tray` (keys from [`crate::autostart::desktop_config_key`]).
+    #[serde(default)]
+    pub desktops: std::collections::HashMap<String, bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
@@ -239,6 +248,15 @@ pub fn save_config_atomic(path: &Path, config: &Config) -> anyhow::Result<()> {
         f.sync_all()?;
     }
     fs::rename(tmp, path)?;
+    Ok(())
+}
+
+/// Persist config and reconcile derived artifacts (tray autostart).
+pub fn persist_config(path: &Path, config: &Config) -> anyhow::Result<()> {
+    save_config_atomic(path, config)?;
+    if let Err(err) = crate::autostart::sync_tray_autostart(config) {
+        tracing::warn!("tray autostart sync failed: {err:#}");
+    }
     Ok(())
 }
 

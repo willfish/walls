@@ -14,6 +14,7 @@
 )]
 
 pub mod apply;
+pub mod autostart;
 pub mod bin_resolve;
 pub mod config;
 pub mod cosmic_theme;

@@ -318,6 +318,7 @@ mod tests {
         let config = Config {
             tray: crate::config::TrayConfig {
                 accent: TrayAccent::Wallpaper,
+                ..crate::config::TrayConfig::default()
             },
             ..crate::config::default_config().expect("default config")
         };
