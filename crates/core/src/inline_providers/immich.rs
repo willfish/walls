@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
+use crate::config::SourceKind;
 use crate::ctx::WallsCtx;
 use crate::inline_providers::common::{
     download_bytes, first_enabled_source, provider_for, send_with_retries, write_cache_and_apply,
@@ -12,7 +13,7 @@ use crate::state::CurrentWallMetadata;
 pub async fn try_immich(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
     let Some(src) = first_enabled_source(
         &ctx.config.sources,
-        "immich",
+        SourceKind::Immich,
         true,
         ctx.config.change.internet_enabled,
     ) else {

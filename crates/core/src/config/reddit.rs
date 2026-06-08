@@ -1,4 +1,4 @@
-use super::SourceEntry;
+use super::{SourceEntry, SourceKind};
 
 pub const REDDIT_SORT_CHOICES: &[&str] = &["hot", "new", "top", "rising", "controversial"];
 pub const REDDIT_TIME_CHOICES: &[&str] = &["hour", "day", "week", "month", "year", "all"];
@@ -96,7 +96,7 @@ pub fn reddit_listing_url(entry: &SourceEntry) -> Option<String> {
 
 /// Split legacy `query` URLs into subreddit + sort + time fields for editing.
 pub fn normalize_reddit_source(entry: &mut SourceEntry) {
-    if entry.source_type != "reddit" {
+    if SourceKind::parse(&entry.source_type) != SourceKind::Reddit {
         return;
     }
 

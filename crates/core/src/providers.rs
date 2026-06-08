@@ -1,4 +1,4 @@
-use crate::config::{Config, Secrets, SourceEntry};
+use crate::config::{Config, Secrets, SourceEntry, SourceKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderKind {
@@ -68,7 +68,7 @@ impl std::fmt::Display for ProviderFailureScope {
 }
 
 pub fn provider_for_source(source: &SourceEntry) -> ProviderDescriptor {
-    let kind = source_kind(&source.source_type);
+    let kind = provider_kind(SourceKind::parse(&source.source_type));
     ProviderDescriptor {
         id: source
             .label
@@ -93,7 +93,7 @@ pub fn configured_providers(config: &Config, secrets: &Secrets) -> Vec<ProviderD
 pub fn enabled_local_sources(sources: &[SourceEntry]) -> impl Iterator<Item = &SourceEntry> {
     sources
         .iter()
-        .filter(|source| source.enabled && source_kind(&source.source_type).is_local())
+        .filter(|source| source.enabled && SourceKind::parse(&source.source_type).is_local())
 }
 
 pub fn wallhaven_provider(config: &Config, _secrets: &Secrets) -> ProviderDescriptor {
@@ -111,29 +111,30 @@ pub fn unsplash_provider(config: &Config, secrets: &Secrets) -> ProviderDescript
         kind: ProviderKind::Unsplash,
         enabled: config.change.internet_enabled
             && !secrets.unsplash_access_key.is_empty()
-            && config
-                .sources
-                .iter()
-                .any(|source| source.enabled && source.source_type == "unsplash"),
+            && config.sources.iter().any(|source| {
+                source.enabled && SourceKind::parse(&source.source_type) == SourceKind::Unsplash
+            }),
         capabilities: capabilities_for_kind(ProviderKind::Unsplash),
     }
 }
 
-fn source_kind(source_type: &str) -> ProviderKind {
-    match source_type {
-        "folder" | "favorites" | "fetched" | "image" => ProviderKind::Local,
-        "unsplash" => ProviderKind::Unsplash,
-        "reddit" => ProviderKind::Reddit,
-        "bing" => ProviderKind::Bing,
-        "apod" => ProviderKind::Apod,
-        "mediarss" => ProviderKind::MediaRss,
-        "attribution" => ProviderKind::Attribution,
-        "json" => ProviderKind::Json,
-        "pixabay" => ProviderKind::Pixabay,
-        "immich" => ProviderKind::Immich,
-        "spotlight" => ProviderKind::Spotlight,
-        "weighting" => ProviderKind::Weighting,
-        _ => ProviderKind::Unsupported,
+fn provider_kind(source_kind: SourceKind) -> ProviderKind {
+    match source_kind {
+        SourceKind::Folder | SourceKind::Favorites | SourceKind::Fetched | SourceKind::Image => {
+            ProviderKind::Local
+        }
+        SourceKind::Unsplash => ProviderKind::Unsplash,
+        SourceKind::Reddit => ProviderKind::Reddit,
+        SourceKind::Bing => ProviderKind::Bing,
+        SourceKind::Apod => ProviderKind::Apod,
+        SourceKind::MediaRss => ProviderKind::MediaRss,
+        SourceKind::Attribution => ProviderKind::Attribution,
+        SourceKind::Json => ProviderKind::Json,
+        SourceKind::Pixabay => ProviderKind::Pixabay,
+        SourceKind::Immich => ProviderKind::Immich,
+        SourceKind::Spotlight => ProviderKind::Spotlight,
+        SourceKind::Weighting => ProviderKind::Weighting,
+        SourceKind::Unknown => ProviderKind::Unsupported,
     }
 }
 

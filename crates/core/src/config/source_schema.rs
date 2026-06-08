@@ -4,7 +4,7 @@
 //! fields the TUI should expose. Prevents unrelated `SourceEntry` options from
 //! leaking into saved config when types share one serde struct.
 
-use super::{normalize_reddit_source, Secrets, SourceEntry};
+use super::{normalize_reddit_source, Secrets, SourceEntry, SourceKind};
 
 /// Hint shown on edit screens for credentials stored outside `config.json`.
 pub const SECRETS_EDIT_HINT: &str = "(edit ~/.config/walls/secrets.json)";
@@ -18,9 +18,9 @@ pub enum SourceSecretsKey {
 
 /// Returns the secrets key required for this source type, when credentials live in `secrets.json`.
 pub fn source_secrets_key(source_type: &str) -> Option<SourceSecretsKey> {
-    match source_type {
-        "unsplash" => Some(SourceSecretsKey::UnsplashAccessKey),
-        "reddit" => Some(SourceSecretsKey::RedditClientId),
+    match SourceKind::parse(source_type) {
+        SourceKind::Unsplash => Some(SourceSecretsKey::UnsplashAccessKey),
+        SourceKind::Reddit => Some(SourceSecretsKey::RedditClientId),
         _ => None,
     }
 }
@@ -54,12 +54,12 @@ const COMMON_SOURCE_FIELDS: &[&str] = &["enabled", "type", "label"];
 
 /// JSON keys that may be persisted for a given source `type`.
 pub fn source_config_fields(source_type: &str) -> &'static [&'static str] {
-    match source_type {
-        "reddit" => &["enabled", "type", "label", "query", "sort", "time"],
-        "folder" | "image" => &["enabled", "type", "label", "path"],
-        "json" => &["enabled", "type", "label", "url", "image_path"],
-        "mediarss" | "attribution" => &["enabled", "type", "label", "url"],
-        "unsplash" => &[
+    match SourceKind::parse(source_type) {
+        SourceKind::Reddit => &["enabled", "type", "label", "query", "sort", "time"],
+        SourceKind::Folder | SourceKind::Image => &["enabled", "type", "label", "path"],
+        SourceKind::Json => &["enabled", "type", "label", "url", "image_path"],
+        SourceKind::MediaRss | SourceKind::Attribution => &["enabled", "type", "label", "url"],
+        SourceKind::Unsplash => &[
             "enabled",
             "type",
             "label",
@@ -70,27 +70,30 @@ pub fn source_config_fields(source_type: &str) -> &'static [&'static str] {
             "orientation",
             "url",
         ],
-        "weighting" => &["enabled", "type", "label", "query"],
-        "pixabay" => &["enabled", "type", "label", "query", "api_key"],
-        "immich" => &["enabled", "type", "label", "url", "api_key"],
+        SourceKind::Weighting => &["enabled", "type", "label", "query"],
+        SourceKind::Pixabay => &["enabled", "type", "label", "query", "api_key"],
+        SourceKind::Immich => &["enabled", "type", "label", "url", "api_key"],
         _ => COMMON_SOURCE_FIELDS,
     }
 }
 
 /// Ordered editable fields for the TUI form (subset of config fields).
 pub fn source_editable_fields(entry: &SourceEntry) -> Vec<&'static str> {
-    match entry.source_type.as_str() {
-        "reddit" => vec!["enabled", "query", "sort", "time"],
-        "folder" | "image" | "favorites" | "fetched" => {
+    let source_kind = SourceKind::parse(&entry.source_type);
+    match source_kind {
+        SourceKind::Reddit => vec!["enabled", "query", "sort", "time"],
+        SourceKind::Folder | SourceKind::Image | SourceKind::Favorites | SourceKind::Fetched => {
             let mut fields = vec!["enabled", "type", "label"];
-            if matches!(entry.source_type.as_str(), "folder" | "image") {
+            if matches!(source_kind, SourceKind::Folder | SourceKind::Image) {
                 fields.push("path");
             }
             fields
         }
-        "json" => vec!["enabled", "type", "label", "url", "image_path"],
-        "mediarss" | "attribution" => vec!["enabled", "type", "label", "url"],
-        "unsplash" => vec![
+        SourceKind::Json => vec!["enabled", "type", "label", "url", "image_path"],
+        SourceKind::MediaRss | SourceKind::Attribution => {
+            vec!["enabled", "type", "label", "url"]
+        }
+        SourceKind::Unsplash => vec![
             "enabled",
             "type",
             "label",
@@ -101,16 +104,16 @@ pub fn source_editable_fields(entry: &SourceEntry) -> Vec<&'static str> {
             "orientation",
             "url",
         ],
-        "weighting" => vec!["enabled", "type", "label", "query"],
-        "pixabay" => vec!["enabled", "type", "label", "query", "api_key"],
-        "immich" => vec!["enabled", "type", "label", "url", "api_key"],
+        SourceKind::Weighting => vec!["enabled", "type", "label", "query"],
+        SourceKind::Pixabay => vec!["enabled", "type", "label", "query", "api_key"],
+        SourceKind::Immich => vec!["enabled", "type", "label", "url", "api_key"],
         _ => vec!["enabled", "type", "label"],
     }
 }
 
 /// Strip fields that do not belong to this source type and apply type-specific cleanup.
 pub fn normalize_source_entry(entry: &mut SourceEntry) {
-    if entry.source_type == "reddit" {
+    if SourceKind::parse(&entry.source_type) == SourceKind::Reddit {
         normalize_reddit_source(entry);
     }
 

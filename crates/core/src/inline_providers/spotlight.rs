@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crate::apply::ApplyTrigger;
+use crate::config::SourceKind;
 use crate::ctx::WallsCtx;
 use crate::inline_providers::common::{expand_dir, first_enabled_source, pick_random_image_in_dir};
 
@@ -8,7 +9,7 @@ use crate::inline_providers::common::{expand_dir, first_enabled_source, pick_ran
 pub async fn try_spotlight(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
     let Some(src) = first_enabled_source(
         &ctx.config.sources,
-        "spotlight",
+        SourceKind::Spotlight,
         false,
         ctx.config.change.internet_enabled,
     ) else {

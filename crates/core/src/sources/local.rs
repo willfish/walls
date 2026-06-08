@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use walkdir::WalkDir;
 
-use crate::config::SourceEntry;
+use crate::config::{SourceEntry, SourceKind};
 use crate::paths::expand_home;
 
 const IMAGE_EXT: &[&str] = &["jpg", "jpeg", "png", "webp", "avif", "bmp", "gif"];
@@ -23,9 +23,9 @@ pub fn list_images_with_paths(
     favorites: &Path,
     fetched: &Path,
 ) -> anyhow::Result<Vec<SourceImage>> {
-    let path = match entry.source_type.as_str() {
-        "favorites" => favorites.to_path_buf(),
-        "fetched" => fetched.to_path_buf(),
+    let path = match SourceKind::parse(&entry.source_type) {
+        SourceKind::Favorites => favorites.to_path_buf(),
+        SourceKind::Fetched => fetched.to_path_buf(),
         _ => return list_images(entry),
     };
     let mut e = entry.clone();
@@ -35,18 +35,18 @@ pub fn list_images_with_paths(
 }
 
 fn resolve_path(entry: &SourceEntry) -> anyhow::Result<PathBuf> {
-    match entry.source_type.as_str() {
-        "folder" | "image" => {
+    match SourceKind::parse(&entry.source_type) {
+        SourceKind::Folder | SourceKind::Image => {
             let p = entry
                 .path
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("missing path"))?;
             Ok(expand_home(p))
         }
-        "favorites" | "fetched" => {
+        SourceKind::Favorites | SourceKind::Fetched => {
             anyhow::bail!("favorites/fetched need WallsPaths — use list_images_with_paths")
         }
-        other => anyhow::bail!("unsupported source type: {other}"),
+        _ => anyhow::bail!("unsupported source type: {}", entry.source_type),
     }
 }
 
