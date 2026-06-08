@@ -38,6 +38,7 @@ impl Theme {
         Self { color_mode }
     }
 
+    /// Frame persistent chrome such as the tabs header or footer.
     pub fn chrome_block<'a>(self, title: &'a str) -> Block<'a> {
         Block::default()
             .borders(Borders::ALL)
@@ -46,6 +47,7 @@ impl Theme {
             .title_style(self.accent())
     }
 
+    /// Frame the active tab body, preview pane, or focused tool surface.
     pub fn content_block<'a>(self, title: &'a str) -> Block<'a> {
         Block::default()
             .borders(Borders::ALL)
@@ -54,10 +56,12 @@ impl Theme {
             .title_style(self.heading())
     }
 
+    /// Ordinary readable body text with no extra hierarchy.
     pub fn normal(self) -> Style {
         Style::default()
     }
 
+    /// Secondary metadata, unavailable text, hints, and quiet separators.
     pub fn muted(self) -> Style {
         match self.color_mode {
             ColorMode::Auto => Style::default().fg(Color::DarkGray),
@@ -65,6 +69,7 @@ impl Theme {
         }
     }
 
+    /// Primary hierarchy cue for titles and important labels.
     pub fn accent(self) -> Style {
         let style = Style::default().add_modifier(Modifier::BOLD);
         match self.color_mode {
@@ -73,10 +78,12 @@ impl Theme {
         }
     }
 
+    /// Colour-neutral strong label for compact headings and enabled names.
     pub fn heading(self) -> Style {
         Style::default().add_modifier(Modifier::BOLD)
     }
 
+    /// Selected list row, tab, or command target.
     pub fn selected(self) -> Style {
         let style = Style::default().add_modifier(Modifier::BOLD | Modifier::REVERSED);
         match self.color_mode {
@@ -93,15 +100,18 @@ impl Theme {
         }
     }
 
+    /// Label segment inside the active edit-form row.
     pub fn edit_focus_label(self) -> Style {
         let row = self.edit_focus_row();
         row.add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
     }
 
+    /// Value segment inside the active edit-form row.
     pub fn edit_focus_value(self) -> Style {
         self.edit_focus_row().add_modifier(Modifier::BOLD)
     }
 
+    /// Default block border treatment.
     pub fn border(self) -> Style {
         match self.color_mode {
             ColorMode::Auto => Style::default().fg(Color::DarkGray),
@@ -109,6 +119,7 @@ impl Theme {
         }
     }
 
+    /// Compact keyboard affordance in chrome or status areas.
     pub fn key_hint(self) -> Style {
         let style = Style::default().add_modifier(Modifier::BOLD);
         match self.color_mode {
@@ -117,6 +128,7 @@ impl Theme {
         }
     }
 
+    /// Result or validation state. Text must still name the state in no-colour mode.
     pub fn status(self, kind: StatusKind) -> Style {
         match (self.color_mode, kind) {
             (_, StatusKind::Neutral) => self.muted(),
