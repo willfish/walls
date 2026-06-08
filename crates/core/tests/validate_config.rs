@@ -100,6 +100,207 @@ fn validate_config_reports_missing_unsplash_key() {
 }
 
 #[test]
+fn validate_config_reports_enabled_provider_schema_errors() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    std::fs::create_dir_all(&images).unwrap();
+    let noop = common::write_noop_script(root.path());
+    common::write_minimal_config(root.path(), &images, &noop);
+
+    let mut config = load_config_json(root.path());
+    config["change"]["internet_enabled"] = serde_json::json!(true);
+    config["sources"] = serde_json::json!([
+        { "enabled": true, "type": "future-provider", "label": "Future" },
+        { "enabled": true, "type": "reddit", "label": "Reddit", "sort": "sideways", "time": "decade" },
+        { "enabled": true, "type": "unsplash", "label": "Unsplash", "orientation": "diagonal" },
+        { "enabled": true, "type": "json", "label": "JSON" },
+        { "enabled": true, "type": "json", "label": "Bad JSON", "url": "ftp://example.com/feed.json", "image_path": "download_url" },
+        { "enabled": true, "type": "mediarss", "label": "RSS", "url": "not a url" },
+        { "enabled": true, "type": "attribution", "label": "Attribution" },
+        { "enabled": true, "type": "pixabay", "label": "Pixabay" },
+        { "enabled": true, "type": "immich", "label": "Immich", "url": "https://immich.example" },
+        { "enabled": true, "type": "spotlight", "label": "Spotlight" },
+        { "enabled": true, "type": "weighting", "label": "Weighting" }
+    ]);
+    common::write_config(root.path(), config);
+
+    let errors = validate_root(root.path());
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("unsupported source type \"future-provider\"")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("source Some(\"Reddit\"): query is required")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("source Some(\"Reddit\").sort must be one of")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("source Some(\"Reddit\").time must be one of")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("source Some(\"Unsplash\").orientation must be one of")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("source Some(\"JSON\"): url is required")),
+        "{errors:?}"
+    );
+    assert!(
+        errors.iter().any(|error| {
+            error.contains("source Some(\"Bad JSON\").url must use http or https")
+        }),
+        "{errors:?}"
+    );
+    assert!(
+        errors.iter().any(|error| {
+            error.contains("source Some(\"Bad JSON\").image_path must be a JSON path")
+        }),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("source Some(\"RSS\").url must be a valid URL")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("source Some(\"Attribution\"): url is required")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("source Some(\"Pixabay\"): api_key is required")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("source Some(\"Immich\"): api_key is required")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("spotlight source requires path or url")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("source Some(\"Weighting\"): query is required")),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn validate_config_accepts_valid_provider_source_schemas() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    std::fs::create_dir_all(&images).unwrap();
+    let noop = common::write_noop_script(root.path());
+    common::write_minimal_config(root.path(), &images, &noop);
+
+    let spotlight = root.path().join("spotlight");
+    std::fs::create_dir_all(&spotlight).unwrap();
+    let mut config = load_config_json(root.path());
+    config["change"]["internet_enabled"] = serde_json::json!(true);
+    config["sources"] = serde_json::json!([
+        { "enabled": true, "type": "reddit", "label": "Reddit", "query": "wallpapers", "sort": "top", "time": "month" },
+        { "enabled": true, "type": "unsplash", "label": "Unsplash", "orientation": "landscape", "query": "forest" },
+        { "enabled": true, "type": "bing", "label": "Bing" },
+        { "enabled": true, "type": "apod", "label": "APOD" },
+        { "enabled": true, "type": "json", "label": "JSON", "url": "https://example.com/feed.json", "image_path": "$.download_url" },
+        { "enabled": true, "type": "mediarss", "label": "RSS", "url": "https://example.com/feed.xml" },
+        { "enabled": true, "type": "attribution", "label": "Attribution", "url": "https://example.com/wall.jpg" },
+        { "enabled": true, "type": "pixabay", "label": "Pixabay", "api_key": "pixabay-key" },
+        { "enabled": true, "type": "immich", "label": "Immich", "url": "https://immich.example", "api_key": "immich-key" },
+        { "enabled": true, "type": "spotlight", "label": "Spotlight", "path": spotlight.display().to_string() },
+        { "enabled": true, "type": "weighting", "label": "Weighting", "query": "high" }
+    ]);
+    common::write_config(root.path(), config);
+    common::write_secrets(
+        root.path(),
+        serde_json::json!({
+            "reddit_client_id": "reddit-key",
+            "unsplash_access_key": "unsplash-key"
+        }),
+    );
+
+    let errors = validate_root(root.path());
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn validate_config_skips_disabled_provider_schema_errors() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    std::fs::create_dir_all(&images).unwrap();
+    let noop = common::write_noop_script(root.path());
+    common::write_minimal_config(root.path(), &images, &noop);
+
+    let mut config = load_config_json(root.path());
+    config["change"]["internet_enabled"] = serde_json::json!(true);
+    config["sources"] = serde_json::json!([
+        { "enabled": false, "type": "future-provider" },
+        { "enabled": false, "type": "json" },
+        { "enabled": false, "type": "immich", "url": "not a url" },
+        { "enabled": false, "type": "" }
+    ]);
+    common::write_config(root.path(), config);
+
+    let errors = validate_root(root.path());
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn source_edit_validate_reports_only_selected_provider_schema_errors() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    std::fs::create_dir_all(&images).unwrap();
+    let noop = common::write_noop_script(root.path());
+    common::write_minimal_config(root.path(), &images, &noop);
+
+    let mut config = load_config_json(root.path());
+    config["sources"] = serde_json::json!([
+        { "enabled": true, "type": "json", "label": "Selected" },
+        { "enabled": true, "type": "immich", "label": "Other" }
+    ]);
+    common::write_config(root.path(), config);
+
+    let ctx = WallsCtx::load_from(root.path()).unwrap();
+    let errors = validate_source_edit(0, &ctx.config, &ctx.secrets, &ctx.paths);
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("source Some(\"Selected\"): url is required")),
+        "{errors:?}"
+    );
+    assert!(
+        !errors.iter().any(|error| error.contains("Other")),
+        "scoped source validation should not report unrelated provider errors: {errors:?}"
+    );
+}
+
+#[test]
 fn validate_config_reports_missing_custom_script_for_custom_script_backend() {
     let root = tempfile::tempdir().unwrap();
     let images = root.path().join("images");
