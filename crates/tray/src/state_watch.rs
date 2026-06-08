@@ -196,17 +196,20 @@ mod tests {
 
     #[test]
     fn poll_detects_cosmic_theme_file_change() {
+        let _lock = cosmic_theme::lock_xdg_config_home_for_tests();
         let root = tempfile::tempdir().unwrap();
-        let cosmic_root = root.path().join("cosmic");
-        fs::create_dir_all(cosmic_root.join("com.system76.CosmicTheme.Mode/v1")).unwrap();
-        fs::create_dir_all(cosmic_root.join("com.system76.CosmicTheme.Dark/v1")).unwrap();
+        let xdg = root.path().join("xdg");
+        let cosmic_config = xdg.join("cosmic");
+        fs::create_dir_all(cosmic_config.join("com.system76.CosmicTheme.Mode/v1")).unwrap();
+        fs::create_dir_all(cosmic_config.join("com.system76.CosmicTheme.Dark/v1")).unwrap();
         fs::write(
-            cosmic_root.join("com.system76.CosmicTheme.Mode/v1/is_dark"),
+            cosmic_config.join("com.system76.CosmicTheme.Mode/v1/is_dark"),
             "true",
         )
         .unwrap();
+        let accent_path = cosmic_config.join("com.system76.CosmicTheme.Dark/v1/accent");
         fs::write(
-            cosmic_root.join("com.system76.CosmicTheme.Dark/v1/accent"),
+            &accent_path,
             r"(
     base: ( red: 0.1, green: 0.2, blue: 0.3, alpha: 1.0, ),
     hover: ( red: 0.2, green: 0.3, blue: 0.4, alpha: 1.0, ),
@@ -216,8 +219,6 @@ mod tests {
         )
         .unwrap();
 
-        let xdg = root.path().join("xdg");
-        fs::create_dir_all(&xdg).unwrap();
         std::env::set_var("XDG_CONFIG_HOME", &xdg);
 
         let mut watcher = setup_watcher(root.path(), &sample_state("/tmp/a.jpg", false));
@@ -226,16 +227,9 @@ mod tests {
         write_config(&watcher.paths.config_file, &config);
         assert!(watcher.poll());
 
-        let cosmic_config = xdg.join("cosmic");
-        fs::create_dir_all(cosmic_config.join("com.system76.CosmicTheme.Mode/v1")).unwrap();
-        fs::create_dir_all(cosmic_config.join("com.system76.CosmicTheme.Dark/v1")).unwrap();
+        std::thread::sleep(Duration::from_millis(50));
         fs::write(
-            cosmic_config.join("com.system76.CosmicTheme.Mode/v1/is_dark"),
-            "true",
-        )
-        .unwrap();
-        fs::write(
-            cosmic_config.join("com.system76.CosmicTheme.Dark/v1/accent"),
+            &accent_path,
             r"(
     base: ( red: 0.5, green: 0.6, blue: 0.7, alpha: 1.0, ),
     hover: ( red: 0.6, green: 0.7, blue: 0.8, alpha: 1.0, ),
@@ -245,7 +239,7 @@ mod tests {
         )
         .unwrap();
 
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(Duration::from_millis(50));
         assert!(watcher.poll());
 
         std::env::remove_var("XDG_CONFIG_HOME");

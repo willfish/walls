@@ -2,11 +2,21 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::time::SystemTime;
 
 use regex::Regex;
 
 use crate::tray_icon::TrayAccentPalette;
+
+static XDG_CONFIG_HOME_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+/// Serialize tests that mutate `XDG_CONFIG_HOME`.
+pub fn lock_xdg_config_home_for_tests() -> MutexGuard<'static, ()> {
+    XDG_CONFIG_HOME_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 const COSMIC_THEME_MODE: &str = "com.system76.CosmicTheme.Mode/v1/is_dark";
 const COSMIC_THEME_DARK_ACCENT: &str = "com.system76.CosmicTheme.Dark/v1/accent";
@@ -148,6 +158,7 @@ mod tests {
 
     #[test]
     fn cosmic_theme_stamp_tracks_accent_file_updates() {
+        let _lock = super::lock_xdg_config_home_for_tests();
         let root = tempfile::tempdir().unwrap();
         let cosmic_root = root.path().join("cosmic");
         fs::create_dir_all(cosmic_root.join("com.system76.CosmicTheme.Mode/v1")).unwrap();
