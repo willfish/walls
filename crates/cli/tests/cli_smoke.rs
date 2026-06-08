@@ -64,6 +64,37 @@ fn cli_status_json_shows_paused_flag() {
 }
 
 #[test]
+fn cli_config_validate_formats_human_and_json_diagnostics() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home) = setup_xdg_home(tmp.path());
+    let config_file = config_home.join("walls/config.json");
+    let mut config: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&config_file).unwrap()).unwrap();
+    config["sources"][0]["path"] = serde_json::json!("/nonexistent/walls-cli-test-folder");
+    fs::write(&config_file, serde_json::to_string_pretty(&config).unwrap()).unwrap();
+
+    walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["config", "validate"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("error: sources[0].path:"))
+        .stderr(predicate::str::contains("hint:"));
+
+    walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["config", "validate", "--json"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(r#""severity": "error""#))
+        .stdout(predicate::str::contains(r#""path": "sources[0].path""#))
+        .stdout(predicate::str::contains(r#""message": "#))
+        .stdout(predicate::str::contains(r#""hint": "#));
+}
+
+#[test]
 fn cli_manual_next_works_when_paused() {
     let tmp = tempfile::tempdir().unwrap();
     let (config_home, state_home) = setup_xdg_home(tmp.path());
