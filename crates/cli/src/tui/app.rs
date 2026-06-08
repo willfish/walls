@@ -8,7 +8,9 @@ use walls_core::config::{
 };
 use walls_core::expand_home;
 use walls_core::sources::list_images_with_paths;
-use walls_core::validate::{validate_config, validate_source_edit, validate_wallhaven_edit};
+use walls_core::validate::{
+    validate_config_diagnostics, validate_source_edit, validate_wallhaven_edit,
+};
 use walls_core::WallsCtx;
 
 use super::style::ColorMode;
@@ -1981,9 +1983,15 @@ fn summarize_wallhaven_provider(ctx: &WallsCtx) -> WallhavenProviderSummary {
 }
 
 fn summarize_config_warnings(ctx: &WallsCtx) -> Vec<String> {
-    validate_config(&ctx.config, &ctx.secrets, &ctx.paths)
+    validate_config_diagnostics(&ctx.config, &ctx.secrets, &ctx.paths)
         .into_iter()
-        .map(|warning| format!("warning: {warning}"))
+        .map(|diagnostic| {
+            let mut warning = format!("warning: {}: {}", diagnostic.path, diagnostic.message);
+            if let Some(hint) = diagnostic.hint {
+                warning.push_str(&format!(" (hint: {hint})"));
+            }
+            warning
+        })
         .collect()
 }
 
