@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 mod apply;
 mod display;
 mod reddit;
+mod source_schema;
 mod unsplash;
 mod wallhaven;
 
@@ -18,6 +19,12 @@ pub use reddit::{
     normalize_reddit_source, reddit_json_url, reddit_listing_url, reddit_oauth_listing_url,
     reddit_sort_needs_time, reddit_sort_value, reddit_subreddit, reddit_summary, reddit_time_value,
     REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
+};
+pub use source_schema::{
+    normalize_config_sources, normalize_source_entry, secrets_credential_label,
+    secrets_credential_present, secrets_credential_warning, source_config_fields,
+    source_editable_fields, source_secrets_detail_lines, source_secrets_key, SourceSecretsKey,
+    SECRETS_EDIT_HINT,
 };
 pub use unsplash::UnsplashSourceConfig;
 pub use wallhaven::{WallhavenCollection, WallhavenConfig, WallhavenPrefer, WallhavenSearch};
@@ -134,33 +141,33 @@ pub struct SourceEntry {
     pub enabled: bool,
     #[serde(rename = "type")]
     pub source_type: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collection: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub topic: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub orientation: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_path: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_path: Option<String>,
     /// Reddit listing sort (`hot`, `new`, `top`, `rising`, `controversial`).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sort: Option<String>,
     /// Reddit time window for `top`/`controversial` (`hour`, `day`, `week`, `month`, `year`, `all`).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time: Option<String>,
 }
 
@@ -253,8 +260,10 @@ pub fn save_config_atomic(path: &Path, config: &Config) -> anyhow::Result<()> {
 
 /// Persist config and reconcile derived artifacts (tray autostart).
 pub fn persist_config(path: &Path, config: &Config) -> anyhow::Result<()> {
-    save_config_atomic(path, config)?;
-    if let Err(err) = crate::autostart::sync_tray_autostart(config) {
+    let mut config = config.clone();
+    normalize_config_sources(&mut config.sources);
+    save_config_atomic(path, &config)?;
+    if let Err(err) = crate::autostart::sync_tray_autostart(&config) {
         tracing::warn!("tray autostart sync failed: {err:#}");
     }
     Ok(())
@@ -292,7 +301,7 @@ fn default_strategy() -> SelectionStrategy {
 
 #[cfg(test)]
 mod tests {
-    use super::{load_config, save_config_atomic, Config, SelectionStrategy};
+    use super::{load_config, save_config_atomic, Config, SelectionStrategy, SourceEntry};
 
     fn test_config() -> Config {
         serde_json::from_value(serde_json::json!({
@@ -336,6 +345,39 @@ mod tests {
         let loaded = load_config(&path).expect("load config");
         assert!(!loaded.change.enabled);
         assert_eq!(loaded.selection.strategy, SelectionStrategy::Sequential);
+    }
+
+    #[test]
+    fn persist_config_strips_unrelated_source_fields() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("config.json");
+        let mut config = test_config();
+        config.sources.push(SourceEntry {
+            enabled: true,
+            source_type: "reddit".into(),
+            query: Some("wallpapers".into()),
+            sort: Some("hot".into()),
+            path: Some("/should-drop".into()),
+            api_key: Some("nope".into()),
+            label: None,
+            url: None,
+            collection: None,
+            user: None,
+            topic: None,
+            orientation: None,
+            image_path: None,
+            title_path: None,
+            time: None,
+        });
+
+        super::persist_config(&path, &config).expect("persist");
+
+        let loaded = load_config(&path).expect("load");
+        let reddit = &loaded.sources[0];
+        assert_eq!(reddit.source_type, "reddit");
+        assert!(reddit.path.is_none());
+        assert!(reddit.api_key.is_none());
+        assert_eq!(reddit.query.as_deref(), Some("wallpapers"));
     }
 
     #[test]
