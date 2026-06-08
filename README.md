@@ -105,6 +105,7 @@ nix develop    # installs git pre-commit + pre-push hooks (see flake.nix)
 cargo build
 cargo test           # integration tests (core + CLI + TUI smoke)
 cargo test -p walls-tray   # tray helper tests + tray build
+cargo bench -p walls-core --bench hot_paths -- --sample-size 10 --measurement-time 1   # benchmark smoke run; see docs/benchmarks.md
 nix build .#checks.x86_64-linux.default   # Nix package + tests (PTY test skipped in sandbox)
 ```
 
