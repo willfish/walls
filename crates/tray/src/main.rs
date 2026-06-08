@@ -1,87 +1,37 @@
-use std::path::PathBuf;
-use std::process::Command;
-use std::thread;
-use std::time::Duration;
-
 use tracing_subscriber::EnvFilter;
-use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-use walls_tray::{icon, lock, resolve_walls_bin, tui};
-
-fn run_walls(walls: &PathBuf, args: &[&str]) -> anyhow::Result<()> {
-    let status = Command::new(walls).args(args).status()?;
-    if !status.success() {
-        anyhow::bail!("{} {} failed: {status}", walls.display(), args.join(" "));
-    }
-    Ok(())
-}
-
-fn refresh_tray(tray: &tray_icon::TrayIcon) {
-    if let Ok(icon) = icon::icon_from_state() {
-        let _ = tray.set_icon(Some(icon));
-    }
-    let _ = tray.set_tooltip(Some(&icon::tooltip_from_state()));
-}
+use walls_tray::{lock, platform, resolve_walls_bin};
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive("walls_tray=info".parse()?))
         .init();
 
-    // Singleton: exit early/cleanly if another tray is running. This makes "ensure tray from TUI/CLI if not already started" safe (no duplicate icons).
     let lock_path = match walls_core::paths::WallsPaths::discover() {
         Ok(paths) => paths.config_dir.join("tray.lock"),
         Err(_) => std::env::temp_dir().join("walls-tray.lock"),
     };
-    let _tray_lock = match lock::try_acquire_tray_lock(&lock_path) {
-        Ok(guard) => guard,
-        Err(e) => {
-            tracing::info!("walls-tray already running ({}); exiting cleanly", e);
-            return Ok(());
-        }
-    };
+    let _tray_lock = lock::acquire_tray_lock(&lock_path)?;
 
-    let walls = resolve_walls_bin();
-    let menu = Menu::new();
-    let next = MenuItem::new("Next wallpaper", true, None);
-    let prev = MenuItem::new("Previous wallpaper", true, None);
-    let pause = MenuItem::new("Toggle pause", true, None);
-    let open_tui = MenuItem::new("Open TUI", true, None);
-    let quit = MenuItem::new("Quit tray", true, None);
-    menu.append(&next)?;
-    menu.append(&prev)?;
-    menu.append(&pause)?;
-    menu.append(&open_tui)?;
-    menu.append(&PredefinedMenuItem::separator())?;
-    menu.append(&quit)?;
+    tracing::info!(
+        "walls-tray using walls binary at {}",
+        resolve_walls_bin().display()
+    );
 
-    let icon = icon::icon_from_state()
-        .unwrap_or_else(|_| icon::default_icon().expect("default tray icon"));
-    let tray = tray_icon::TrayIconBuilder::new()
-        .with_menu(Box::new(menu))
-        .with_tooltip(icon::tooltip_from_state())
-        .with_icon(icon)
-        .build()?;
-
-    let menu_channel = MenuEvent::receiver();
-    loop {
-        if let Ok(event) = menu_channel.recv() {
-            let id = event.id().0.clone();
-            if id == next.id().0 {
-                let _ = run_walls(&walls, &["next"]);
-                refresh_tray(&tray);
-            } else if id == prev.id().0 {
-                let _ = run_walls(&walls, &["prev"]);
-                refresh_tray(&tray);
-            } else if id == pause.id().0 {
-                let _ = run_walls(&walls, &["toggle-pause"]);
-                refresh_tray(&tray);
-            } else if id == open_tui.id().0 {
-                let _ = tui::spawn_tui(&walls);
-            } else if id == quit.id().0 {
-                break;
+    if platform::prefer_status_notifier() {
+        match walls_tray::sni::run() {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                tracing::warn!("StatusNotifier tray unavailable ({err}); trying AppIndicator");
             }
         }
-        thread::sleep(Duration::from_millis(50));
     }
-    Ok(())
+
+    if platform::is_wayland_session() {
+        tracing::error!(
+            "no StatusNotifier tray host on this Wayland session; use the TUI (runs its own scheduler when tray is unavailable)"
+        );
+        return Ok(());
+    }
+
+    walls_tray::appindicator::run()
 }

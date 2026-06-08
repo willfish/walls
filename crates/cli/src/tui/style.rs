@@ -85,6 +85,23 @@ impl Theme {
         }
     }
 
+    /// High-contrast row background for the focused edit-form field (labels must stay readable).
+    pub fn edit_focus_row(self) -> Style {
+        match self.color_mode {
+            ColorMode::Auto => Style::default().fg(Color::Black).bg(Color::Cyan),
+            ColorMode::Never => Style::default().add_modifier(Modifier::REVERSED),
+        }
+    }
+
+    pub fn edit_focus_label(self) -> Style {
+        let row = self.edit_focus_row();
+        row.add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    }
+
+    pub fn edit_focus_value(self) -> Style {
+        self.edit_focus_row().add_modifier(Modifier::BOLD)
+    }
+
     pub fn border(self) -> Style {
         match self.color_mode {
             ColorMode::Auto => Style::default().fg(Color::DarkGray),

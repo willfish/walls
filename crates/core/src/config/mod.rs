@@ -6,11 +6,19 @@ use serde::{Deserialize, Serialize};
 
 mod apply;
 mod display;
+mod reddit;
 mod unsplash;
 mod wallhaven;
 
-pub use apply::{ApplyBackendSetting, ApplyConfig, CosmicApplyConfig, CosmicMethod};
+pub use apply::{
+    ApplyBackendSetting, ApplyConfig, CosmicApplyConfig, CosmicBackgroundEntryConfig, CosmicMethod,
+};
 pub use display::{DisplayConfig, DisplayFiltersConfig, ImageMagickFilterConfig};
+pub use reddit::{
+    normalize_reddit_source, reddit_json_url, reddit_listing_url, reddit_oauth_listing_url,
+    reddit_sort_needs_time, reddit_sort_value, reddit_subreddit, reddit_summary, reddit_time_value,
+    REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
+};
 pub use unsplash::UnsplashSourceConfig;
 pub use wallhaven::{WallhavenCollection, WallhavenConfig, WallhavenPrefer, WallhavenSearch};
 
@@ -31,6 +39,27 @@ pub struct Config {
     pub sources: Vec<SourceEntry>,
     #[serde(default)]
     pub wallhaven: WallhavenConfig,
+    #[serde(default)]
+    pub tray: TrayConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct TrayConfig {
+    #[serde(default)]
+    pub accent: TrayAccent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TrayAccent {
+    #[default]
+    Blue,
+    White,
+    Cosmic,
+    Green,
+    Pink,
+    Purple,
+    Wallpaper,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -118,14 +147,26 @@ pub struct SourceEntry {
     pub image_path: Option<String>,
     #[serde(default)]
     pub title_path: Option<String>,
+    /// Reddit listing sort (`hot`, `new`, `top`, `rising`, `controversial`).
+    #[serde(default)]
+    pub sort: Option<String>,
+    /// Reddit time window for `top`/`controversial` (`hour`, `day`, `week`, `month`, `year`, `all`).
+    #[serde(default)]
+    pub time: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Secrets {
     #[serde(default)]
     pub wallhaven_api_key: String,
     #[serde(default)]
     pub unsplash_access_key: String,
+    /// Reddit API app client id (<https://www.reddit.com/prefs/apps> — script or installed app).
+    #[serde(default)]
+    pub reddit_client_id: String,
+    /// Reddit API app secret (empty for installed-app type).
+    #[serde(default)]
+    pub reddit_client_secret: String,
 }
 
 impl Default for ChangeConfig {
@@ -162,9 +203,27 @@ impl Default for SelectionConfig {
     }
 }
 
+/// Default configuration for a fresh install (matches `config.example.json` at repo root).
+pub fn default_config() -> anyhow::Result<Config> {
+    Ok(serde_json::from_str(include_str!(
+        "../../../../config.example.json"
+    ))?)
+}
+
 pub fn load_config(path: &Path) -> anyhow::Result<Config> {
     let data = fs::read_to_string(path)?;
     Ok(serde_json::from_str(&data)?)
+}
+
+/// Load config from disk, writing [`default_config`] first when the file is missing.
+pub fn load_or_create_config(path: &Path) -> anyhow::Result<Config> {
+    if path.exists() {
+        return load_config(path);
+    }
+    let config = default_config()?;
+    save_config_atomic(path, &config)?;
+    tracing::info!("created default config at {}", path.display());
+    Ok(config)
 }
 
 pub fn save_config_atomic(path: &Path, config: &Config) -> anyhow::Result<()> {
@@ -185,10 +244,7 @@ pub fn save_config_atomic(path: &Path, config: &Config) -> anyhow::Result<()> {
 
 pub fn load_secrets(path: &Path) -> anyhow::Result<Secrets> {
     if !path.exists() {
-        return Ok(Secrets {
-            wallhaven_api_key: String::new(),
-            unsplash_access_key: String::new(),
-        });
+        return Ok(Secrets::default());
     }
     let data = fs::read_to_string(path)?;
     Ok(serde_json::from_str(&data)?)
@@ -231,6 +287,18 @@ mod tests {
             }
         }))
         .expect("config")
+    }
+
+    #[test]
+    fn load_or_create_config_writes_default_when_missing() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("config.json");
+
+        let loaded = super::load_or_create_config(&path).expect("create default config");
+
+        assert!(path.is_file());
+        assert!(loaded.change.enabled);
+        assert_eq!(loaded.paths.compose_dir, "~/.local/share/walls/wallpaper");
     }
 
     #[test]

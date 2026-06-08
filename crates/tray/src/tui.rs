@@ -4,7 +4,13 @@ use std::process::Command;
 pub fn spawn_tui(walls: &Path) -> anyhow::Result<()> {
     let override_cmd = std::env::var("WALLS_TUI_CMD").ok();
     let terminal = std::env::var("TERMINAL").ok();
-    let command = tui_command(walls, override_cmd.as_deref(), terminal.as_deref())?;
+    let xdg_terminal_exec = xdg_terminal_exec_on_path();
+    let command = tui_command(
+        walls,
+        override_cmd.as_deref(),
+        terminal.as_deref(),
+        xdg_terminal_exec.as_deref(),
+    )?;
     Command::new(&command.program).args(&command.args).spawn()?;
     Ok(())
 }
@@ -19,6 +25,7 @@ pub(crate) fn tui_command(
     walls: &Path,
     override_cmd: Option<&str>,
     terminal: Option<&str>,
+    xdg_terminal_exec: Option<&str>,
 ) -> anyhow::Result<TuiCommand> {
     if let Some(cmd) = override_cmd {
         return Ok(TuiCommand {
@@ -30,13 +37,36 @@ pub(crate) fn tui_command(
         });
     }
 
-    let terminal = terminal.unwrap_or("alacritty");
     let walls_str = walls
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("walls path is not valid UTF-8"))?;
+
+    if let Some(terminal) = terminal {
+        return Ok(TuiCommand {
+            program: terminal.into(),
+            args: vec!["-e".into(), walls_str.into(), "tui".into()],
+        });
+    }
+
+    if let Some(xdg_terminal_exec) = xdg_terminal_exec {
+        return Ok(TuiCommand {
+            program: xdg_terminal_exec.into(),
+            args: vec![walls_str.into(), "tui".into()],
+        });
+    }
+
     Ok(TuiCommand {
-        program: terminal.into(),
+        program: "alacritty".into(),
         args: vec!["-e".into(), walls_str.into(), "tui".into()],
+    })
+}
+
+fn xdg_terminal_exec_on_path() -> Option<String> {
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths).find_map(|dir| {
+            let candidate = dir.join("xdg-terminal-exec");
+            candidate.is_file().then(|| candidate.display().to_string())
+        })
     })
 }
 
@@ -50,6 +80,7 @@ mod tests {
             Path::new("/opt/walls/bin/walls"),
             Some("kitty -- {walls} tui"),
             Some("wezterm"),
+            Some("/usr/bin/xdg-terminal-exec"),
         )
         .unwrap();
 
@@ -62,15 +93,30 @@ mod tests {
 
     #[test]
     fn tui_command_defaults_to_terminal_exec() {
-        let command = tui_command(Path::new("/opt/walls/bin/walls"), None, Some("foot")).unwrap();
+        let command =
+            tui_command(Path::new("/opt/walls/bin/walls"), None, Some("foot"), None).unwrap();
 
         assert_eq!(command.program, "foot");
         assert_eq!(command.args, vec!["-e", "/opt/walls/bin/walls", "tui"]);
     }
 
     #[test]
+    fn tui_command_uses_xdg_terminal_exec_before_alacritty_fallback() {
+        let command = tui_command(
+            Path::new("/opt/walls/bin/walls"),
+            None,
+            None,
+            Some("/usr/bin/xdg-terminal-exec"),
+        )
+        .unwrap();
+
+        assert_eq!(command.program, "/usr/bin/xdg-terminal-exec");
+        assert_eq!(command.args, vec!["/opt/walls/bin/walls", "tui"]);
+    }
+
+    #[test]
     fn tui_command_defaults_terminal_to_alacritty() {
-        let command = tui_command(Path::new("/opt/walls/bin/walls"), None, None).unwrap();
+        let command = tui_command(Path::new("/opt/walls/bin/walls"), None, None, None).unwrap();
 
         assert_eq!(command.program, "alacritty");
         assert_eq!(command.args, vec!["-e", "/opt/walls/bin/walls", "tui"]);

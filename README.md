@@ -4,7 +4,7 @@ Personal wallpaper manager (Rust). JSON config under `~/.config/walls`, COSMIC +
 
 ## Scope
 
-**walls is:** a small daily-driver for rotating wallpapers — local folders, Wallhaven search/cache, CLI + TUI + tray, and a systemd user timer. Apply targets **COSMIC** first (`cosmic-ext-bg-ctl` + RON patch), GNOME-family desktops via `gsettings`, KDE Plasma via `dbus-send`, XFCE via `xfconf-query`, sway/wlroots/Hyprland via `swaymsg` or `swaybg`, with **feh/nitrogen** fallback when detection does not find a native backend. Custom apply scripts are supported as [trusted user code](docs/security.md#custom-apply-scripts).
+**walls is:** a small daily-driver for rotating wallpapers — local folders, Wallhaven search/cache, CLI + TUI + tray, and an in-process rotation scheduler (Variety-style `change.interval_secs` from config). Apply targets **COSMIC** first (`cosmic-ext-bg-ctl` + RON patch), GNOME-family desktops via `gsettings`, KDE Plasma via `dbus-send`, XFCE via `xfconf-query`, sway/wlroots/Hyprland via `swaymsg` or `swaybg`, with **feh/nitrogen** fallback when detection does not find a native backend. Custom apply scripts are supported as [trusted user code](docs/security.md#custom-apply-scripts).
 
 **walls is not:** a [Variety](https://github.com/varietywalls/variety) clone. There is no quotes/clock overlay pipeline and no broad multi-DE matrix beyond the tracked apply backend work ([v0.5 milestone](https://github.com/willfish/walls/milestone/4), [apply backend matrix](docs/apply-backends.md)). Image effects are opt-in and intentionally small while the [v0.6 pipeline](https://github.com/willfish/walls/milestone/5) lands. PRs welcome, but the 1.0 bar is “install and rotate on COSMIC/GNOME-family/KDE/XFCE/sway/Hyprland desktops (or feh fallback)”. [Roadmap issues](https://github.com/willfish/walls/issues?q=is%3Aopen+label%3Aepic).
 
@@ -22,7 +22,7 @@ nix build github:willfish/walls#walls
 cd walls && nix build .#walls
 ```
 
-Add `walls` and `walls-tray` to `home.packages`, wire the user timer and tray — see [`docs/home-manager.example.nix`](docs/home-manager.example.nix). Rotation interval lives in the **timer unit**, not `config.json`.
+Add `walls` and `walls-tray` to `home.packages` and enable the tray — see [`docs/home-manager.example.nix`](docs/home-manager.example.nix). Rotation interval lives in `config.json` (`change.interval_secs`); `walls-tray` runs the scheduler while the session is active.
 
 ### Cargo (from source)
 
@@ -53,14 +53,13 @@ flowchart TD
     CACHE["~/.cache/walls"]
     LOCAL[Local folders]
     WH[Wallhaven API]
-    TIMER[walls.timer]
-    TRAY[walls-tray]
+    TRAY[walls-tray scheduler]
     CLI["walls CLI / TUI"]
     CORE[walls-core]
     APPLY["COSMIC, GNOME, KDE, XFCE, wlroots, or feh"]
 
-    TIMER -->|walls next| CLI
-    TRAY -->|subprocess| CLI
+    TRAY -->|advance_next on interval| CORE
+    TRAY -->|manual prev/next| CLI
     CONFIG --> CORE
     CACHE --> CORE
     LOCAL --> CORE
@@ -69,12 +68,12 @@ flowchart TD
     CORE --> APPLY
 
     classDef box stroke:#6366f1,stroke-width:2px
-    class CONFIG,CACHE,LOCAL,WH,TIMER,TRAY,CLI,CORE,APPLY box
+    class CONFIG,CACHE,LOCAL,WH,TRAY,CLI,CORE,APPLY box
 ```
 
 - **Config** — `config.json`, `secrets.json`, locked `state.json` (history, queue, current).
 - **Cache** — downloaded Wallhaven images and composed outputs.
-- **Triggers** — `walls.timer` runs `walls next`; tray runs `walls prev` / `next` / `toggle-pause` / opens TUI.
+- **Triggers** — `walls-tray` polls `change.interval_secs` and calls `advance_next`; tray menu runs manual `prev` / `next` / `toggle-pause` and opens TUI. TUI runs the scheduler only when the tray did not start.
 
 ### TUI layout (`walls tui`)
 
@@ -145,23 +144,32 @@ walls-tray         # tray menu → walls prev/next/toggle-pause
 | `walls trash` | Works |
 | `walls config validate` | Works |
 | `walls pause` / `walls resume` / `walls toggle-pause` | Works |
-| `walls next [--refresh <level>]` / `walls prev` | Works (local + Wallhaven cache queue; refresh levels: `all`, `filters-and-texts`, `texts`, `clock-only`) |
+| `walls next [--manual] [--refresh <level>]` / `walls prev` | Works (auto `next` respects pause/rotation-off; `--manual` for explicit changes; refresh levels: `all`, `filters-and-texts`, `texts`, `clock-only`) |
 | `walls tui` | Works — tabs: Status/Now/History/Browse/Search; `:` commands; `f`/`d` favorite/trash |
 | `walls tui` with `--features tui-preview` | Optional Now-tab image preview in terminals supporting Kitty graphics (Ghostty/Kitty) or iTerm2 inline images; metadata-only fallback otherwise; set `WALLS_TUI_PREVIEW=0` to force metadata-only |
-| `walls-tray` | Works (prev/next/pause, Open TUI, thumbnail icon) |
+| `walls-tray` | Works (prev/next/pause, Open TUI, brand tray icon from `assets/icons/walls-tray.svg`) |
 
-Set `WALLS_TUI_CMD` to override the terminal launch command (`{walls}` is substituted). Defaults to `$TERMINAL -e walls tui` (terminal: `alacritty`).
+**Terminal for tray “Open TUI”** (precedence order):
 
-## systemd timer
+1. `WALLS_TUI_CMD` — full override; `{walls}` is substituted (e.g. `ghostty -e {walls} tui`)
+2. `$TERMINAL` — if set in the tray process environment (e.g. systemd `Environment=TERMINAL=ghostty`)
+3. `xdg-terminal-exec` — system default terminal when on `PATH` (typical on modern Linux desktops)
+4. `alacritty` — last-resort fallback
 
-User units live in `systemd/`. Install `walls.service`, `walls.timer`, and optionally `walls-tray.service` under `~/.config/systemd/user/`, then:
+The **desktop launcher** (`walls.desktop`, installed on Linux via Nix) uses `Terminal=true`, so your desktop’s default terminal emulator runs `walls tui` — no extra config.
 
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now walls.timer
-systemctl --user enable --now walls-tray.service
-```
+Tray/desktop icon SVGs live under `assets/icons/` (`walls-tray.svg` for launchers and the active tray icon, `walls-tray-paused.svg` when rotation is inactive). Rebuild `walls-tray` after editing. Set `WALLS_TRAY_WALLPAPER_THUMBNAIL=1` to restore the old live-wallpaper thumbnail icon (paused still uses the paused brand icon).
 
-Rotation interval is configured in the **timer unit** (or home-manager), not in `config.json`. `walls pause` makes `walls next` a no-op (exit 0).
+## Automatic rotation
+
+Configure rotation in `config.json`:
+
+- `change.enabled` — master switch
+- `change.interval_secs` — seconds between automatic changes (tray scheduler)
+- `change.on_start` — change once when `walls-tray` starts
+
+`walls pause` stops automatic rotation; use `walls next --manual` (or tray/TUI next) while paused.
+
+Optional legacy `systemd/` units remain for headless setups without a tray host; prefer the tray scheduler when a graphical session is available.
 
 See `docs/home-manager.example.nix` for a home-manager sketch.

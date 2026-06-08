@@ -56,6 +56,19 @@ impl WallsCtx {
         Ok(imported)
     }
 
+    pub fn plan_nuke_downloads(&self) -> crate::downloads::NukeDownloadsPlan {
+        crate::downloads::plan_nuke_downloads(&self.paths, &self.state)
+    }
+
+    /// Clear the provider queue, or purge cached/downloaded provider files when the queue is empty.
+    pub fn nuke_downloads(&mut self) -> anyhow::Result<crate::downloads::NukeDownloadsResult> {
+        self.with_state_lock(|ctx| {
+            let result = crate::downloads::nuke_downloads(&ctx.paths, &mut ctx.state)?;
+            ctx.save_state()?;
+            Ok(result)
+        })
+    }
+
     /// Delete the current wallpaper file and clear it from state/history.
     pub fn trash_current(&mut self) -> anyhow::Result<()> {
         self.with_state_lock(WallsCtx::trash_current_inner)

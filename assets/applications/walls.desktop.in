@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=walls
+GenericName=Wallpaper manager
+Comment=Rotate and manage wallpapers
+Exec=@walls@ tui
+Icon=walls
+Terminal=true
+Categories=Utility;
+StartupNotify=true

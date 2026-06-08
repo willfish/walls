@@ -24,7 +24,11 @@
     "cosmic": {
       "method": "cosmic-config",
       "config_path": "~/.config/cosmic/com.system76.CosmicBackground/v1/all",
-      "use_original_path": false
+      "use_original_path": false,
+      "entry": {
+        "rotation_frequency": 0,
+        "filter_by_theme": false
+      }
     },
     "custom_script": null
   },
@@ -50,6 +54,9 @@
     "refetch_when_cache_below": 5,
     "strategy": "random"
   },
+  "tray": {
+    "accent": "blue"
+  },
   "sources": [
     { "enabled": true, "type": "favorites", "label": "The Favorites folder" },
     { "enabled": true, "type": "fetched", "label": "The Fetched folder" },
@@ -69,8 +76,8 @@
     {
       "enabled": false,
       "type": "reddit",
-      "label": "Reddit wallpapers",
-      "query": "wallpapers"
+      "query": "wallpapers",
+      "sort": "hot"
     },
     {
       "enabled": false,
@@ -125,6 +132,7 @@
     }
   ],
   "wallhaven": {
+    "enabled": true,
     "collections": [],
     "search": {
       "q": "",

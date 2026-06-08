@@ -72,7 +72,7 @@ impl WallsCtx {
         Ok(Some(composed))
     }
 
-    pub(super) fn apply_file_inner(
+    pub(crate) fn apply_file_inner(
         &mut self,
         original: &Path,
         trigger: ApplyTrigger,
@@ -88,7 +88,7 @@ impl WallsCtx {
         )
     }
 
-    pub(super) fn apply_file_inner_with_metadata(
+    pub(crate) fn apply_file_inner_with_metadata(
         &mut self,
         original: &Path,
         trigger: ApplyTrigger,

@@ -64,6 +64,13 @@ pub fn validate_config(config: &Config, secrets: &Secrets, paths: &WallsPaths) -
         }
     }
 
+    if config.wallhaven.enabled
+        && config.change.internet_enabled
+        && secrets.wallhaven_api_key.is_empty()
+    {
+        errors.push("wallhaven provider enabled but secrets.wallhaven_api_key is empty".into());
+    }
+
     validate_apply_config(config, &mut errors);
     validate_quota_config(config, &mut errors);
 

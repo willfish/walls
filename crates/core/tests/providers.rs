@@ -166,6 +166,11 @@ fn wallhaven_descriptor_preserves_existing_enablement_rules() {
 
     secrets.wallhaven_api_key.clear();
     assert!(!wallhaven_provider(&test_config(true), &secrets).enabled);
+
+    secrets.wallhaven_api_key = "key".into();
+    let mut config = test_config(true);
+    config.wallhaven.enabled = false;
+    assert!(!wallhaven_provider(&config, &secrets).enabled);
 }
 
 #[test]
@@ -216,6 +221,8 @@ fn failure_scope_names_provider_and_operation() {
         api_key: None,
         image_path: None,
         title_path: None,
+        sort: None,
+        time: None,
     }])
     .remove(0);
 

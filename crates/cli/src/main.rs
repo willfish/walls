@@ -24,6 +24,9 @@ enum Command {
     Apply { path: PathBuf },
     /// Show next wallpaper from configured sources
     Next {
+        /// User-initiated next (ignores pause and rotation disabled)
+        #[arg(long, short = 'm')]
+        manual: bool,
         /// Refresh current wallpaper instead of selecting a new one
         #[arg(long, value_enum)]
         refresh: Option<CliRefreshLevel>,
@@ -112,7 +115,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Some(Command::Apply { path }) => cmd_apply(path)?,
-        Some(Command::Next { refresh }) => cmd_next(refresh).await?,
+        Some(Command::Next { manual, refresh }) => cmd_next(manual, refresh).await?,
         Some(Command::Prev) => cmd_prev()?,
         Some(Command::Status { json }) => cmd_status(json)?,
         Some(Command::Pause) => cmd_pause(true)?,
@@ -127,8 +130,8 @@ async fn main() -> anyhow::Result<()> {
         },
         #[cfg(feature = "tui")]
         Some(Command::Tui) | None => {
-            bin_utils::ensure_tray_running();
-            return tui::run().context("tui failed");
+            let tray = bin_utils::ensure_tray_running();
+            return tui::run(tray.tui_message(), tray.owns_auto_rotation()).context("tui failed");
         }
         #[cfg(not(feature = "tui"))]
         None => {
@@ -172,7 +175,7 @@ fn cmd_status(json: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn cmd_next(refresh: Option<CliRefreshLevel>) -> anyhow::Result<()> {
+async fn cmd_next(manual: bool, refresh: Option<CliRefreshLevel>) -> anyhow::Result<()> {
     let mut ctx = WallsCtx::load()?;
     if let Some(level) = refresh {
         match ctx.refresh_current(level.into())? {
@@ -181,7 +184,12 @@ async fn cmd_next(refresh: Option<CliRefreshLevel>) -> anyhow::Result<()> {
         }
         return Ok(());
     }
-    match ctx.advance_next().await? {
+    let applied = if manual {
+        ctx.advance_next_manual().await?
+    } else {
+        ctx.advance_next().await?
+    };
+    match applied {
         Some(p) => println!("{}", p.display()),
         None => println!("no change"),
     }
