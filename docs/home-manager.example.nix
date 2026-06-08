@@ -1,11 +1,15 @@
 # Example home-manager module for walls.
-# Timer interval is configured here (not duplicated in config.json).
+# Rotation interval is in config.json (change.interval_secs); walls-tray runs the scheduler.
 { pkgs, ... }:
 {
   home.packages = [
-    pkgs.walls
+    pkgs.walls # includes walls.desktop + walls-tray.svg launcher icon on Linux
     pkgs.walls-tray
   ];
+
+  # Optional: pin the terminal used by tray “Open TUI” (desktop launcher uses Terminal=true instead).
+  # xdg-desktop-portal provides xdg-terminal-exec on many desktops; otherwise set TERMINAL.
+  # systemd.user.services.walls-tray.serviceConfig.Environment = [ "TERMINAL=ghostty" ];
 
   xdg.configFile."walls/config.json".source = ./walls-config.json;
   # Prefer sops-nix for secrets:
@@ -31,13 +35,7 @@
     installConfig.WantedBy = [ "graphical-session.target" ];
   };
 
-  systemd.user.timers.walls = {
-    description = "walls wallpaper rotation";
-    timerConfig = {
-      OnBootSec = "3min";
-      OnUnitActiveSec = "30min";
-      Persistent = true;
-    };
-    installConfig.WantedBy = [ "timers.target" ];
-  };
+  # Optional: legacy systemd timer if you cannot run walls-tray (headless cron-style rotation).
+  # Prefer change.interval_secs in config.json + walls-tray.service for graphical sessions.
+  # systemd.user.timers.walls = { ... };
 }

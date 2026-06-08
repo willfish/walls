@@ -1,6 +1,7 @@
 mod app;
 #[cfg(feature = "tui-preview")]
 mod preview;
+mod sources_view;
 mod style;
 
 use std::io::{stdout, IsTerminal};
@@ -9,7 +10,7 @@ use crate::tui::app::EditTarget;
 use anyhow::Context;
 use app::{App, InputMode, Tab};
 use ratatui::backend::CrosstermBackend;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -18,6 +19,9 @@ use ratatui::prelude::*;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, List, ListItem, Paragraph, Tabs};
+use walls_core::apply::{
+    backend_setting_label, summarize_apply_environment, ApplyEnvironmentSummary,
+};
 use walls_core::config::{ApplyBackendSetting, CosmicMethod};
 use walls_core::WallsCtx;
 
@@ -90,7 +94,7 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CaptureWriter {
     }
 }
 
-pub fn run() -> anyhow::Result<()> {
+pub fn run(startup_message: Option<String>, tray_owns_rotation: bool) -> anyhow::Result<()> {
     require_tty()?;
     let rt = tokio::runtime::Handle::current();
 
@@ -102,12 +106,18 @@ pub fn run() -> anyhow::Result<()> {
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
     let _restore = TerminalRestore;
 
-    let mut app = App::new(WallsCtx::load().context(
-        "failed to load ~/.config/walls/config.json — copy config.example.json to get started",
-    )?)?;
+    let mut app = App::new(WallsCtx::load().context("failed to load walls config")?)?;
+    if let Some(message) = startup_message {
+        app.message = message;
+    }
     IN_TUI.store(true, Ordering::Relaxed);
     #[cfg(feature = "tui-preview")]
     let mut preview = preview::ImagePreview::detect();
+    let mut auto_rotator = if tray_owns_rotation {
+        None
+    } else {
+        Some(walls_core::rotation::AutoRotator::new())
+    };
 
     loop {
         terminal.draw(|f| {
@@ -116,6 +126,15 @@ pub fn run() -> anyhow::Result<()> {
             #[cfg(not(feature = "tui-preview"))]
             draw(f, &app);
         })?;
+        if let Some(rotator) = &mut auto_rotator {
+            let outcome = rt.block_on(async {
+                let mut ctx = walls_core::WallsCtx::load()?;
+                Ok::<_, anyhow::Error>(rotator.tick(&mut ctx).await)
+            });
+            if matches!(outcome, Ok(walls_core::rotation::TickOutcome::Rotated)) {
+                app.reload_ctx()?;
+            }
+        }
         if event::poll(std::time::Duration::from_millis(200))? {
             if let Event::Key(key) = event::read()? {
                 if handle_key(&mut app, key, &rt)? {
@@ -164,6 +183,9 @@ enum UiAction {
     Prev,
     Favorite,
     Trash,
+    NukeDownloadsRequest,
+    NukeDownloadsConfirm,
+    CancelNuke,
     TogglePause,
     ToggleConfigValue,
     #[allow(dead_code)]
@@ -175,6 +197,10 @@ enum UiAction {
     EditFieldCommit,
     EditFieldUp,
     EditFieldDown,
+    EditFieldCycle {
+        forward: bool,
+    },
+    ExitConfigSubnav,
     #[allow(dead_code)]
     SaveEditItem,
     SwitchTab(Tab),
@@ -219,7 +245,19 @@ fn handle_key(app: &mut App, key: KeyEvent, rt: &tokio::runtime::Handle) -> anyh
     Ok(effect == UpdateEffect::Quit)
 }
 
+fn is_shift_x(key: KeyEvent) -> bool {
+    matches!(key.code, KeyCode::Char('X' | 'x')) && key.modifiers.contains(KeyModifiers::SHIFT)
+}
+
 fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
+    if app.pending_nuke_confirm {
+        return match key.code {
+            KeyCode::Esc => UiAction::CancelNuke,
+            _ if is_shift_x(key) => UiAction::NukeDownloadsConfirm,
+            _ => UiAction::Ignore,
+        };
+    }
+
     match app.input_mode {
         InputMode::Command => {
             return match key.code {
@@ -251,6 +289,9 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
         return match key.code {
             KeyCode::Up => UiAction::EditFieldUp,
             KeyCode::Down => UiAction::EditFieldDown,
+            KeyCode::Left => UiAction::EditFieldCycle { forward: false },
+            KeyCode::Right => UiAction::EditFieldCycle { forward: true },
+            KeyCode::Char(' ') => UiAction::EditFieldCycle { forward: true },
             KeyCode::Esc => UiAction::CancelEdit,
             KeyCode::Backspace => UiAction::EditFieldBackspace,
             KeyCode::Enter => UiAction::EditFieldCommit,
@@ -266,6 +307,7 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
         KeyCode::Char('p') => UiAction::Prev,
         KeyCode::Char('f') => UiAction::Favorite,
         KeyCode::Char('d') => UiAction::Trash,
+        _ if is_shift_x(key) => UiAction::NukeDownloadsRequest,
         KeyCode::Char(' ') => UiAction::TogglePause,
         KeyCode::Char('t') if app.tab == Tab::Config => UiAction::ToggleConfigValue,
         KeyCode::Char('e') if app.tab == Tab::Config => UiAction::EditConfigItem,
@@ -279,6 +321,13 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
         KeyCode::Char('i') if app.tab == Tab::Search => UiAction::EditSearch,
         KeyCode::Down | KeyCode::Char('j') => UiAction::MoveDown,
         KeyCode::Up | KeyCode::Char('k') => UiAction::MoveUp,
+        KeyCode::Esc
+            if app.tab == Tab::Config
+                && app.config_in_subnav
+                && app.is_sources_list_block(app.config_cursor) =>
+        {
+            UiAction::ExitConfigSubnav
+        }
         KeyCode::Enter => UiAction::Enter,
         _ => UiAction::Ignore,
     }
@@ -324,12 +373,12 @@ fn update(
         }
         UiAction::SearchChar(c) => app.search_query.push(c),
         UiAction::Next => {
-            app.message = match tokio::task::block_in_place(|| rt.block_on(app.ctx.advance_next()))
-            {
-                Ok(Some(p)) => format!("next: {}", p.display()),
-                Ok(None) => "next: no change".into(),
-                Err(e) => format!("next error: {e}"),
-            };
+            app.message =
+                match tokio::task::block_in_place(|| rt.block_on(app.ctx.advance_next_manual())) {
+                    Ok(Some(p)) => format!("next: {}", p.display()),
+                    Ok(None) => "next: no change".into(),
+                    Err(e) => format!("next error: {e}"),
+                };
             return Ok(UpdateEffect::Reload);
         }
         UiAction::Prev => {
@@ -354,6 +403,28 @@ fn update(
             }
             Err(e) => app.message = format!("trash error: {e}"),
         },
+        UiAction::NukeDownloadsRequest => {
+            let prompt = app.nuke_downloads_prompt();
+            if prompt.contains("Shift+X confirm") {
+                app.pending_nuke_confirm = true;
+            }
+            app.message = prompt;
+        }
+        UiAction::NukeDownloadsConfirm => match app.nuke_downloads() {
+            Ok(msg) => {
+                app.pending_nuke_confirm = false;
+                app.message = msg;
+                return Ok(UpdateEffect::Reload);
+            }
+            Err(e) => {
+                app.pending_nuke_confirm = false;
+                app.message = format!("nuke error: {e}");
+            }
+        },
+        UiAction::CancelNuke => {
+            app.pending_nuke_confirm = false;
+            app.message = "nuke cancelled".into();
+        }
         UiAction::TogglePause => match app.ctx.toggle_pause() {
             Ok(()) => app.message = format!("paused: {}", app.ctx.state.paused),
             Err(e) => app.message = format!("pause error: {e}"),
@@ -381,43 +452,32 @@ fn update(
             app.cancel_edit();
         }
         UiAction::EditFieldChar(c) => {
-            if let Some(sess) = &mut app.editing {
-                // For bool fields (enabled, internet etc), first char on a prefilled "true"/"false" replaces
-                // instead of appends. This makes "change true to false" direct (type f... or t...) without
-                // mandatory 4x backspace first, while keeping append model for urls/queries/labels.
-                let is_bool_field = match &sess.target {
-                    EditTarget::Block(0) => sess.field_cursor == 0 || sess.field_cursor == 2,
-                    EditTarget::Source(_) => {
-                        if let Some(d) = &sess.draft_source {
-                            let names = app::App::source_editable_fields(d);
-                            if sess.field_cursor < names.len() {
-                                matches!(names[sess.field_cursor].as_str(), "enabled" | "internet")
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    }
-                    _ => false,
-                };
-                if is_bool_field
-                    && (sess.field_buffer == "true"
-                        || sess.field_buffer == "false"
-                        || sess.field_buffer.is_empty())
-                {
-                    sess.field_buffer = c.to_string();
-                } else {
-                    sess.field_buffer.push(c);
-                }
+            if matches!(
+                app.current_edit_field_kind(),
+                app::EditFieldKind::Bool | app::EditFieldKind::Choice(_)
+            ) {
+                // Choice/bool fields use Space/arrow cycling, not free text.
+            } else if let Some(sess) = &mut app.editing {
+                sess.field_buffer.push(c);
                 app.refresh_edit_validation();
             }
         }
         UiAction::EditFieldBackspace => {
-            if let Some(sess) = &mut app.editing {
+            if matches!(
+                app.current_edit_field_kind(),
+                app::EditFieldKind::Bool | app::EditFieldKind::Choice(_)
+            ) {
+                // Choice/bool fields use Space/arrow cycling, not free text.
+            } else if let Some(sess) = &mut app.editing {
                 sess.field_buffer.pop();
                 app.refresh_edit_validation();
             }
+        }
+        UiAction::EditFieldCycle { forward } => {
+            app.cycle_current_edit_field(forward);
+        }
+        UiAction::ExitConfigSubnav => {
+            app.exit_config_subnav();
         }
         UiAction::EditFieldCommit => {
             if app.editing.is_some() {
@@ -455,14 +515,17 @@ fn update(
         UiAction::EditFieldDown => {
             // Pure field move inside edit form (triggered by arrows; letter j/k no longer do this).
             // No auto commit/persist on arrow (uncommitted typing on a field is lost if you arrow away; hit Enter to commit+save a field).
+            let max_fields = app.edit_field_count();
             let buf = if let Some(sess) = &app.editing {
-                let c = sess.field_cursor + 1;
+                let c = (sess.field_cursor + 1).min(max_fields.saturating_sub(1));
                 app.edit_field_value_at(&sess.target, c)
             } else {
                 String::new()
             };
             if let Some(sess) = &mut app.editing {
-                sess.field_cursor += 1;
+                if sess.field_cursor + 1 < max_fields {
+                    sess.field_cursor += 1;
+                }
                 sess.field_buffer = buf;
             }
         }
@@ -520,8 +583,8 @@ fn handle_enter(app: &mut App, rt: &tokio::runtime::Handle) -> anyhow::Result<Up
                 return Ok(UpdateEffect::Reload);
             }
         }
-        Tab::Config if app.is_sources_list_block(app.config_cursor) => {
-            app.toggle_config_subnav();
+        Tab::Config if app.is_sources_list_block(app.config_cursor) && !app.config_in_subnav => {
+            app.enter_config_subnav();
         }
         _ => {}
     }
@@ -651,8 +714,7 @@ fn render_tab_body(
             if app.tab == Tab::Config && app.is_editing() {
                 render_rich_edit(f, area, app, theme, &edit_target_title(app));
             } else {
-                let (title, body) = (app.tab.title().to_string(), tab_lines(app));
-                render_lines(f, area, &title, body, theme);
+                render_tab_content(f, area, app, theme, area.width);
             }
         }
     }
@@ -670,34 +732,167 @@ fn render_tab_body(
     if app.tab == Tab::Config && app.is_editing() {
         render_rich_edit(f, area, app, theme, &edit_target_title(app));
     } else {
-        let (title, body) = (app.tab.title().to_string(), tab_lines(app));
-        render_lines(f, area, &title, body, theme);
+        render_tab_content(f, area, app, theme, area.width);
     }
 }
 
-fn tab_lines(app: &App) -> Vec<String> {
+fn render_tab_content(f: &mut Frame, area: Rect, app: &App, theme: style::Theme, width: u16) {
+    if app.tab == Tab::Config {
+        render_config_tab(f, area, app, theme);
+        return;
+    }
+    let (title, body) = (app.tab.title().to_string(), tab_lines(app, width));
+    render_lines(f, area, &title, body, theme);
+}
+
+fn render_config_tab(f: &mut Frame, area: Rect, app: &App, theme: style::Theme) {
+    let items = config_list_items(app, theme);
+    let list = List::new(items)
+        .block(theme.content_block("Config"))
+        .style(theme.normal());
+    f.render_widget(list, area);
+}
+
+fn tab_lines(app: &App, width: u16) -> Vec<String> {
     match app.tab {
         Tab::Config => config_lines(app),
         Tab::Now => now_lines(app),
         Tab::History => app.history_lines(),
         Tab::Browse => app.browse_lines(),
         Tab::Search => app.search_lines(),
-        Tab::Logs => app.logs_lines(),
+        Tab::Logs => app.logs_lines(width),
     }
 }
 
 fn render_lines(f: &mut Frame, area: Rect, title: &str, body: Vec<String>, theme: style::Theme) {
     let items: Vec<ListItem> = body
         .iter()
-        .map(|line| {
-            let item_style = line_style(line, theme);
-            ListItem::new(line.as_str()).style(item_style)
-        })
+        .map(|line| string_list_item(line, theme))
         .collect();
     let list = List::new(items)
         .block(theme.content_block(title))
         .style(theme.normal());
     f.render_widget(list, area);
+}
+
+fn string_list_item(line: &str, theme: style::Theme) -> ListItem<'static> {
+    ListItem::new(line.to_string()).style(line_style(line, theme))
+}
+
+struct ConfigBlock<'a> {
+    index: usize,
+    cursor: usize,
+    title: &'a str,
+    enabled: bool,
+    summary: String,
+    details: Vec<ListItem<'static>>,
+    theme: style::Theme,
+}
+
+fn config_list_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
+    let mut items = Vec::new();
+    push_config_block_items(
+        &mut items,
+        ConfigBlock {
+            index: 0,
+            cursor: app.config_cursor,
+            title: "Rotation",
+            enabled: app.ctx.config.change.enabled,
+            summary: format!(
+                "every {}s, {}, {:.0}% online",
+                app.ctx.config.change.interval_secs,
+                if app.ctx.config.change.internet_enabled {
+                    "online"
+                } else {
+                    "local only"
+                },
+                app.ctx.config.change.download_preference_ratio * 100.0
+            ),
+            details: rotation_details(app)
+                .into_iter()
+                .map(|line| string_list_item(&line, theme))
+                .collect(),
+            theme,
+        },
+    );
+
+    let sources = &app.ctx.config.sources;
+    let wallhaven_enabled = app.wallhaven_summary.enabled;
+    let sources_enabled = sources.iter().any(|s| s.enabled) || wallhaven_enabled;
+    let sources_details = if app.config_cursor == 1 {
+        sources_view::build_sources_list_items(app, theme, 4)
+    } else {
+        Vec::new()
+    };
+    push_config_block_items(
+        &mut items,
+        ConfigBlock {
+            index: 1,
+            cursor: app.config_cursor,
+            title: "Sources",
+            enabled: sources_enabled,
+            summary: sources_view::sources_block_summary(app),
+            details: sources_details,
+            theme,
+        },
+    );
+
+    push_config_block_items(
+        &mut items,
+        ConfigBlock {
+            index: 2,
+            cursor: app.config_cursor,
+            title: "Library",
+            enabled: app.ctx.config.quota.enabled,
+            summary: format!(
+                "{} queued, {} history, quota {}",
+                app.ctx.state.cache_queue.len(),
+                app.ctx.state.history.len(),
+                quota_summary(app)
+            ),
+            details: library_details(app)
+                .into_iter()
+                .map(|line| string_list_item(&line, theme))
+                .collect(),
+            theme,
+        },
+    );
+
+    push_config_block_items(
+        &mut items,
+        ConfigBlock {
+            index: 3,
+            cursor: app.config_cursor,
+            title: "Apply/display",
+            enabled: true,
+            summary: format!(
+                "{} backend, {} mode, {}",
+                apply_block_backend_summary(app),
+                app.ctx.config.display.mode,
+                display_target_summary(app)
+            ),
+            details: apply_display_details(app)
+                .into_iter()
+                .map(|line| string_list_item(&line, theme))
+                .collect(),
+            theme,
+        },
+    );
+    items
+}
+
+fn push_config_block_items(items: &mut Vec<ListItem<'static>>, block: ConfigBlock<'_>) {
+    let marker = if block.cursor == block.index {
+        ">"
+    } else {
+        " "
+    };
+    let state = if block.enabled { "on" } else { "off" };
+    let header = format!("{marker} [{state}] {} - {}", block.title, block.summary);
+    items.push(string_list_item(&header, block.theme));
+    if block.cursor == block.index {
+        items.extend(block.details);
+    }
 }
 
 fn footer_paragraph(app: &App, width: u16, theme: style::Theme) -> Paragraph<'_> {
@@ -739,8 +934,13 @@ fn footer_keys(app: &App, width: u16) -> String {
             InputMode::SearchInput => "type | Enter search | Esc | q".into(),
             InputMode::Normal => match app.tab {
                 Tab::Search => "i edit | Enter | j/k | : | q".into(),
+                Tab::Config
+                    if app.config_in_subnav && app.is_sources_list_block(app.config_cursor) =>
+                {
+                    "Esc back | j/k | e edit | t | n/p | sp | : | q".into()
+                }
                 Tab::Config => "j/k | Enter sub | e edit | t | n/p | sp | : | q".into(),
-                _ => "1-5 | n/p | f/d | sp | : | q".into(),
+                _ => "1-5 | n/p | f/d | Shift+X | sp | : | q".into(),
             },
         };
     }
@@ -804,39 +1004,22 @@ fn config_lines(app: &App) -> Vec<String> {
         ),
         rotation_details(app),
     );
-    // Sources block now lists *all* providers (for nested edit with j/k pick + e)
+    // Sources block lists configured providers plus Wallhaven (nested edit with j/k pick + e)
     let sources = &app.ctx.config.sources;
-    let sources_enabled = sources.iter().any(|s| s.enabled);
-    let sources_summary = if sources.is_empty() {
-        "no sources configured".to_string()
-    } else {
-        format!(
-            "{} configured, {} enabled",
-            sources.len(),
-            sources.iter().filter(|s| s.enabled).count()
-        )
-    };
+    let wallhaven_enabled = app.wallhaven_summary.enabled;
+    let sources_enabled = sources.iter().any(|s| s.enabled) || wallhaven_enabled;
     push_config_block(
         &mut lines,
         1,
         app.config_cursor,
         "Sources",
         sources_enabled,
-        sources_summary,
-        sources_details(app),
+        sources_view::sources_block_summary(app),
+        sources_view::sources_detail_lines(app),
     );
     push_config_block(
         &mut lines,
         2,
-        app.config_cursor,
-        "Wallhaven",
-        app.wallhaven_summary.usable(),
-        wallhaven_summary(app),
-        wallhaven_details(app),
-    );
-    push_config_block(
-        &mut lines,
-        3,
         app.config_cursor,
         "Library",
         app.ctx.config.quota.enabled,
@@ -850,13 +1033,13 @@ fn config_lines(app: &App) -> Vec<String> {
     );
     push_config_block(
         &mut lines,
-        4,
+        3,
         app.config_cursor,
         "Apply/display",
         true,
         format!(
             "{} backend, {} mode, {}",
-            apply_backend_label(app.ctx.config.apply.backend),
+            apply_block_backend_summary(app),
             app.ctx.config.display.mode,
             display_target_summary(app)
         ),
@@ -913,42 +1096,6 @@ fn local_source_details(app: &App) -> Vec<String> {
         .collect()
 }
 
-fn sources_details(app: &App) -> Vec<String> {
-    let sources = &app.ctx.config.sources;
-    if sources.is_empty() {
-        return vec!["no sources configured".into()];
-    }
-    let in_sub = app.config_in_subnav && app.is_sources_list_block(app.config_cursor);
-    let sub_sel = if in_sub {
-        Some(app.config_sub_cursor)
-    } else {
-        None
-    };
-    sources
-        .iter()
-        .enumerate()
-        .map(|(index, src)| {
-            let state = if src.enabled { "on" } else { "off" };
-            let key = src
-                .path
-                .as_deref()
-                .or(src.url.as_deref())
-                .or(src.query.as_deref())
-                .unwrap_or("(no key)");
-            let label = src.label.as_deref().unwrap_or(&src.source_type);
-            let marker = if sub_sel == Some(index) { "> " } else { "  " };
-            format!(
-                "{}{}. [{state}] {} ({}) - {}",
-                marker,
-                index + 1,
-                label,
-                src.source_type,
-                key
-            )
-        })
-        .collect()
-}
-
 fn rotation_details(app: &App) -> Vec<String> {
     vec![
         format!("enabled: {}", app.ctx.config.change.enabled),
@@ -961,89 +1108,13 @@ fn rotation_details(app: &App) -> Vec<String> {
             "download preference: {:.0}% online",
             app.ctx.config.change.download_preference_ratio * 100.0
         ),
+        format!(
+            "tray icon: {}",
+            walls_core::tray_icon::tray_accent_label(walls_core::tray_icon::effective_tray_accent(
+                app.ctx.config.tray.accent,
+            ))
+        ),
     ]
-}
-
-fn wallhaven_summary(app: &App) -> String {
-    let provider = &app.wallhaven_summary;
-    let online = if provider.internet_enabled {
-        "online on"
-    } else {
-        "online off"
-    };
-    let key = if provider.api_key_present {
-        "key"
-    } else {
-        "no key"
-    };
-    let collection_count = provider.collections.len();
-    let collection_label = if collection_count == 1 { "col" } else { "cols" };
-    format!(
-        "{online}, {key}, {collection_count} {collection_label}, q={}, pref={}",
-        short_query(&provider.query),
-        short_wallhaven_prefer(&provider.prefer)
-    )
-}
-
-fn short_wallhaven_prefer(prefer: &str) -> &str {
-    match prefer {
-        "CollectionsThenSearch" => "c+s",
-        "SearchOnly" => "search",
-        "CollectionsOnly" => "coll",
-        _ => prefer,
-    }
-}
-
-fn short_query(query: &str) -> String {
-    if query == "(empty query)" {
-        return "empty".into();
-    }
-
-    const MAX_QUERY_CHARS: usize = 24;
-    let mut chars = query.chars();
-    let short: String = chars.by_ref().take(MAX_QUERY_CHARS).collect();
-    if chars.next().is_some() {
-        format!("{short}...")
-    } else {
-        short
-    }
-}
-
-fn wallhaven_details(app: &App) -> Vec<String> {
-    let provider = &app.wallhaven_summary;
-    let key = if provider.api_key_present {
-        "present"
-    } else {
-        "missing"
-    };
-    let mut details = vec![
-        format!("api key: {key}"),
-        format!("prefer: {}", provider.prefer),
-        format!(
-            "search: q={} categories={} purity={}",
-            provider.query, provider.categories, provider.purity
-        ),
-        format!(
-            "sort: {} {} minimum {}",
-            provider.sorting, provider.order, provider.atleast
-        ),
-    ];
-
-    if provider.collections.is_empty() {
-        details.push("collections: none".into());
-    } else {
-        details.push(format!("collections: {}", provider.collections.len()));
-        details.extend(
-            provider
-                .collections
-                .iter()
-                .enumerate()
-                .map(|(index, collection)| format!("{}. {}", index + 1, collection)),
-        );
-    }
-
-    details.extend(provider.warnings.iter().cloned());
-    details
 }
 
 fn library_details(app: &App) -> Vec<String> {
@@ -1067,7 +1138,22 @@ fn library_details(app: &App) -> Vec<String> {
     details
 }
 
+fn apply_environment_summary(app: &App) -> ApplyEnvironmentSummary {
+    summarize_apply_environment(&app.ctx.config.apply)
+}
+
+fn apply_block_backend_summary(app: &App) -> String {
+    let detection = apply_environment_summary(app);
+    let configured = backend_setting_label(detection.configured_backend);
+    if detection.configured_backend == ApplyBackendSetting::Auto {
+        format!("{configured} → {}", detection.effective_backend_label())
+    } else {
+        configured.to_string()
+    }
+}
+
 fn apply_display_details(app: &App) -> Vec<String> {
+    let detection = apply_environment_summary(app);
     let custom_script = app
         .ctx
         .config
@@ -1077,34 +1163,46 @@ fn apply_display_details(app: &App) -> Vec<String> {
         .filter(|path| !path.trim().is_empty())
         .unwrap_or("(not set)");
     let mut details = vec![
+        "configured (config.json):".into(),
         format!(
-            "backend: {}",
-            apply_backend_label(app.ctx.config.apply.backend)
+            "  backend: {}",
+            backend_setting_label(app.ctx.config.apply.backend)
         ),
-        format!("custom script: {custom_script}"),
+        format!("  custom script: {custom_script}"),
         format!(
-            "cosmic: {}",
+            "  cosmic method: {}",
             cosmic_method_label(app.ctx.config.apply.cosmic.method)
         ),
-        format!("cosmic config: {}", app.ctx.config.apply.cosmic.config_path),
         format!(
-            "cosmic uses original: {}",
+            "  cosmic config path: {}",
+            app.ctx.config.apply.cosmic.config_path
+        ),
+        format!(
+            "  cosmic uses original: {}",
             app.ctx.config.apply.cosmic.use_original_path
         ),
-        format!("display mode: {}", app.ctx.config.display.mode),
-        format!("auto rotate: {}", app.ctx.config.display.auto_rotate),
-        format!("target: {}", display_target_summary(app)),
+        format!("  display mode: {}", app.ctx.config.display.mode),
+        format!("  EXIF auto-rotate: {}", app.ctx.config.display.auto_rotate),
+        format!("  target: {}", display_target_summary(app)),
         format!(
-            "imagemagick: {}",
+            "  imagemagick: {}",
             app.ctx.config.display.imagemagick_command
         ),
         format!(
-            "filters: {} configured, enabled={}",
+            "  filters: {} configured, enabled={}",
             app.ctx.config.display.filters.filters.len(),
             app.ctx.config.display.filters.enabled
         ),
-        format!("filter command: {}", app.ctx.config.display.filters.command),
+        format!(
+            "  filter command: {}",
+            app.ctx.config.display.filters.command
+        ),
+        "".into(),
+        "detected (this session):".into(),
     ];
+    for line in detection.detection_detail_lines(app.ctx.config.apply.cosmic.method) {
+        details.push(format!("  {line}"));
+    }
     details.extend(config_warning_lines(app, &["apply."]));
     details
 }
@@ -1139,22 +1237,6 @@ fn config_warning_lines(app: &App, prefixes: &[&str]) -> Vec<String> {
         .collect()
 }
 
-fn apply_backend_label(backend: ApplyBackendSetting) -> &'static str {
-    match backend {
-        ApplyBackendSetting::Auto => "auto",
-        ApplyBackendSetting::Cosmic => "cosmic",
-        ApplyBackendSetting::CosmicExtBgCtl => "cosmic-ext-bg-ctl",
-        ApplyBackendSetting::Gnome => "gnome",
-        ApplyBackendSetting::Kde => "kde",
-        ApplyBackendSetting::Xfce => "xfce",
-        ApplyBackendSetting::Sway => "sway",
-        ApplyBackendSetting::Wlroots => "wlroots",
-        ApplyBackendSetting::Hyprland => "hyprland",
-        ApplyBackendSetting::Feh => "feh",
-        ApplyBackendSetting::CustomScript => "custom-script",
-    }
-}
-
 fn cosmic_method_label(method: CosmicMethod) -> &'static str {
     match method {
         CosmicMethod::CosmicConfig => "cosmic-config",
@@ -1169,13 +1251,18 @@ fn edit_target_title(app: &App) -> String {
     if let Some(sess) = &app.editing {
         match &sess.target {
             EditTarget::Block(0) => "Edit Rotation".to_string(),
+            EditTarget::Wallhaven => "Edit Wallhaven".to_string(),
             EditTarget::Block(b) => format!("Edit block {}", b),
             EditTarget::Source(i) => {
                 if let Some(ref src) = sess.draft_source {
-                    let lab = src.label.clone().unwrap_or_else(|| src.source_type.clone());
-                    format!("Edit Source #{}: {} ({})", i, lab, src.source_type)
+                    if src.source_type == "reddit" {
+                        format!("Edit Reddit #{}", i + 1)
+                    } else {
+                        let lab = src.label.clone().unwrap_or_else(|| src.source_type.clone());
+                        format!("Edit Source #{}: {} ({})", i + 1, lab, src.source_type)
+                    }
                 } else {
-                    format!("Edit source #{}", i)
+                    format!("Edit source #{}", i + 1)
                 }
             }
         }
@@ -1192,7 +1279,7 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
         let mut lines: Vec<String> = vec![
             // Modern form header using box-drawing for a contemporary TUI feel (like lazygit, helix, etc.).
             // No duplicate title (chrome provides "Edit Rotation" etc.).
-            "┄─ EDIT FORM (▸ focus | ↑/↓ | type | Enter save | Esc) ─┄".into(),
+            "┄─ EDIT FORM (▸ focus | ↑/↓ | type or Space/←/→ | Enter save | Esc) ─┄".into(),
         ];
         // Validation errors inline at top (after marker) so visible immediately, with !! cue for red styling.
         // This addresses "they have no validation" and "s it just fails" (user sees *why* before or on save).
@@ -1204,66 +1291,110 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
             lines.push("".into());
         }
         // dynamic fields list with cursor + live buffer on current (same logic as before)
-        let mut fields: Vec<(String, String)> = vec![];
+        let mut fields: Vec<(String, String, app::EditFieldKind)> = vec![];
         if let Some(ref src) = sess.draft_source {
             // Use the single source of truth for necessary fields per type (no dups, no unused like title_path)
             for name in app::App::source_editable_fields(src) {
-                let label = match name.as_str() {
-                    "enabled" => "Enabled".to_string(),
-                    "type" => "Type".to_string(),
-                    "label" => "Label".to_string(),
-                    "url" => "URL".to_string(),
-                    "path" => "Path".to_string(),
-                    "image_path" => "Image path (JSONPath)".to_string(),
-                    "query" => "Query".to_string(),
-                    "api_key" => "API key".to_string(),
-                    "collection" => "Collection".to_string(),
-                    "user" => "User".to_string(),
-                    "topic" => "Topic".to_string(),
-                    "orientation" => "Orientation (landscape|portrait|squarish)".to_string(),
-                    _ => name.clone(),
-                };
+                let label = app::source_field_label(src, &name);
                 let v = app::App::get_source_field(src, &name);
-                fields.push((label, v));
+                fields.push((label, v, app::source_field_kind_for(src, &name)));
             }
-        } else {
-            // Block(0) rotation: use fixed stable order + user-friendly labels (hashmap iter order not guaranteed)
-            // Expose the *full* ChangeConfig (previously only 3 fields were wired for edit; now all so rotation is fully configurable).
-            let keys_in_order = [
-                "enabled",
-                "on_start",
-                "interval",
-                "internet",
-                "safe_mode",
-                "change_lock_screen",
-                "download_preference_ratio",
-            ];
-            for k in keys_in_order {
-                if let Some(v) = sess.draft_block_values.get(k) {
-                    let label = match k {
-                        "enabled" => "Enabled",
-                        "on_start" => "On start",
-                        "interval" => "Interval (seconds)",
-                        "internet" => "Internet enabled",
-                        "safe_mode" => "Safe mode",
-                        "change_lock_screen" => "Change lock screen",
-                        "download_preference_ratio" => "Download preference ratio (0.0-1.0)",
-                        _ => k,
+        } else if let EditTarget::Wallhaven = &sess.target {
+            for k in app::WALLHAVEN_BLOCK_FIELDS {
+                if let Some(v) = sess.draft_block_values.get(*k) {
+                    let label = if *k == "purity_nsfw" && !app.wallhaven_block_field_locked(k) {
+                        "Purity: NSFW".to_string()
+                    } else {
+                        app::block_field_label(app::WALLHAVEN_FIELDS_BLOCK, k)
                     };
-                    fields.push((label.to_string(), v.clone()));
+                    fields.push((
+                        label,
+                        v.clone(),
+                        app::block_field_kind(app::WALLHAVEN_FIELDS_BLOCK, k),
+                    ));
+                }
+            }
+            fields.push((
+                "API key".into(),
+                "(edit ~/.config/walls/secrets.json)".into(),
+                app::EditFieldKind::Text,
+            ));
+            fields.push((
+                "Collections".into(),
+                "(edit config.json for now)".into(),
+                app::EditFieldKind::Text,
+            ));
+        } else if let EditTarget::Block(block) = &sess.target {
+            let keys = match block {
+                0 => app::ROTATION_BLOCK_FIELDS,
+                _ => &[],
+            };
+            for k in keys {
+                if let Some(v) = sess.draft_block_values.get(*k) {
+                    fields.push((
+                        app::block_field_label(*block, k),
+                        v.clone(),
+                        app::block_field_kind(*block, k),
+                    ));
                 }
             }
         }
         // Right-aligned labels within a capped column for a tight, modern form look (avoids huge gaps on short labels like "Type").
         // Values stay in a clean column. Cap prevents sparse layout on small forms.
-        let max_label = fields.iter().map(|(l, _)| l.len()).max().unwrap_or(0);
+        let max_label = fields.iter().map(|(l, _, _)| l.len()).max().unwrap_or(0);
         let pad = std::cmp::min(max_label, 28);
-        for (i, (k, v)) in fields.iter().enumerate() {
+        let wallhaven_keys = if matches!(&sess.target, EditTarget::Wallhaven) {
+            app::WALLHAVEN_BLOCK_FIELDS
+        } else {
+            &[] as &[&str]
+        };
+        let source_names = sess
+            .draft_source
+            .as_ref()
+            .map(app::App::source_editable_fields);
+        for (i, (k, v, kind)) in fields.iter().enumerate() {
             let padded = format!("{:>width$}", k, width = pad);
+            let field_key = source_names
+                .as_ref()
+                .and_then(|names| names.get(i).map(String::as_str))
+                .or_else(|| wallhaven_keys.get(i).copied())
+                .unwrap_or("");
             let val = if i == sess.field_cursor {
-                format!("{}|", sess.field_buffer)
+                match kind {
+                    app::EditFieldKind::Text => format!("{}|", sess.field_buffer),
+                    app::EditFieldKind::Bool | app::EditFieldKind::Choice(_) => format!(
+                        "‹ {} ›",
+                        if let Some(src) = &sess.draft_source {
+                            if src.source_type == "reddit" {
+                                app.reddit_field_display_value(
+                                    src,
+                                    field_key,
+                                    &sess.field_buffer,
+                                    *kind,
+                                )
+                            } else {
+                                app::App::choice_display_for_current_field(
+                                    &sess.field_buffer,
+                                    *kind,
+                                )
+                            }
+                        } else if field_key.is_empty() {
+                            app::App::choice_display_for_current_field(&sess.field_buffer, *kind)
+                        } else {
+                            app.wallhaven_field_display_value(field_key, &sess.field_buffer, *kind)
+                        }
+                    ),
+                }
+            } else if let Some(src) = &sess.draft_source {
+                if src.source_type == "reddit" {
+                    app.reddit_field_display_value(src, field_key, v, *kind)
+                } else {
+                    app::App::choice_display_for_current_field(v, *kind)
+                }
+            } else if field_key.is_empty() {
+                app::App::choice_display_for_current_field(v, *kind)
             } else {
-                v.clone()
+                app.wallhaven_field_display_value(field_key, v, *kind)
             };
             if i == sess.field_cursor {
                 lines.push(format!("▸ {}: {}", padded, val));
@@ -1310,47 +1441,39 @@ fn build_rich_edit_form_items(app: &App, theme: style::Theme) -> Vec<ListItem<'s
         }
         if trimmed.starts_with("▸ ") || trimmed.starts_with("  ") {
             // Field: split for rich modern styling.
-            // - Current row: label gets strong accent + underline (focus pop), value normal.
-            // - Non-current: labels muted. For bool fields (common in rotation/sources), pretty-print
-            //   with ✓/✗ + success/error colour (redundant with text, works in no-colour via modifiers).
+            // - Current row: high-contrast black-on-cyan (edit_focus_*) so labels stay readable.
+            // - Non-current: labels muted. Bool values use ✓/✗ + semantic colour.
             if let Some(colon_pos) = line.find(": ") {
                 let label_part = &line[..colon_pos];
                 let value_part = &line[colon_pos + 2..];
                 let is_cur = trimmed.starts_with("▸ ");
                 let label_st = if is_cur {
-                    theme
-                        .accent()
-                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                    theme.edit_focus_label()
                 } else {
                     theme.muted()
                 };
-                let val_st = if !is_cur && (value_part == "true" || value_part == "false") {
-                    if value_part == "true" {
-                        theme.status(style::StatusKind::Success)
-                    } else {
-                        theme.status(style::StatusKind::Error)
-                    }
-                } else {
-                    theme.normal()
-                };
-                let display_val = if !is_cur && value_part == "true" {
-                    "✓ true".to_string()
-                } else if !is_cur && value_part == "false" {
-                    "✗ false".to_string()
-                } else {
-                    value_part.to_string()
-                };
-                let row_st = if is_cur {
-                    theme.selected()
+                let val_st = if is_cur {
+                    theme.edit_focus_value()
+                } else if value_part.starts_with("✓ true") {
+                    theme.status(style::StatusKind::Success)
+                } else if value_part.starts_with("✗ false") {
+                    theme.status(style::StatusKind::Error)
                 } else {
                     theme.normal()
                 };
                 let l = Line::from(vec![
                     Span::styled(label_part.to_string(), label_st),
-                    Span::raw(": "),
-                    Span::styled(display_val, val_st),
+                    Span::styled(
+                        ": ",
+                        if is_cur {
+                            theme.edit_focus_row()
+                        } else {
+                            theme.normal()
+                        },
+                    ),
+                    Span::styled(value_part.to_string(), val_st),
                 ]);
-                items.push(ListItem::new(l).style(row_st));
+                items.push(ListItem::new(l));
                 continue;
             }
         }
@@ -1544,7 +1667,7 @@ mod tests {
         assert!(text.contains("Config"), "{text}");
         assert!(text.contains("> [on] Rotation"), "{text}");
         assert!(text.contains("  [on] Sources"), "{text}");
-        assert!(text.contains("  [off] Wallhaven"), "{text}");
+        assert!(!text.contains("  [off] Wallhaven"), "{text}");
         assert!(text.contains("  [on] Library"), "{text}");
         assert!(text.contains("  [on] Apply/display"), "{text}");
         assert!(text.contains("on start: false"), "{text}");
@@ -1564,9 +1687,12 @@ mod tests {
 
         let text = render_text(&app, 80, 24);
 
-        assert!(text.contains("> [on] Sources"), "{text}");
-        // now rendered via sources_details (full providers list)
-        assert!(text.contains("1. [on]"), "{text}");
+        assert!(
+            text.contains("> [on] Sources - 2 active · 2 total"),
+            "{text}"
+        );
+        assert!(text.contains("Local folder"), "{text}");
+        assert!(text.contains("Wallhaven"), "{text}");
         assert!(!text.contains("on start: false"), "{text}");
     }
 
@@ -1595,14 +1721,15 @@ mod tests {
 
         let text = render_text(&app, 120, 30);
 
-        // now Sources block uses full sources_details (no "candidates" in this view)
-        assert!(text.contains("6 configured, 5 enabled"), "{text}");
-        assert!(text.contains("1. [on] Favorites (favorites)"), "{text}");
-        assert!(text.contains("2. [on] Fetched (fetched)"), "{text}");
-        assert!(text.contains("3. [on] Wallpapers (folder)"), "{text}");
-        assert!(text.contains("4. [on] Single (image)"), "{text}");
-        assert!(text.contains("5. [off] Disabled (folder)"), "{text}");
-        assert!(text.contains("6. [on] Missing (folder)"), "{text}");
+        assert!(text.contains("6 active · 7 total"), "{text}");
+        assert!(text.contains("Favorites"), "{text}");
+        assert!(text.contains("Fetched"), "{text}");
+        assert!(text.contains("Wallpapers"), "{text}");
+        assert!(text.contains("Single"), "{text}");
+        assert!(text.contains("Missing"), "{text}");
+        assert!(text.contains("Wallhaven"), "{text}");
+        assert!(!text.contains("Disabled"), "{text}");
+        assert!(text.contains("1 disabled source"), "{text}");
     }
 
     #[test]
@@ -1646,6 +1773,7 @@ mod tests {
         assert!(text.contains("safe mode: true"), "{text}");
         assert!(text.contains("lock screen: true"), "{text}");
         assert!(text.contains("download preference: 35% online"), "{text}");
+        assert!(text.contains("tray icon: blue"), "{text}");
         assert!(!text.contains("paused:"), "{text}");
     }
 
@@ -1668,7 +1796,7 @@ mod tests {
             }),
             serde_json::json!({}),
         );
-        app.config_cursor = 3;
+        app.config_cursor = 2;
 
         let text = render_text(&app, 120, 32);
 
@@ -1725,7 +1853,7 @@ mod tests {
             }),
             serde_json::json!({}),
         );
-        app.config_cursor = 4;
+        app.config_cursor = 3;
 
         let text = render_text(&app, 120, 34);
 
@@ -1735,17 +1863,20 @@ mod tests {
             ),
             "{text}"
         );
+        assert!(text.contains("configured (config.json):"), "{text}");
+        assert!(text.contains("detected (this session):"), "{text}");
         assert!(text.contains("backend: custom-script"), "{text}");
         assert!(text.contains("custom script: (not set)"), "{text}");
-        assert!(text.contains("cosmic: cosmic-ext-bg-ctl"), "{text}");
+        assert!(text.contains("cosmic method: cosmic-ext-bg-ctl"), "{text}");
         assert!(
-            text.contains("cosmic config: /tmp/missing-cosmic-config"),
+            text.contains("cosmic config path: /tmp/missing-cosmic-config"),
             "{text}"
         );
         assert!(text.contains("cosmic uses original: true"), "{text}");
         assert!(text.contains("display mode: fill"), "{text}");
-        assert!(text.contains("auto rotate: true"), "{text}");
+        assert!(text.contains("EXIF auto-rotate: true"), "{text}");
         assert!(text.contains("target: 3840x2160 target"), "{text}");
+        assert!(text.contains("resolved backend: custom-script"), "{text}");
         assert!(
             text.contains("filters: 1 configured, enabled=true"),
             "{text}"
@@ -1761,14 +1892,16 @@ mod tests {
     #[test]
     fn narrow_config_screen_keeps_focused_block_and_navigation_visible() {
         let mut app = test_app();
-        app.config_cursor = 2;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = app.ctx.config.sources.len();
 
         let text = render_text(&app, 42, 14);
 
         assert!(text.contains("Config"), "{text}");
-        assert!(text.contains("> [off] Wallhaven"), "{text}");
-        assert!(text.contains("api key: missing"), "{text}");
-        assert!(text.contains("j/k | Enter sub | e edit"), "{text}");
+        assert!(text.contains("▸ Wallhaven"), "{text}");
+        assert!(text.contains("enabled: true"), "{text}");
+        assert!(text.contains("Esc back | j/k"), "{text}");
     }
 
     #[test]
@@ -1791,24 +1924,23 @@ mod tests {
             }),
             serde_json::json!({}),
         );
-        app.config_cursor = 2;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = app.ctx.config.sources.len();
 
         let text = render_text(&app, 120, 30);
 
-        assert!(
-            text.contains("> [off] Wallhaven - online on, no key, 1 col"),
-            "{text}"
-        );
+        assert!(text.contains("▸ Wallhaven"), "{text}");
+        assert!(text.contains("query mountains"), "{text}");
         assert!(text.contains("api key: missing"), "{text}");
-        assert!(
-            text.contains("search: q=mountains categories=101 purity=100"),
-            "{text}"
-        );
+        assert!(text.contains("search query: mountains"), "{text}");
+        assert!(text.contains("categories: general, people"), "{text}");
+        assert!(text.contains("purity: SFW"), "{text}");
         assert!(
             text.contains("sort: toplist desc minimum 2560x1440"),
             "{text}"
         );
-        assert!(text.contains("1. Abstract: alice/42"), "{text}");
+        assert!(text.contains("Abstract: alice/42"), "{text}");
         assert!(
             text.contains("warning: API key missing; search and downloads are unavailable"),
             "{text}"
@@ -1828,23 +1960,205 @@ mod tests {
             }),
             serde_json::json!({ "wallhaven_api_key": "super-secret-token" }),
         );
-        app.config_cursor = 2;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = app.ctx.config.sources.len();
 
         let text = render_text(&app, 120, 30);
 
-        assert!(text.contains("> [on] Wallhaven - online on, key"), "{text}");
+        assert!(text.contains("▸ Wallhaven"), "{text}");
+        assert!(text.contains("API key"), "{text}");
         assert!(text.contains("api key: present"), "{text}");
-        assert!(text.contains("prefer: SearchOnly"), "{text}");
+        assert!(text.contains("prefer: search only"), "{text}");
+        assert!(text.contains("search query: forest"), "{text}");
         assert!(
-            text.contains("search: q=forest categories=111 purity=111"),
+            text.contains("categories: general, anime, people"),
             "{text}"
         );
+        assert!(text.contains("purity: SFW, sketchy, NSFW"), "{text}");
         assert!(text.contains("collections: none"), "{text}");
         assert!(
             text.contains("warning: NSFW purity requires Wallhaven account access"),
             "{text}"
         );
         assert!(!text.contains("super-secret-token"), "{text}");
+    }
+
+    #[test]
+    fn wallhaven_subnav_t_key_toggles_enabled() {
+        let mut app = test_app_with_wallhaven(
+            true,
+            serde_json::json!({
+                "enabled": true,
+                "search": { "q": "forest", "purity": "100" }
+            }),
+            serde_json::json!({ "wallhaven_api_key": "key" }),
+        );
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = app.ctx.config.sources.len();
+
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+        update(&mut app, UiAction::ToggleConfigValue, rt.handle())
+            .expect("toggle wallhaven enabled");
+        app.reload_ctx().expect("reload");
+
+        let text = render_text(&app, 120, 30);
+        assert!(text.contains("▸ Wallhaven"), "{text}");
+        assert!(text.contains(" off · "), "{text}");
+        assert!(text.contains("enabled: false"), "{text}");
+    }
+
+    #[test]
+    fn wallhaven_block_edit_form_exposes_search_fields() {
+        let mut app = test_app_with_wallhaven(
+            true,
+            serde_json::json!({
+                "prefer": "search_only",
+                "search": {
+                    "q": "forest",
+                    "categories": "111",
+                    "purity": "100",
+                    "sorting": "random",
+                    "order": "desc",
+                    "atleast": "1920x1080"
+                }
+            }),
+            serde_json::json!({ "wallhaven_api_key": "key" }),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = app.ctx.config.sources.len();
+        app.start_edit_for_current();
+
+        let text = render_text(&app, 120, 32);
+
+        assert!(text.contains("Edit Wallhaven"), "{text}");
+        assert!(text.contains("Search query"), "{text}");
+        assert!(text.contains("forest"), "{text}");
+        assert!(text.contains("search_only"), "{text}");
+        assert!(text.contains("Category: General"), "{text}");
+        assert!(text.contains("Category: Anime"), "{text}");
+        assert!(text.contains("Purity: SFW"), "{text}");
+        assert!(text.contains("secrets.json"), "{text}");
+    }
+
+    #[test]
+    fn edit_form_space_toggles_bool_field_without_typing() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "on_start": false, "interval": 3600 },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": []
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 0;
+        app.start_edit_for_current();
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+
+        assert_eq!(
+            app.editing.as_ref().unwrap().field_buffer,
+            "true",
+            "enabled field should prefill"
+        );
+        update(
+            &mut app,
+            UiAction::EditFieldCycle { forward: true },
+            rt.handle(),
+        )
+        .ok();
+        assert_eq!(
+            app.editing.as_ref().unwrap().field_buffer,
+            "false",
+            "Space should toggle enabled to false"
+        );
+        let text = render_text(&app, 100, 24);
+        assert!(
+            text.contains("Space toggle") || text.contains("Space/"),
+            "footer should hint choice controls: {text}"
+        );
+    }
+
+    #[test]
+    fn wallhaven_nsfw_unavailable_without_api_key() {
+        let mut app = test_app_with_wallhaven(
+            true,
+            serde_json::json!({
+                "search": {
+                    "q": "forest",
+                    "purity": "111",
+                    "categories": "111"
+                }
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = app.ctx.config.sources.len();
+        app.start_edit_for_current();
+
+        let text = render_text(&app, 120, 36);
+        assert!(text.contains("Purity: NSFW (requires API key)"), "{text}");
+        assert!(text.contains("unavailable (no API key)"), "{text}");
+
+        // Navigate to NSFW field (index 7) and try toggling — should stay unavailable.
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+        for _ in 0..8 {
+            update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
+        }
+        update(
+            &mut app,
+            UiAction::EditFieldCycle { forward: true },
+            rt.handle(),
+        )
+        .ok();
+        let text = render_text(&app, 120, 36);
+        assert!(
+            text.contains("unavailable (no API key)"),
+            "Space should not enable NSFW without API key: {text}"
+        );
+    }
+
+    #[test]
+    fn edit_form_space_cycles_wallhaven_sorting_enum() {
+        let mut app = test_app_with_wallhaven(
+            true,
+            serde_json::json!({
+                "search": { "sorting": "random", "purity": "100", "categories": "111", "order": "desc", "atleast": "1920x1080" }
+            }),
+            serde_json::json!({ "wallhaven_api_key": "key" }),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = app.ctx.config.sources.len();
+        app.start_edit_for_current();
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+
+        // sorting follows enabled, prefer, search_q, and six category/purity toggles
+        for _ in 0..9 {
+            update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
+        }
+        assert_eq!(
+            app.editing.as_ref().unwrap().field_buffer,
+            "random",
+            "should land on sorting field"
+        );
+        update(
+            &mut app,
+            UiAction::EditFieldCycle { forward: true },
+            rt.handle(),
+        )
+        .ok();
+        assert_eq!(
+            app.editing.as_ref().unwrap().field_buffer,
+            "views",
+            "Space should cycle sorting to next option after random"
+        );
     }
 
     #[test]
@@ -1919,11 +2233,7 @@ mod tests {
         let app = test_app();
         let text = render_text(&app, 80, 24);
 
-        // key row visible (may wrap/truncate on 80 cols with long config footer "Enter sub" etc)
-        assert!(
-            text.contains("Enter (sub") || text.contains("subnav"),
-            "{text}"
-        );
+        assert!(text.contains("e edit"), "{text}");
         assert!(
             text.contains("space pa") || text.contains("pause"),
             "{text}"
@@ -2064,7 +2374,7 @@ mod tests {
     fn config_cycle_persists_enum_like_value_and_reloads_context() {
         let mut app = test_app();
         let rt = tokio::runtime::Runtime::new().expect("runtime");
-        app.config_cursor = 3;
+        app.config_cursor = 2;
         app.tab = Tab::Config;
 
         assert_eq!(
@@ -2218,7 +2528,7 @@ mod tests {
             serde_json::json!({
                 "change": { "enabled": true },
                 "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
-                "sources": [ { "enabled": true, "type": "reddit", "label": "r", "query": "cats" } ]
+                "sources": [ { "enabled": true, "type": "reddit", "query": "cats", "sort": "hot" } ]
             }),
             serde_json::json!({}),
         );
@@ -2227,11 +2537,8 @@ mod tests {
         app.start_edit_for_current();
         assert!(app.is_editing());
         let rt = tokio::runtime::Runtime::new().expect("rt");
-        // fields for reddit: 0=enabled,1=type,2=label,3=query
-        // move cursor to query field (3 downs from 0)
-        for _ in 0..3 {
-            update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
-        }
+        // fields for reddit: 0=enabled, 1=query (subreddit)
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
         // prefill should have loaded the query value via name-based current_edit
         let initial = app.editing.as_ref().unwrap().field_buffer.clone();
         assert_eq!(
@@ -2256,6 +2563,55 @@ mod tests {
             "must not have polluted url field; url={:?}",
             draft.url
         );
+    }
+
+    #[test]
+    fn reddit_edit_form_lists_subreddit_sort_and_time_without_label_or_type() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [ { "enabled": true, "type": "reddit", "query": "wallpapers", "sort": "top", "time": "month" } ]
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = 0;
+        app.start_edit_for_current();
+
+        let text = render_text(&app, 100, 28);
+        assert!(text.contains("Edit Reddit"), "{text}");
+        assert!(text.contains("Subreddit"), "{text}");
+        assert!(text.contains("wallpapers"), "{text}");
+        assert!(text.contains("Sort"), "{text}");
+        assert!(text.contains("Time period"), "{text}");
+        assert!(text.contains("month"), "{text}");
+        assert!(!text.contains("Label"), "{text}");
+        assert!(!text.contains("Type"), "{text}");
+    }
+
+    #[test]
+    fn reddit_time_unavailable_when_sort_is_hot() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [ { "enabled": true, "type": "reddit", "query": "pics", "sort": "hot" } ]
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.start_edit_for_current();
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+        for _ in 0..3 {
+            update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
+        }
+        let text = render_text(&app, 100, 28);
+        assert!(text.contains("n/a (top/controversial only)"), "{text}");
     }
 
     #[test]
@@ -2302,6 +2658,44 @@ mod tests {
     }
 
     #[test]
+    fn config_subnav_enter_enters_and_esc_exits_without_enter_toggle() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [
+                    { "enabled": true, "type": "folder", "path": "/tmp" },
+                    { "enabled": false, "type": "json", "label": "the one", "url": "https://ex", "image_path": "$.x" }
+                ]
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+
+        assert!(!app.config_in_subnav);
+        update(&mut app, UiAction::Enter, rt.handle()).ok();
+        assert!(app.config_in_subnav, "Enter on Sources should enter subnav");
+
+        update(&mut app, UiAction::Enter, rt.handle()).ok();
+        assert!(
+            app.config_in_subnav,
+            "Enter while in subnav must not exit; use Esc instead"
+        );
+
+        update(&mut app, UiAction::ExitConfigSubnav, rt.handle()).ok();
+        assert!(!app.config_in_subnav, "Esc should exit subnav");
+
+        let action = action_for_key(&app, KeyEvent::from(KeyCode::Esc));
+        assert_eq!(
+            action,
+            UiAction::Ignore,
+            "Esc outside subnav should not map to exit"
+        );
+    }
+
+    #[test]
     fn config_subnav_highlights_selected_item_in_details() {
         let mut app = test_app_with_config(
             serde_json::json!({
@@ -2321,16 +2715,56 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().expect("rt");
         update(&mut app, UiAction::MoveDown, rt.handle()).ok();
         let text = render_text(&app, 80, 24);
-        // should highlight the selected sub with >
         assert!(
-            text.contains("> 2. [off] the one (json)"),
-            "sub item should be highlighted with > marker; got: {}",
+            text.contains("▸ the one"),
+            "sub item should be highlighted with marker; got: {}",
             text
         );
         assert!(
-            !text.contains("> 1. [on] folder"),
+            !text.contains("▸ Local folder"),
             "only selected sub highlighted"
         );
+    }
+
+    #[test]
+    fn shift_x_nuke_requires_confirmation_then_clears_queue() {
+        use ratatui::crossterm::event::KeyModifiers;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(tmp.path().join("cache")).expect("cache");
+        fs::create_dir_all(tmp.path().join("downloaded")).expect("downloaded");
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "internet_enabled": false },
+                "paths": {
+                    "cache_dir": tmp.path().join("cache").display().to_string(),
+                    "download_dir": tmp.path().join("downloaded").display().to_string(),
+                    "favorites_dir": tmp.path().join("favorites").display().to_string(),
+                    "fetched_dir": tmp.path().join("fetched").display().to_string(),
+                    "compose_dir": tmp.path().join("compose").display().to_string(),
+                },
+                "sources": []
+            }),
+            serde_json::json!({}),
+        );
+        app.ctx.state.cache_queue = vec!["wh1".into(), "wh2".into()];
+        app.ctx.save_state().expect("save state");
+
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+        let shift_x = KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT);
+
+        let request = action_for_key(&app, shift_x);
+        assert_eq!(request, UiAction::NukeDownloadsRequest);
+        update(&mut app, request, rt.handle()).expect("request nuke");
+        assert!(app.pending_nuke_confirm);
+        assert!(app.message.contains("clear 2 queued provider items"));
+
+        let confirm = action_for_key(&app, shift_x);
+        assert_eq!(confirm, UiAction::NukeDownloadsConfirm);
+        update(&mut app, confirm, rt.handle()).expect("confirm nuke");
+        assert!(!app.pending_nuke_confirm);
+        assert!(app.message.contains("cleared 2 queued provider items"));
+        assert!(app.ctx.state.cache_queue.is_empty());
     }
 
     #[test]
@@ -2578,7 +3012,7 @@ mod tests {
                 "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
                 "sources": [
                     { "enabled": true, "type": "wallhaven", "label": "wallhaven space", "query": "space" },
-                    { "enabled": false, "type": "reddit", "label": "r", "query": "wallpapers" }
+                    { "enabled": false, "type": "reddit", "query": "wallpapers", "sort": "top", "time": "month" }
                 ]
             }),
             serde_json::json!({}),
@@ -2641,18 +3075,13 @@ mod tests {
             "enabled must be prefilled from the json config value"
         );
 
-        // Reproduce the exact user flow: change enabled true -> false, then 's' (use backspaces + chars to simulate typing, then Save which auto-commits)
-        // First ensure we are on enabled (field 0 for sources)
-        // Backspace the "true" (4 chars), then type "false"
-        for _ in 0..4 {
-            update(&mut app, UiAction::EditFieldBackspace, rt.handle()).ok();
-        }
-        for c in ['f', 'a', 'l', 's', 'e'] {
-            update(&mut app, UiAction::EditFieldChar(c), rt.handle()).ok();
-        }
-        // Now hit Enter (commit field buffer + persist/save the config, keep in edit form so user can continue with other fields or Esc).
-        // This satisfies "type false and hit enter" to save without separate save key, and "enter ... should just save the config".
-        update(&mut app, UiAction::EditFieldCommit, rt.handle()).ok();
+        // Reproduce the user flow: change enabled true -> false via Space toggle (bool fields are pickers, not free text).
+        update(
+            &mut app,
+            UiAction::EditFieldCycle { forward: true },
+            rt.handle(),
+        )
+        .ok();
         let after_enter_msg = app.message.clone();
         let still_editing = app.is_editing();
         eprintln!(
@@ -2676,7 +3105,7 @@ mod tests {
             });
         assert!(
             draft_enabled_false,
-            "after backspace+type 'false' + Enter (commit + save), the draft must have enabled=false; msg={}",
+            "after Space toggle on enabled, the draft must have enabled=false; msg={}",
             after_enter_msg
         );
         assert!(

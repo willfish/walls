@@ -1,18 +1,12 @@
-mod common;
+mod common {
+    include!("common/minimal.rs");
+}
 
 use walls_core::validate::validate_config;
 use walls_core::WallsCtx;
 
 fn load_config_json(root: &std::path::Path) -> serde_json::Value {
     serde_json::from_str(&std::fs::read_to_string(root.join("config.json")).unwrap()).unwrap()
-}
-
-fn write_config_json(root: &std::path::Path, config: &serde_json::Value) {
-    std::fs::write(
-        root.join("config.json"),
-        serde_json::to_string_pretty(config).unwrap(),
-    )
-    .unwrap();
 }
 
 fn validate_root(root: &std::path::Path) -> Vec<String> {
@@ -46,7 +40,7 @@ fn validate_config_reports_missing_folder_path() {
         "type": "folder",
         "path": "/nonexistent/walls-test-folder"
     }]);
-    write_config_json(root.path(), &config);
+    common::write_config(root.path(), config);
 
     let errors = validate_root(root.path());
     assert!(errors.iter().any(|e| e.contains("does not exist")));
@@ -67,7 +61,7 @@ fn validate_config_reports_missing_unsplash_key() {
         "type": "unsplash",
         "query": "forest"
     }]);
-    write_config_json(root.path(), &config);
+    common::write_config(root.path(), config);
 
     let errors = validate_root(root.path());
     assert!(
@@ -89,7 +83,7 @@ fn validate_config_reports_missing_custom_script_for_custom_script_backend() {
     let missing = root.path().join("missing-script.sh");
     let mut config = load_config_json(root.path());
     config["apply"]["custom_script"] = serde_json::json!(missing.display().to_string());
-    write_config_json(root.path(), &config);
+    common::write_config(root.path(), config);
 
     let errors = validate_root(root.path());
     assert!(
@@ -110,7 +104,7 @@ fn validate_config_reports_required_custom_script_for_custom_script_backend() {
 
     let mut config = load_config_json(root.path());
     config["apply"]["custom_script"] = serde_json::Value::Null;
-    write_config_json(root.path(), &config);
+    common::write_config(root.path(), config);
 
     let errors = validate_root(root.path());
     assert!(
@@ -151,7 +145,7 @@ fn validate_config_reports_custom_script_when_backend_does_not_use_it() {
 
     let mut config = load_config_json(root.path());
     config["apply"]["backend"] = serde_json::json!("gnome");
-    write_config_json(root.path(), &config);
+    common::write_config(root.path(), config);
 
     let errors = validate_root(root.path());
     assert!(
@@ -172,7 +166,7 @@ fn validate_config_reports_zero_quota_size() {
 
     let mut config = load_config_json(root.path());
     config["quota"] = serde_json::json!({ "enabled": true, "size_mb": 0 });
-    write_config_json(root.path(), &config);
+    common::write_config(root.path(), config);
 
     let errors = validate_root(root.path());
     assert!(

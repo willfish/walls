@@ -1,7 +1,11 @@
 use std::path::PathBuf;
 
 use walls_core::apply::ApplyTrigger;
-use walls_core::config::{save_config_atomic, SelectionStrategy, SourceEntry};
+use walls_core::config::{
+    normalize_reddit_source, reddit_sort_needs_time, reddit_sort_value, reddit_time_value,
+    save_config_atomic, Config, SelectionStrategy, SourceEntry, WallhavenPrefer,
+    REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
+};
 use walls_core::expand_home;
 use walls_core::sources::list_images_with_paths;
 use walls_core::validate::validate_config;
@@ -67,6 +71,548 @@ pub enum InputMode {
 pub enum EditTarget {
     Block(usize),
     Source(usize),
+    Wallhaven,
+}
+
+/// Internal block index for shared Wallhaven field metadata helpers.
+pub(crate) const WALLHAVEN_FIELDS_BLOCK: usize = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EditFieldKind {
+    Text,
+    Bool,
+    Choice(&'static [&'static str]),
+}
+
+pub(crate) const SOURCE_TYPE_CHOICES: &[&str] = &[
+    "folder",
+    "image",
+    "favorites",
+    "fetched",
+    "json",
+    "mediarss",
+    "attribution",
+    "unsplash",
+    "reddit",
+    "weighting",
+    "pixabay",
+    "immich",
+    "bing",
+    "apod",
+    "spotlight",
+    "wallhaven",
+];
+
+pub(crate) const ROTATION_BLOCK_FIELDS: &[&str] = &[
+    "enabled",
+    "on_start",
+    "interval",
+    "internet",
+    "safe_mode",
+    "change_lock_screen",
+    "download_preference_ratio",
+    "tray_accent",
+];
+
+pub(crate) const WALLHAVEN_BLOCK_FIELDS: &[&str] = &[
+    "enabled",
+    "prefer",
+    "search_q",
+    "category_general",
+    "category_anime",
+    "category_people",
+    "purity_sfw",
+    "purity_sketchy",
+    "purity_nsfw",
+    "sorting",
+    "order",
+    "atleast",
+];
+
+fn wallhaven_bit_at(s: &str, idx: usize, default: bool) -> bool {
+    s.chars().nth(idx).map(|c| c == '1').unwrap_or(default)
+}
+
+fn wallhaven_bits_from_bools(a: bool, b: bool, c: bool) -> String {
+    format!("{}{}{}", u8::from(a), u8::from(b), u8::from(c))
+}
+
+pub(crate) fn format_wallhaven_categories(s: &str) -> String {
+    let mut parts = Vec::new();
+    if wallhaven_bit_at(s, 0, true) {
+        parts.push("general");
+    }
+    if wallhaven_bit_at(s, 1, false) {
+        parts.push("anime");
+    }
+    if wallhaven_bit_at(s, 2, false) {
+        parts.push("people");
+    }
+    if parts.is_empty() {
+        "(none)".into()
+    } else {
+        parts.join(", ")
+    }
+}
+
+pub(crate) fn format_wallhaven_purity(s: &str, api_key_present: bool) -> String {
+    let mut parts = Vec::new();
+    if wallhaven_bit_at(s, 0, true) {
+        parts.push("SFW");
+    }
+    if wallhaven_bit_at(s, 1, false) {
+        parts.push("sketchy");
+    }
+    if api_key_present && wallhaven_bit_at(s, 2, false) {
+        parts.push("NSFW");
+    }
+    if parts.is_empty() {
+        "(none)".into()
+    } else {
+        parts.join(", ")
+    }
+}
+
+fn rotation_block_draft(config: &Config) -> std::collections::HashMap<String, String> {
+    let mut vals = std::collections::HashMap::new();
+    vals.insert("enabled".into(), config.change.enabled.to_string());
+    vals.insert("on_start".into(), config.change.on_start.to_string());
+    vals.insert("interval".into(), config.change.interval_secs.to_string());
+    vals.insert(
+        "internet".into(),
+        config.change.internet_enabled.to_string(),
+    );
+    vals.insert("safe_mode".into(), config.change.safe_mode.to_string());
+    vals.insert(
+        "change_lock_screen".into(),
+        config.change.change_lock_screen.to_string(),
+    );
+    vals.insert(
+        "download_preference_ratio".into(),
+        config.change.download_preference_ratio.to_string(),
+    );
+    vals.insert(
+        "tray_accent".into(),
+        walls_core::tray_icon::tray_accent_label(walls_core::tray_icon::effective_tray_accent(
+            config.tray.accent,
+        ))
+        .into(),
+    );
+    vals
+}
+
+fn wallhaven_api_key_present(secrets: &walls_core::config::Secrets) -> bool {
+    !secrets.wallhaven_api_key.trim().is_empty()
+}
+
+fn wallhaven_block_draft(
+    config: &Config,
+    api_key_present: bool,
+) -> std::collections::HashMap<String, String> {
+    let search = &config.wallhaven.search;
+    let mut vals = std::collections::HashMap::new();
+    vals.insert("enabled".into(), config.wallhaven.enabled.to_string());
+    vals.insert(
+        "prefer".into(),
+        wallhaven_prefer_label(config.wallhaven.prefer),
+    );
+    vals.insert("search_q".into(), search.q.clone());
+    vals.insert(
+        "category_general".into(),
+        wallhaven_bit_at(&search.categories, 0, true).to_string(),
+    );
+    vals.insert(
+        "category_anime".into(),
+        wallhaven_bit_at(&search.categories, 1, false).to_string(),
+    );
+    vals.insert(
+        "category_people".into(),
+        wallhaven_bit_at(&search.categories, 2, false).to_string(),
+    );
+    vals.insert(
+        "purity_sfw".into(),
+        wallhaven_bit_at(&search.purity, 0, true).to_string(),
+    );
+    vals.insert(
+        "purity_sketchy".into(),
+        wallhaven_bit_at(&search.purity, 1, false).to_string(),
+    );
+    vals.insert(
+        "purity_nsfw".into(),
+        if api_key_present {
+            wallhaven_bit_at(&search.purity, 2, false).to_string()
+        } else {
+            "false".into()
+        },
+    );
+    vals.insert("sorting".into(), search.sorting.clone());
+    vals.insert("order".into(), search.order.clone());
+    vals.insert("atleast".into(), search.atleast.clone());
+    vals
+}
+
+fn wallhaven_prefer_label(prefer: WallhavenPrefer) -> String {
+    match prefer {
+        WallhavenPrefer::CollectionsThenSearch => "collections_then_search".into(),
+        WallhavenPrefer::SearchOnly => "search_only".into(),
+        WallhavenPrefer::CollectionsOnly => "collections_only".into(),
+    }
+}
+
+fn parse_wallhaven_prefer(s: &str) -> Option<WallhavenPrefer> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "collections_then_search" => Some(WallhavenPrefer::CollectionsThenSearch),
+        "search_only" => Some(WallhavenPrefer::SearchOnly),
+        "collections_only" => Some(WallhavenPrefer::CollectionsOnly),
+        _ => None,
+    }
+}
+
+pub(crate) fn block_field_label(block: usize, key: &str) -> String {
+    match block {
+        0 => match key {
+            "enabled" => "Enabled".into(),
+            "on_start" => "On start".into(),
+            "interval" => "Interval (seconds)".into(),
+            "internet" => "Internet enabled".into(),
+            "safe_mode" => "Safe mode".into(),
+            "change_lock_screen" => "Change lock screen".into(),
+            "download_preference_ratio" => "Download preference ratio (0.0-1.0)".into(),
+            "tray_accent" => "Tray icon accent".into(),
+            other => other.into(),
+        },
+        2 => match key {
+            "enabled" => "Enabled".into(),
+            "prefer" => "Prefer".into(),
+            "search_q" => "Search query".into(),
+            "category_general" => "Category: General".into(),
+            "category_anime" => "Category: Anime".into(),
+            "category_people" => "Category: People".into(),
+            "purity_sfw" => "Purity: SFW".into(),
+            "purity_sketchy" => "Purity: Sketchy".into(),
+            "purity_nsfw" => "Purity: NSFW (requires API key)".into(),
+            "sorting" => "Sorting".into(),
+            "order" => "Order".into(),
+            "atleast" => "Minimum resolution".into(),
+            other => other.into(),
+        },
+        _ => key.into(),
+    }
+}
+
+pub(crate) fn block_field_kind(block: usize, key: &str) -> EditFieldKind {
+    match block {
+        0 => match key {
+            "enabled" | "on_start" | "internet" | "safe_mode" | "change_lock_screen" => {
+                EditFieldKind::Bool
+            }
+            "tray_accent" => EditFieldKind::Choice(walls_core::tray_icon::tray_accent_choices()),
+            _ => EditFieldKind::Text,
+        },
+        2 => match key {
+            "enabled" => EditFieldKind::Bool,
+            "prefer" => EditFieldKind::Choice(&[
+                "collections_then_search",
+                "search_only",
+                "collections_only",
+            ]),
+            "category_general" | "category_anime" | "category_people" | "purity_sfw"
+            | "purity_sketchy" | "purity_nsfw" => EditFieldKind::Bool,
+            "sorting" => EditFieldKind::Choice(&[
+                "date",
+                "relevance",
+                "random",
+                "views",
+                "favorites",
+                "toplist",
+            ]),
+            "order" => EditFieldKind::Choice(&["desc", "asc"]),
+            _ => EditFieldKind::Text,
+        },
+        _ => EditFieldKind::Text,
+    }
+}
+
+pub(crate) fn source_field_kind(name: &str) -> EditFieldKind {
+    match name {
+        "enabled" => EditFieldKind::Bool,
+        "type" => EditFieldKind::Choice(SOURCE_TYPE_CHOICES),
+        "orientation" => EditFieldKind::Choice(&["", "landscape", "portrait", "squarish"]),
+        "sort" => EditFieldKind::Choice(REDDIT_SORT_CHOICES),
+        "time" => EditFieldKind::Choice(REDDIT_TIME_CHOICES),
+        _ => EditFieldKind::Text,
+    }
+}
+
+pub(crate) fn source_field_kind_for(src: &SourceEntry, name: &str) -> EditFieldKind {
+    if src.source_type == "reddit" {
+        return source_field_kind(name);
+    }
+    match name {
+        "sort" | "time" => EditFieldKind::Text,
+        _ => source_field_kind(name),
+    }
+}
+
+pub(crate) fn reddit_time_field_locked(src: &SourceEntry) -> bool {
+    src.source_type == "reddit" && !reddit_sort_needs_time(reddit_sort_value(src))
+}
+
+pub(crate) fn source_field_label(src: &SourceEntry, name: &str) -> String {
+    if src.source_type == "reddit" {
+        return match name {
+            "enabled" => "Enabled".into(),
+            "query" => "Subreddit".into(),
+            "sort" => "Sort".into(),
+            "time" => "Time period".into(),
+            other => other.into(),
+        };
+    }
+    match name {
+        "enabled" => "Enabled".into(),
+        "type" => "Type".into(),
+        "label" => "Label".into(),
+        "url" => "URL".into(),
+        "path" => "Path".into(),
+        "image_path" => "Image path (JSONPath)".into(),
+        "query" => "Query".into(),
+        "api_key" => "API key".into(),
+        "collection" => "Collection".into(),
+        "user" => "User".into(),
+        "topic" => "Topic".into(),
+        "orientation" => "Orientation".into(),
+        other => other.into(),
+    }
+}
+
+fn cycle_choice_value(current: &str, options: &[&str], forward: bool) -> String {
+    if options.is_empty() {
+        return current.to_string();
+    }
+    let idx = options.iter().position(|&o| o == current).unwrap_or(0);
+    let next = if forward {
+        (idx + 1) % options.len()
+    } else {
+        (idx + options.len().saturating_sub(1)) % options.len()
+    };
+    options[next].to_string()
+}
+
+fn toggle_bool_value(current: &str) -> String {
+    if App::parse_bool_like(current) == Some(true) {
+        "false".into()
+    } else {
+        "true".into()
+    }
+}
+
+fn choice_display_value(kind: EditFieldKind, value: &str) -> String {
+    match kind {
+        EditFieldKind::Bool => {
+            if App::parse_bool_like(value) == Some(true) {
+                "✓ true".into()
+            } else {
+                "✗ false".into()
+            }
+        }
+        EditFieldKind::Choice(options) => {
+            if value.is_empty() && options.first() == Some(&"") {
+                "(any)".into()
+            } else {
+                value.to_string()
+            }
+        }
+        EditFieldKind::Text => value.to_string(),
+    }
+}
+
+fn block_field_value_at(
+    config: &Config,
+    block: usize,
+    draft: &std::collections::HashMap<String, String>,
+    idx: usize,
+) -> String {
+    let keys = match block {
+        0 => ROTATION_BLOCK_FIELDS,
+        2 => WALLHAVEN_BLOCK_FIELDS,
+        _ => return String::new(),
+    };
+    let Some(key) = keys.get(idx) else {
+        return String::new();
+    };
+    if let Some(v) = draft.get(*key) {
+        return v.clone();
+    }
+    match block {
+        0 => match *key {
+            "enabled" => config.change.enabled.to_string(),
+            "on_start" => config.change.on_start.to_string(),
+            "interval" => config.change.interval_secs.to_string(),
+            "internet" => config.change.internet_enabled.to_string(),
+            "safe_mode" => config.change.safe_mode.to_string(),
+            "change_lock_screen" => config.change.change_lock_screen.to_string(),
+            "download_preference_ratio" => config.change.download_preference_ratio.to_string(),
+            "tray_accent" => walls_core::tray_icon::tray_accent_label(
+                walls_core::tray_icon::effective_tray_accent(config.tray.accent),
+            )
+            .into(),
+            _ => String::new(),
+        },
+        2 => match *key {
+            "enabled" => config.wallhaven.enabled.to_string(),
+            "prefer" => wallhaven_prefer_label(config.wallhaven.prefer),
+            "search_q" => config.wallhaven.search.q.clone(),
+            "category_general" => {
+                wallhaven_bit_at(&config.wallhaven.search.categories, 0, true).to_string()
+            }
+            "category_anime" => {
+                wallhaven_bit_at(&config.wallhaven.search.categories, 1, false).to_string()
+            }
+            "category_people" => {
+                wallhaven_bit_at(&config.wallhaven.search.categories, 2, false).to_string()
+            }
+            "purity_sfw" => wallhaven_bit_at(&config.wallhaven.search.purity, 0, true).to_string(),
+            "purity_sketchy" => {
+                wallhaven_bit_at(&config.wallhaven.search.purity, 1, false).to_string()
+            }
+            "purity_nsfw" => {
+                wallhaven_bit_at(&config.wallhaven.search.purity, 2, false).to_string()
+            }
+            "sorting" => config.wallhaven.search.sorting.clone(),
+            "order" => config.wallhaven.search.order.clone(),
+            "atleast" => config.wallhaven.search.atleast.clone(),
+            _ => String::new(),
+        },
+        _ => String::new(),
+    }
+}
+
+fn commit_block_field_buffer(
+    block: usize,
+    field_idx: usize,
+    buf: &str,
+    draft: &mut std::collections::HashMap<String, String>,
+) {
+    let keys = match block {
+        0 => ROTATION_BLOCK_FIELDS,
+        2 => WALLHAVEN_BLOCK_FIELDS,
+        _ => return,
+    };
+    let Some(key) = keys.get(field_idx) else {
+        return;
+    };
+    draft.insert((*key).into(), buf.trim().to_string());
+}
+
+fn apply_rotation_block_draft(
+    config: &mut Config,
+    draft: &std::collections::HashMap<String, String>,
+) {
+    if let Some(v) = draft.get("enabled") {
+        config.change.enabled = App::parse_bool_like(v).unwrap_or(config.change.enabled);
+    }
+    if let Some(v) = draft.get("on_start") {
+        config.change.on_start = App::parse_bool_like(v).unwrap_or(config.change.on_start);
+    }
+    if let Some(v) = draft.get("interval") {
+        if let Ok(n) = v.parse() {
+            config.change.interval_secs = n;
+        }
+    }
+    if let Some(v) = draft.get("internet") {
+        config.change.internet_enabled =
+            App::parse_bool_like(v).unwrap_or(config.change.internet_enabled);
+    }
+    if let Some(v) = draft.get("safe_mode") {
+        config.change.safe_mode = App::parse_bool_like(v).unwrap_or(config.change.safe_mode);
+    }
+    if let Some(v) = draft.get("change_lock_screen") {
+        config.change.change_lock_screen =
+            App::parse_bool_like(v).unwrap_or(config.change.change_lock_screen);
+    }
+    if let Some(v) = draft.get("download_preference_ratio") {
+        if let Ok(f) = v.parse::<f64>() {
+            config.change.download_preference_ratio = f.clamp(0.0, 1.0);
+        }
+    }
+    if let Some(v) = draft.get("tray_accent") {
+        if let Some(accent) = walls_core::tray_icon::parse_tray_accent(v) {
+            if walls_core::tray_icon::tray_accent_available(accent) {
+                config.tray.accent = accent;
+            }
+        }
+    }
+}
+
+fn apply_wallhaven_block_draft(
+    config: &mut Config,
+    draft: &std::collections::HashMap<String, String>,
+    api_key_present: bool,
+) {
+    if let Some(v) = draft.get("enabled") {
+        config.wallhaven.enabled = App::parse_bool_like(v).unwrap_or(config.wallhaven.enabled);
+    }
+    if let Some(v) = draft.get("prefer") {
+        if let Some(prefer) = parse_wallhaven_prefer(v) {
+            config.wallhaven.prefer = prefer;
+        }
+    }
+    if let Some(v) = draft.get("search_q") {
+        config.wallhaven.search.q = v.clone();
+    }
+    let category_general = draft
+        .get("category_general")
+        .and_then(|v| App::parse_bool_like(v))
+        .unwrap_or(wallhaven_bit_at(
+            &config.wallhaven.search.categories,
+            0,
+            true,
+        ));
+    let category_anime = draft
+        .get("category_anime")
+        .and_then(|v| App::parse_bool_like(v))
+        .unwrap_or(wallhaven_bit_at(
+            &config.wallhaven.search.categories,
+            1,
+            false,
+        ));
+    let category_people = draft
+        .get("category_people")
+        .and_then(|v| App::parse_bool_like(v))
+        .unwrap_or(wallhaven_bit_at(
+            &config.wallhaven.search.categories,
+            2,
+            false,
+        ));
+    config.wallhaven.search.categories =
+        wallhaven_bits_from_bools(category_general, category_anime, category_people);
+
+    let purity_sfw = draft
+        .get("purity_sfw")
+        .and_then(|v| App::parse_bool_like(v))
+        .unwrap_or(wallhaven_bit_at(&config.wallhaven.search.purity, 0, true));
+    let purity_sketchy = draft
+        .get("purity_sketchy")
+        .and_then(|v| App::parse_bool_like(v))
+        .unwrap_or(wallhaven_bit_at(&config.wallhaven.search.purity, 1, false));
+    let mut purity_nsfw = draft
+        .get("purity_nsfw")
+        .and_then(|v| App::parse_bool_like(v))
+        .unwrap_or(wallhaven_bit_at(&config.wallhaven.search.purity, 2, false));
+    if !api_key_present {
+        purity_nsfw = false;
+    }
+    config.wallhaven.search.purity =
+        wallhaven_bits_from_bools(purity_sfw, purity_sketchy, purity_nsfw);
+    if let Some(v) = draft.get("sorting") {
+        config.wallhaven.search.sorting = v.clone();
+    }
+    if let Some(v) = draft.get("order") {
+        config.wallhaven.search.order = v.clone();
+    }
+    if let Some(v) = draft.get("atleast") {
+        config.wallhaven.search.atleast = v.clone();
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +641,7 @@ pub struct LocalSourceSummary {
 }
 
 pub struct WallhavenProviderSummary {
+    pub enabled: bool,
     pub internet_enabled: bool,
     pub api_key_present: bool,
     pub prefer: String,
@@ -106,12 +653,6 @@ pub struct WallhavenProviderSummary {
     pub order: String,
     pub atleast: String,
     pub warnings: Vec<String>,
-}
-
-impl WallhavenProviderSummary {
-    pub fn usable(&self) -> bool {
-        self.internet_enabled && self.api_key_present
-    }
 }
 
 pub struct App {
@@ -133,6 +674,7 @@ pub struct App {
     pub(crate) wallhaven_summary: WallhavenProviderSummary,
     pub(crate) config_warnings: Vec<String>,
     pub color_mode: ColorMode,
+    pub pending_nuke_confirm: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,11 +725,13 @@ impl App {
             wallhaven_summary,
             config_warnings,
             color_mode: ColorMode::from_env(),
+            pending_nuke_confirm: false,
         };
         app.refresh_local_candidates()?;
         Ok(app)
     }
 
+    /// Reload config/state from disk. Recreates `config.json` with defaults if it was removed.
     pub fn reload_ctx(&mut self) -> anyhow::Result<()> {
         let paths = self.ctx.paths.clone();
         self.ctx = WallsCtx::load_with_paths(paths)?;
@@ -210,12 +754,20 @@ impl App {
         Ok(())
     }
 
+    pub fn sources_subnav_len(&self) -> usize {
+        self.ctx.config.sources.len() + 1
+    }
+
+    pub fn is_wallhaven_subnav_index(&self, idx: usize) -> bool {
+        idx == self.ctx.config.sources.len()
+    }
+
     pub fn move_down(&mut self) {
         if self.tab == Tab::Config
             && self.config_in_subnav
             && self.is_sources_list_block(self.config_cursor)
         {
-            let len = self.ctx.config.sources.len();
+            let len = self.sources_subnav_len();
             if len > 0 {
                 self.config_sub_cursor = (self.config_sub_cursor + 1).min(len - 1);
             }
@@ -268,7 +820,7 @@ impl App {
         match self.tab {
             Tab::Config => {
                 if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
-                    self.ctx.config.sources.len()
+                    self.sources_subnav_len()
                 } else {
                     Self::config_block_count()
                 }
@@ -282,7 +834,7 @@ impl App {
     }
 
     pub fn config_block_count() -> usize {
-        5
+        4
     }
 
     fn active_cursor_mut(&mut self) -> &mut usize {
@@ -329,18 +881,25 @@ impl App {
         lines
     }
 
-    pub fn logs_lines(&self) -> Vec<String> {
+    pub fn logs_lines(&self, width: u16) -> Vec<String> {
         let logs = super::LOG_BUFFER.lock().unwrap();
         if logs.is_empty() {
             return vec!["(no logs captured yet)".into()];
         }
-        logs.iter()
-            .enumerate()
-            .map(|(i, line)| {
-                let mark = if i == self.cursor { ">" } else { " " };
-                format!("{mark} {line}")
-            })
-            .collect()
+        let wrap_width = usize::from(width).saturating_sub(4);
+        let mut lines = Vec::new();
+        for (i, line) in logs.iter().enumerate() {
+            let mark = if i == self.cursor { ">" } else { " " };
+            let wrapped = wrap_log_text(line, wrap_width);
+            for (j, segment) in wrapped.into_iter().enumerate() {
+                if j == 0 {
+                    lines.push(format!("{mark} {segment}"));
+                } else {
+                    lines.push(format!("  {segment}"));
+                }
+            }
+        }
+        lines
     }
 
     pub fn browse_items(&self) -> Vec<String> {
@@ -377,7 +936,7 @@ impl App {
         };
         if let Some(id) = line.strip_prefix("queue: ") {
             self.ctx.prioritize_cache_id(id)?;
-            if let Some(p) = self.ctx.advance_next().await? {
+            if let Some(p) = self.ctx.advance_next_manual().await? {
                 return Ok(Some(format!("applied queue head: {}", p.display())));
             }
             return Ok(Some("queue item not applicable".into()));
@@ -458,18 +1017,77 @@ impl App {
         Ok("trashed current wallpaper".into())
     }
 
+    pub fn nuke_downloads_prompt(&self) -> String {
+        let plan = self.ctx.plan_nuke_downloads();
+        match plan.mode {
+            walls_core::downloads::NukeDownloadsMode::ClearQueue => format!(
+                "nuke: clear {} queued provider item{}? Shift+X confirm, Esc cancel",
+                plan.queue_len,
+                if plan.queue_len == 1 { "" } else { "s" }
+            ),
+            walls_core::downloads::NukeDownloadsMode::PurgeProviderFiles => format!(
+                "nuke: delete {} cache + {} downloaded provider file{}? Shift+X confirm, Esc cancel",
+                plan.cache_files,
+                plan.download_files,
+                if plan.cache_files + plan.download_files == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            ),
+            walls_core::downloads::NukeDownloadsMode::Nothing => {
+                "nuke: queue empty and no provider downloads to delete".into()
+            }
+        }
+    }
+
+    pub fn nuke_downloads(&mut self) -> anyhow::Result<String> {
+        let result = self.ctx.nuke_downloads()?;
+        Ok(match result.mode {
+            walls_core::downloads::NukeDownloadsMode::ClearQueue => format!(
+                "nuke: cleared {} queued provider item{}",
+                result.queue_cleared,
+                if result.queue_cleared == 1 { "" } else { "s" }
+            ),
+            walls_core::downloads::NukeDownloadsMode::PurgeProviderFiles => format!(
+                "nuke: removed {} cache + {} downloaded provider file{}",
+                result.cache_removed,
+                result.download_removed,
+                if result.cache_removed + result.download_removed == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            ),
+            walls_core::downloads::NukeDownloadsMode::Nothing => {
+                "nuke: queue empty and no provider downloads to delete".into()
+            }
+        })
+    }
+
     pub fn toggle_focused_config_value(&mut self) -> anyhow::Result<Option<String>> {
         let mut config = self.ctx.config.clone();
+        if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
+            let idx = self.config_sub_cursor;
+            if self.is_wallhaven_subnav_index(idx) {
+                config.wallhaven.enabled = !config.wallhaven.enabled;
+                save_config_atomic(&self.ctx.paths.config_file, &config)?;
+                return Ok(Some(format!(
+                    "config saved: wallhaven enabled={}",
+                    config.wallhaven.enabled
+                )));
+            }
+        }
         let message = match self.config_cursor {
             0 => {
                 config.change.enabled = !config.change.enabled;
                 format!("config saved: rotation enabled={}", config.change.enabled)
             }
-            3 => {
+            2 => {
                 config.quota.enabled = !config.quota.enabled;
                 format!("config saved: quota enabled={}", config.quota.enabled)
             }
-            4 => {
+            3 => {
                 config.display.auto_rotate = !config.display.auto_rotate;
                 format!("config saved: auto rotate={}", config.display.auto_rotate)
             }
@@ -483,7 +1101,7 @@ impl App {
     pub fn cycle_focused_config_value(&mut self) -> anyhow::Result<Option<String>> {
         let mut config = self.ctx.config.clone();
         let message = match self.config_cursor {
-            3 => {
+            2 => {
                 config.selection.strategy = match config.selection.strategy {
                     SelectionStrategy::Random => SelectionStrategy::Sequential,
                     SelectionStrategy::Sequential => SelectionStrategy::Random,
@@ -505,11 +1123,35 @@ impl App {
         // Support subnav for Sources block: if in subnav, target the sub item
         if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
             let idx = self.config_sub_cursor;
+            if self.is_wallhaven_subnav_index(idx) {
+                let session = EditSession {
+                    target: EditTarget::Wallhaven,
+                    draft_source: None,
+                    draft_block_values: wallhaven_block_draft(
+                        &self.ctx.config,
+                        wallhaven_api_key_present(&self.ctx.secrets),
+                    ),
+                    field_cursor: 0,
+                    field_buffer: String::new(),
+                    validation_errors: vec![],
+                };
+                self.editing = Some(session);
+                let new_buf = self.current_edit_field_value();
+                if let Some(s) = &mut self.editing {
+                    s.field_buffer = new_buf;
+                }
+                self.message.clear();
+                return;
+            }
             if idx < self.ctx.config.sources.len() {
                 let target = EditTarget::Source(idx);
+                let mut draft = self.ctx.config.sources[idx].clone();
+                if draft.source_type == "reddit" {
+                    normalize_reddit_source(&mut draft);
+                }
                 let session = EditSession {
                     target,
-                    draft_source: Some(self.ctx.config.sources[idx].clone()),
+                    draft_source: Some(draft),
                     draft_block_values: std::collections::HashMap::new(),
                     field_cursor: 0,
                     field_buffer: String::new(),
@@ -533,51 +1175,38 @@ impl App {
         let session = match &target {
             EditTarget::Source(i) if *i < self.ctx.config.sources.len() => {
                 let idx = *i;
+                let mut draft = self.ctx.config.sources[idx].clone();
+                if draft.source_type == "reddit" {
+                    normalize_reddit_source(&mut draft);
+                }
                 EditSession {
                     target: target.clone(),
-                    draft_source: Some(self.ctx.config.sources[idx].clone()),
+                    draft_source: Some(draft),
                     draft_block_values: std::collections::HashMap::new(),
                     field_cursor: 0,
                     field_buffer: String::new(),
                     validation_errors: vec![],
                 }
             }
-            EditTarget::Block(0) => {
-                let mut vals = std::collections::HashMap::new();
-                vals.insert("enabled".into(), self.ctx.config.change.enabled.to_string());
-                vals.insert(
-                    "on_start".into(),
-                    self.ctx.config.change.on_start.to_string(),
-                );
-                vals.insert(
-                    "interval".into(),
-                    self.ctx.config.change.interval_secs.to_string(),
-                );
-                vals.insert(
-                    "internet".into(),
-                    self.ctx.config.change.internet_enabled.to_string(),
-                );
-                vals.insert(
-                    "safe_mode".into(),
-                    self.ctx.config.change.safe_mode.to_string(),
-                );
-                vals.insert(
-                    "change_lock_screen".into(),
-                    self.ctx.config.change.change_lock_screen.to_string(),
-                );
-                vals.insert(
-                    "download_preference_ratio".into(),
-                    self.ctx.config.change.download_preference_ratio.to_string(),
-                );
-                EditSession {
-                    target: target.clone(),
-                    draft_source: None,
-                    draft_block_values: vals,
-                    field_cursor: 0,
-                    field_buffer: String::new(),
-                    validation_errors: vec![],
-                }
-            }
+            EditTarget::Block(0) => EditSession {
+                target: target.clone(),
+                draft_source: None,
+                draft_block_values: rotation_block_draft(&self.ctx.config),
+                field_cursor: 0,
+                field_buffer: String::new(),
+                validation_errors: vec![],
+            },
+            EditTarget::Wallhaven => EditSession {
+                target: target.clone(),
+                draft_source: None,
+                draft_block_values: wallhaven_block_draft(
+                    &self.ctx.config,
+                    wallhaven_api_key_present(&self.ctx.secrets),
+                ),
+                field_cursor: 0,
+                field_buffer: String::new(),
+                validation_errors: vec![],
+            },
             _ => return,
         };
         self.editing = Some(session);
@@ -599,6 +1228,153 @@ impl App {
         self.editing.is_some()
     }
 
+    pub(crate) fn edit_field_count(&self) -> usize {
+        let Some(sess) = &self.editing else {
+            return 0;
+        };
+        match &sess.target {
+            EditTarget::Source(i) if *i < self.ctx.config.sources.len() => {
+                let src = sess
+                    .draft_source
+                    .as_ref()
+                    .unwrap_or(&self.ctx.config.sources[*i]);
+                Self::source_editable_fields(src).len()
+            }
+            EditTarget::Block(0) => ROTATION_BLOCK_FIELDS.len(),
+            EditTarget::Block(_) => 0,
+            EditTarget::Wallhaven => WALLHAVEN_BLOCK_FIELDS.len(),
+            _ => 0,
+        }
+    }
+
+    pub(crate) fn current_edit_field_kind(&self) -> EditFieldKind {
+        let Some(sess) = &self.editing else {
+            return EditFieldKind::Text;
+        };
+        match &sess.target {
+            EditTarget::Source(i) if *i < self.ctx.config.sources.len() => {
+                let src = sess
+                    .draft_source
+                    .as_ref()
+                    .unwrap_or(&self.ctx.config.sources[*i]);
+                let names = Self::source_editable_fields(src);
+                if sess.field_cursor < names.len() {
+                    source_field_kind_for(src, &names[sess.field_cursor])
+                } else {
+                    EditFieldKind::Text
+                }
+            }
+            EditTarget::Block(block) => {
+                let keys = match block {
+                    0 => ROTATION_BLOCK_FIELDS,
+                    _ => &[] as &[&str],
+                };
+                if let Some(key) = keys.get(sess.field_cursor) {
+                    block_field_kind(*block, key)
+                } else {
+                    EditFieldKind::Text
+                }
+            }
+            EditTarget::Wallhaven => {
+                if let Some(key) = WALLHAVEN_BLOCK_FIELDS.get(sess.field_cursor) {
+                    block_field_kind(WALLHAVEN_FIELDS_BLOCK, key)
+                } else {
+                    EditFieldKind::Text
+                }
+            }
+            _ => EditFieldKind::Text,
+        }
+    }
+
+    pub(crate) fn wallhaven_block_field_locked(&self, key: &str) -> bool {
+        key == "purity_nsfw" && !wallhaven_api_key_present(&self.ctx.secrets)
+    }
+
+    pub(crate) fn current_edit_field_locked(&self) -> bool {
+        let Some(sess) = &self.editing else {
+            return false;
+        };
+        if let EditTarget::Wallhaven = &sess.target {
+            if let Some(key) = WALLHAVEN_BLOCK_FIELDS.get(sess.field_cursor) {
+                return self.wallhaven_block_field_locked(key);
+            }
+        }
+        if let EditTarget::Source(_) = &sess.target {
+            if let Some(draft) = &sess.draft_source {
+                let names = Self::source_editable_fields(draft);
+                if let Some(name) = names.get(sess.field_cursor) {
+                    return name == "time" && reddit_time_field_locked(draft);
+                }
+            }
+        }
+        false
+    }
+
+    pub(crate) fn reddit_field_display_value(
+        &self,
+        src: &SourceEntry,
+        key: &str,
+        value: &str,
+        kind: EditFieldKind,
+    ) -> String {
+        if key == "time" && reddit_time_field_locked(src) {
+            return "n/a (top/controversial only)".into();
+        }
+        Self::choice_display_for_current_field(value, kind)
+    }
+
+    pub(crate) fn wallhaven_field_display_value(
+        &self,
+        key: &str,
+        value: &str,
+        kind: EditFieldKind,
+    ) -> String {
+        if self.wallhaven_block_field_locked(key) {
+            return "unavailable (no API key)".into();
+        }
+        choice_display_value(kind, value)
+    }
+
+    pub(crate) fn cycle_current_edit_field(&mut self, forward: bool) {
+        if self.current_edit_field_locked() {
+            return;
+        }
+        let kind = self.current_edit_field_kind();
+        let next = match kind {
+            EditFieldKind::Text => return,
+            EditFieldKind::Bool => {
+                let current = self
+                    .editing
+                    .as_ref()
+                    .map(|s| s.field_buffer.clone())
+                    .unwrap_or_default();
+                toggle_bool_value(&current)
+            }
+            EditFieldKind::Choice(options) => {
+                let current = self
+                    .editing
+                    .as_ref()
+                    .map(|s| s.field_buffer.clone())
+                    .unwrap_or_default();
+                cycle_choice_value(&current, options, forward)
+            }
+        };
+        if let Some(sess) = &mut self.editing {
+            sess.field_buffer = next;
+        }
+        self.commit_edit_field_buffer();
+        let _ = self.save_edit_item(false);
+        let refreshed = self.current_edit_field_value();
+        if let Some(sess) = &mut self.editing {
+            sess.field_buffer = refreshed;
+        }
+        self.refresh_edit_validation();
+    }
+
+    pub(crate) fn choice_display_for_current_field(value: &str, kind: EditFieldKind) -> String {
+        choice_display_value(kind, value)
+    }
+
     /// Ordered list of editable field names for a given source type.
     /// This is the single source of truth for "100% necessary fields per config item".
     /// Includes only fields that are part of SourceEntry, appear in example.json or tests for the type,
@@ -607,12 +1383,20 @@ impl App {
     /// Omits attribution's "source"/"author" (present in some example but not modeled in SourceEntry).
     #[allow(dead_code)]
     pub fn source_editable_fields(src: &walls_core::config::SourceEntry) -> Vec<String> {
+        let t = src.source_type.as_str();
+        if t == "reddit" {
+            return vec![
+                "enabled".into(),
+                "query".into(),
+                "sort".into(),
+                "time".into(),
+            ];
+        }
         let mut f = vec![
             "enabled".to_string(),
             "type".to_string(),
             "label".to_string(),
         ];
-        let t = src.source_type.as_str();
         match t {
             "folder" | "image" | "favorites" | "fetched" => {
                 f.push("path".into());
@@ -635,7 +1419,7 @@ impl App {
                 f.push("topic".into());
                 f.push("orientation".into());
             }
-            "reddit" | "weighting" => {
+            "weighting" => {
                 f.push("query".into());
             }
             "pixabay" => {
@@ -667,6 +1451,14 @@ impl App {
             "user" => src.user.clone().unwrap_or_default(),
             "topic" => src.topic.clone().unwrap_or_default(),
             "orientation" => src.orientation.clone().unwrap_or_default(),
+            "sort" => reddit_sort_value(src).to_string(),
+            "time" => {
+                if reddit_sort_needs_time(reddit_sort_value(src)) {
+                    reddit_time_value(src).to_string()
+                } else {
+                    String::new()
+                }
+            }
             _ => String::new(),
         }
     }
@@ -707,6 +1499,25 @@ impl App {
             "user" => draft.user = v,
             "topic" => draft.topic = v,
             "orientation" => draft.orientation = v,
+            "sort" if !trimmed.is_empty() && REDDIT_SORT_CHOICES.contains(&trimmed) => {
+                draft.sort = Some(trimmed.to_string());
+                if !reddit_sort_needs_time(trimmed) {
+                    draft.time = None;
+                } else if draft
+                    .time
+                    .as_deref()
+                    .is_none_or(|t| !REDDIT_TIME_CHOICES.contains(&t))
+                {
+                    draft.time = Some("week".into());
+                }
+            }
+            "time"
+                if !trimmed.is_empty()
+                    && REDDIT_TIME_CHOICES.contains(&trimmed)
+                    && reddit_sort_needs_time(reddit_sort_value(draft)) =>
+            {
+                draft.time = Some(trimmed.to_string());
+            }
             _ => {}
         }
     }
@@ -739,34 +1550,21 @@ impl App {
                     String::new()
                 }
             }
-            EditTarget::Block(0) => {
-                let key = match idx {
-                    0 => "enabled",
-                    1 => "on_start",
-                    2 => "interval",
-                    3 => "internet",
-                    4 => "safe_mode",
-                    5 => "change_lock_screen",
-                    6 => "download_preference_ratio",
-                    _ => "",
-                };
-                if !key.is_empty() {
-                    if let Some(sess) = &self.editing {
-                        if let Some(v) = sess.draft_block_values.get(key) {
-                            return v.clone();
-                        }
-                    }
-                }
-                match idx {
-                    0 => self.ctx.config.change.enabled.to_string(),
-                    1 => self.ctx.config.change.on_start.to_string(),
-                    2 => self.ctx.config.change.interval_secs.to_string(),
-                    3 => self.ctx.config.change.internet_enabled.to_string(),
-                    4 => self.ctx.config.change.safe_mode.to_string(),
-                    5 => self.ctx.config.change.change_lock_screen.to_string(),
-                    6 => self.ctx.config.change.download_preference_ratio.to_string(),
-                    _ => String::new(),
-                }
+            EditTarget::Block(block) => {
+                let draft = self
+                    .editing
+                    .as_ref()
+                    .map(|sess| sess.draft_block_values.clone())
+                    .unwrap_or_default();
+                block_field_value_at(&self.ctx.config, *block, &draft, idx)
+            }
+            EditTarget::Wallhaven => {
+                let draft = self
+                    .editing
+                    .as_ref()
+                    .map(|sess| sess.draft_block_values.clone())
+                    .unwrap_or_default();
+                block_field_value_at(&self.ctx.config, WALLHAVEN_FIELDS_BLOCK, &draft, idx)
             }
             _ => String::new(),
         }
@@ -793,35 +1591,15 @@ impl App {
                     }
                     String::new()
                 }
-                EditTarget::Block(0) => {
-                    // For blocks, prefer draft_block_values (populated at start from json/config) so
-                    // prefills after partial commits come from edit state.
-                    let key = match idx {
-                        0 => "enabled",
-                        1 => "on_start",
-                        2 => "interval",
-                        3 => "internet",
-                        4 => "safe_mode",
-                        5 => "change_lock_screen",
-                        6 => "download_preference_ratio",
-                        _ => "",
-                    };
-                    if !key.is_empty() {
-                        if let Some(v) = sess.draft_block_values.get(key) {
-                            return v.clone();
-                        }
-                    }
-                    match idx {
-                        0 => self.ctx.config.change.enabled.to_string(),
-                        1 => self.ctx.config.change.on_start.to_string(),
-                        2 => self.ctx.config.change.interval_secs.to_string(),
-                        3 => self.ctx.config.change.internet_enabled.to_string(),
-                        4 => self.ctx.config.change.safe_mode.to_string(),
-                        5 => self.ctx.config.change.change_lock_screen.to_string(),
-                        6 => self.ctx.config.change.download_preference_ratio.to_string(),
-                        _ => String::new(),
-                    }
+                EditTarget::Block(block) => {
+                    block_field_value_at(&self.ctx.config, *block, &sess.draft_block_values, idx)
                 }
+                EditTarget::Wallhaven => block_field_value_at(
+                    &self.ctx.config,
+                    WALLHAVEN_FIELDS_BLOCK,
+                    &sess.draft_block_values,
+                    idx,
+                ),
                 _ => String::new(),
             }
         } else {
@@ -851,6 +1629,10 @@ impl App {
         }
     }
 
+    pub fn exit_config_subnav(&mut self) {
+        self.config_in_subnav = false;
+    }
+
     #[allow(dead_code)]
     pub fn refresh_edit_validation(&mut self) {
         if let Some(sess) = &mut self.editing {
@@ -860,10 +1642,18 @@ impl App {
             match &sess.target {
                 EditTarget::Source(i) if *i < temp.sources.len() => {
                     if let Some(d) = &sess.draft_source {
-                        // apply buffer if any to the draft for live
-                        // (in practice commit does full, here just use current draft + buffer for current field is complex; simple: use draft)
                         temp.sources[*i] = d.clone();
                     }
+                }
+                EditTarget::Block(0) => {
+                    apply_rotation_block_draft(&mut temp, &sess.draft_block_values);
+                }
+                EditTarget::Wallhaven => {
+                    apply_wallhaven_block_draft(
+                        &mut temp,
+                        &sess.draft_block_values,
+                        wallhaven_api_key_present(&self.ctx.secrets),
+                    );
                 }
                 _ => {}
             }
@@ -878,6 +1668,9 @@ impl App {
                             || e.contains("path")
                             || e.contains("url")
                             || e.contains("key")
+                    }
+                    EditTarget::Wallhaven => {
+                        e.contains("wallhaven") || e.contains("NSFW") || e.contains("purity")
                     }
                     _ => true,
                 })
@@ -900,39 +1693,21 @@ impl App {
                         }
                     }
                 }
-                EditTarget::Block(0) => {
-                    // rotation scalars (now full ChangeConfig, not just 3)
-                    match field_idx {
-                        0 => {
-                            sess.draft_block_values
-                                .insert("enabled".into(), buf.trim().to_string());
-                        }
-                        1 => {
-                            sess.draft_block_values
-                                .insert("on_start".into(), buf.trim().to_string());
-                        }
-                        2 => {
-                            sess.draft_block_values
-                                .insert("interval".into(), buf.trim().to_string());
-                        }
-                        3 => {
-                            sess.draft_block_values
-                                .insert("internet".into(), buf.trim().to_string());
-                        }
-                        4 => {
-                            sess.draft_block_values
-                                .insert("safe_mode".into(), buf.trim().to_string());
-                        }
-                        5 => {
-                            sess.draft_block_values
-                                .insert("change_lock_screen".into(), buf.trim().to_string());
-                        }
-                        6 => {
-                            sess.draft_block_values
-                                .insert("download_preference_ratio".into(), buf.trim().to_string());
-                        }
-                        _ => {}
-                    }
+                EditTarget::Block(block) => {
+                    commit_block_field_buffer(
+                        *block,
+                        field_idx,
+                        &buf,
+                        &mut sess.draft_block_values,
+                    );
+                }
+                EditTarget::Wallhaven => {
+                    commit_block_field_buffer(
+                        WALLHAVEN_FIELDS_BLOCK,
+                        field_idx,
+                        &buf,
+                        &mut sess.draft_block_values,
+                    );
                 }
                 _ => {}
             }
@@ -964,43 +1739,29 @@ impl App {
         match &sess.target {
             EditTarget::Source(i) if *i < config.sources.len() => {
                 if let Some(d) = &sess.draft_source {
-                    config.sources[*i] = d.clone();
-                    success_msg = format!("config saved: source #{} type={}", i, d.source_type);
+                    let mut saved = d.clone();
+                    if saved.source_type == "reddit" {
+                        normalize_reddit_source(&mut saved);
+                    }
+                    config.sources[*i] = saved;
+                    success_msg = if d.source_type == "reddit" {
+                        format!("config saved: reddit source #{i}")
+                    } else {
+                        format!("config saved: source #{} type={}", i, d.source_type)
+                    };
                 }
             }
             EditTarget::Block(0) => {
-                // apply rotation values (full ChangeConfig now)
-                if let Some(v) = sess.draft_block_values.get("enabled") {
-                    config.change.enabled =
-                        Self::parse_bool_like(v).unwrap_or(config.change.enabled);
-                }
-                if let Some(v) = sess.draft_block_values.get("on_start") {
-                    config.change.on_start =
-                        Self::parse_bool_like(v).unwrap_or(config.change.on_start);
-                }
-                if let Some(v) = sess.draft_block_values.get("interval") {
-                    if let Ok(n) = v.parse() {
-                        config.change.interval_secs = n;
-                    }
-                }
-                if let Some(v) = sess.draft_block_values.get("internet") {
-                    config.change.internet_enabled =
-                        Self::parse_bool_like(v).unwrap_or(config.change.internet_enabled);
-                }
-                if let Some(v) = sess.draft_block_values.get("safe_mode") {
-                    config.change.safe_mode =
-                        Self::parse_bool_like(v).unwrap_or(config.change.safe_mode);
-                }
-                if let Some(v) = sess.draft_block_values.get("change_lock_screen") {
-                    config.change.change_lock_screen =
-                        Self::parse_bool_like(v).unwrap_or(config.change.change_lock_screen);
-                }
-                if let Some(v) = sess.draft_block_values.get("download_preference_ratio") {
-                    if let Ok(f) = v.parse::<f64>() {
-                        config.change.download_preference_ratio = f.clamp(0.0, 1.0);
-                    }
-                }
+                apply_rotation_block_draft(&mut config, &sess.draft_block_values);
                 success_msg = "config saved: rotation".into();
+            }
+            EditTarget::Wallhaven => {
+                apply_wallhaven_block_draft(
+                    &mut config,
+                    &sess.draft_block_values,
+                    wallhaven_api_key_present(&self.ctx.secrets),
+                );
+                success_msg = "config saved: wallhaven".into();
             }
             _ => {}
         }
@@ -1027,7 +1788,7 @@ impl App {
     pub fn run_command(&mut self, rt: &tokio::runtime::Handle) -> anyhow::Result<Option<String>> {
         let msg = match ParsedCommand::parse(&self.cmd_line) {
             ParsedCommand::Next => {
-                match tokio::task::block_in_place(|| rt.block_on(self.ctx.advance_next())) {
+                match tokio::task::block_in_place(|| rt.block_on(self.ctx.advance_next_manual())) {
                     Ok(Some(p)) => format!("next: {}", p.display()),
                     Ok(None) => "next: no change".into(),
                     Err(e) => format!("next error: {e}"),
@@ -1059,9 +1820,28 @@ impl App {
 
     pub fn footer_keys(&self) -> String {
         if self.is_editing() {
-            // j/k letters reserved for main list / subnav (Esc first); arrows move fields inside the form.
-            // Enter commits the field buffer and saves/persists the item (no separate save).
-            return "edit: ↑/↓ fields | type/Backspace | Enter save | Esc cancel | q".into();
+            let choice_hint = if self.current_edit_field_locked() {
+                if self
+                    .editing
+                    .as_ref()
+                    .and_then(|s| s.draft_source.as_ref())
+                    .is_some_and(|src| src.source_type == "reddit")
+                {
+                    "top/controversial only"
+                } else {
+                    "requires API key"
+                }
+            } else {
+                match self.current_edit_field_kind() {
+                    EditFieldKind::Text => "type/Backspace",
+                    EditFieldKind::Bool => "Space toggle",
+                    EditFieldKind::Choice(_) => "Space/←/→ cycle",
+                }
+            };
+            return format!("edit: ↑/↓ fields | {choice_hint} | Enter save | Esc cancel | q");
+        }
+        if self.pending_nuke_confirm {
+            return "Shift+X confirm nuke | Esc cancel | q quit".into();
         }
         let keys = match self.input_mode {
             InputMode::Command => format!(":{}_ | Enter run Esc cancel", self.cmd_line),
@@ -1073,9 +1853,19 @@ impl App {
                     "5 Search | i edit query Enter search | j/k | Enter apply | : cmd".into()
                 }
                 Tab::Config => {
-                    "1 Config | j/k | Enter (subnav for lists) | e edit | t toggle | n/p | space pause | : cmd".into()
+                    if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
+                        "1 Config | Esc back | j/k pick source | e edit | t toggle | n/p | space pause | : cmd".into()
+                    } else if self.is_sources_list_block(self.config_cursor) {
+                        "1 Config | j/k | Enter sub | e edit | t toggle | n/p | space pause | : cmd"
+                            .into()
+                    } else {
+                        "1 Config | j/k | e edit | t toggle | n/p | space pause | : cmd".into()
+                    }
                 }
-                _ => "1-6 tabs | n/p next/prev | f favorite d trash | space pause | : cmd".into(),
+                _ => {
+                    "1-6 tabs | n/p next/prev | f favorite d trash | Shift+X nuke | space pause | : cmd"
+                        .into()
+                }
             },
         };
         format!("{keys} | q quit")
@@ -1163,6 +1953,7 @@ fn summarize_wallhaven_provider(ctx: &WallsCtx) -> WallhavenProviderSummary {
     }
 
     WallhavenProviderSummary {
+        enabled: ctx.config.wallhaven.enabled,
         internet_enabled: ctx.config.change.internet_enabled,
         api_key_present,
         prefer: format!("{:?}", ctx.config.wallhaven.prefer),
@@ -1182,6 +1973,41 @@ fn summarize_config_warnings(ctx: &WallsCtx) -> Vec<String> {
         .into_iter()
         .map(|warning| format!("warning: {warning}"))
         .collect()
+}
+
+fn wrap_log_text(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![text.to_string()];
+    }
+    if text.len() <= width {
+        return vec![text.to_string()];
+    }
+
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        let extra = if current.is_empty() {
+            word.len()
+        } else {
+            current.len() + 1 + word.len()
+        };
+        if current.is_empty() {
+            current = word.to_string();
+        } else if extra <= width {
+            current.push(' ');
+            current.push_str(word);
+        } else {
+            lines.push(current);
+            current = word.to_string();
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    if lines.is_empty() {
+        lines.push(text.to_string());
+    }
+    lines
 }
 
 #[cfg(test)]

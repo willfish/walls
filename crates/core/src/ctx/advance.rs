@@ -35,10 +35,20 @@ impl WallsCtx {
         Ok(())
     }
 
+    /// Automatic rotation — respects pause and `change.enabled`.
     pub async fn advance_next(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        self.advance_next_mode(AdvanceMode::Auto).await
+    }
+
+    /// Explicit user action (tray, CLI, TUI) — runs even when paused or rotation is off.
+    pub async fn advance_next_manual(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        self.advance_next_mode(AdvanceMode::Manual).await
+    }
+
+    async fn advance_next_mode(&mut self, mode: AdvanceMode) -> anyhow::Result<Option<PathBuf>> {
         let _lock = crate::lock::StateLock::acquire(&self.paths.state_file)?;
         self.state = State::load_or_default(&self.paths.state_file)?;
-        AdvanceNext::new(self).run().await
+        AdvanceNext::new(self, mode).run().await
     }
 
     pub fn advance_prev(&mut self) -> anyhow::Result<Option<PathBuf>> {
@@ -60,13 +70,20 @@ impl WallsCtx {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdvanceMode {
+    Auto,
+    Manual,
+}
+
 struct AdvanceNext<'ctx> {
     ctx: &'ctx mut WallsCtx,
+    mode: AdvanceMode,
 }
 
 impl<'ctx> AdvanceNext<'ctx> {
-    fn new(ctx: &'ctx mut WallsCtx) -> Self {
-        Self { ctx }
+    fn new(ctx: &'ctx mut WallsCtx, mode: AdvanceMode) -> Self {
+        Self { ctx, mode }
     }
 
     async fn run(&mut self) -> anyhow::Result<Option<PathBuf>> {
@@ -99,10 +116,32 @@ impl<'ctx> AdvanceNext<'ctx> {
             return Ok(Some(path));
         }
 
+        if let Some(path) = crate::inline_providers::try_reddit(self.ctx).await? {
+            return Ok(Some(path));
+        }
+        if let Some(path) = crate::inline_providers::try_apod(self.ctx).await? {
+            return Ok(Some(path));
+        }
+        if let Some(path) = crate::inline_providers::try_pixabay(self.ctx).await? {
+            return Ok(Some(path));
+        }
+        if let Some(path) = crate::inline_providers::try_immich(self.ctx).await? {
+            return Ok(Some(path));
+        }
+        if let Some(path) = crate::inline_providers::try_attribution(self.ctx).await? {
+            return Ok(Some(path));
+        }
+        if let Some(path) = crate::inline_providers::try_spotlight(self.ctx).await? {
+            return Ok(Some(path));
+        }
+
         self.apply_local_candidate()
     }
 
     fn should_skip(&self) -> bool {
+        if self.mode == AdvanceMode::Manual {
+            return false;
+        }
         self.ctx.state.paused || !self.ctx.config.change.enabled
     }
 
@@ -315,9 +354,10 @@ impl<'ctx> AdvanceNext<'ctx> {
         }
         let provider = provider_for_source(bing_sources[0]);
 
+        let base = bing_api_base();
         let client = ::reqwest::Client::new();
         let j: serde_json::Value = client
-            .get("https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1")
+            .get(format!("{base}/HPImageArchive.aspx?format=js&idx=0&n=1"))
             .send()
             .await
             .with_context(|| provider.failure_scope("bing json fetch").to_string())?
@@ -330,7 +370,11 @@ impl<'ctx> AdvanceNext<'ctx> {
         if rel.is_empty() {
             return Ok(None);
         }
-        let url = format!("https://www.bing.com{rel}");
+        let url = if rel.starts_with("http://") || rel.starts_with("https://") {
+            rel.to_string()
+        } else {
+            format!("{base}{rel}")
+        };
 
         let bytes = client
             .get(&url)
@@ -386,18 +430,19 @@ impl<'ctx> AdvanceNext<'ctx> {
             .await
             .with_context(|| provider.failure_scope("json feed parse").to_string())?;
 
-        let image_url = extract_json_string(&j, src.image_path.as_deref().unwrap_or("$.url"))
-            .or_else(|| {
-                j.get("url")
-                    .and_then(|v| v.as_str())
-                    .map(ToString::to_string)
-            })
-            .or_else(|| {
-                j.get("download_url")
-                    .and_then(|v| v.as_str())
-                    .map(ToString::to_string)
-            })
-            .ok_or_else(|| anyhow::anyhow!("no image url found in json feed"))?;
+        let image_url =
+            crate::feeds::extract_json_string(&j, src.image_path.as_deref().unwrap_or("$.url"))
+                .or_else(|| {
+                    j.get("url")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string)
+                })
+                .or_else(|| {
+                    j.get("download_url")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string)
+                })
+                .ok_or_else(|| anyhow::anyhow!("no image url found in json feed"))?;
 
         let bytes = client
             .get(&image_url)
@@ -453,7 +498,7 @@ impl<'ctx> AdvanceNext<'ctx> {
             .await
             .with_context(|| provider.failure_scope("mediarss text").to_string())?;
 
-        let image_url = extract_first_media_from_rss(&xml)
+        let image_url = crate::feeds::extract_first_media_from_rss(&xml)
             .ok_or_else(|| anyhow::anyhow!("no image enclosure found in mediarss"))?;
 
         let bytes = client
@@ -483,43 +528,11 @@ impl<'ctx> AdvanceNext<'ctx> {
     }
 }
 
-// Minimal helpers for the feed extractors (used by json/mediarss wiring).
-fn extract_json_string(value: &serde_json::Value, path: &str) -> Option<String> {
-    if !path.starts_with("$.") {
-        return value
-            .get(path)
-            .and_then(|v| v.as_str())
-            .map(ToString::to_string);
-    }
-    let mut current = value;
-    for part in path[2..].split('.') {
-        let part = part.trim();
-        if !part.is_empty() {
-            if let Some(idx_start) = part.find('[') {
-                let key = &part[..idx_start];
-                if !key.is_empty() {
-                    current = current.get(key)?;
-                }
-                // handle [0]
-                if let Some(end) = part.find(']') {
-                    if let Ok(i) = part[idx_start + 1..end].parse::<usize>() {
-                        current = current.get(i)?;
-                    }
-                }
-            } else {
-                current = current.get(part)?;
-            }
-        }
-    }
-    current.as_str().map(ToString::to_string)
-}
-
-fn extract_first_media_from_rss(xml: &str) -> Option<String> {
-    // Look for enclosure url= or media:content url= (common in image RSS)
-    let re = regex::Regex::new(r#"(?:enclosure|media:content)[^>]*url=["']([^"']+)["']"#).ok()?;
-    re.captures(xml)
-        .and_then(|c| c.get(1))
-        .map(|m| m.as_str().to_string())
+fn bing_api_base() -> String {
+    std::env::var("BING_API_BASE")
+        .unwrap_or_else(|_| "https://www.bing.com".to_string())
+        .trim_end_matches('/')
+        .to_string()
 }
 
 struct LocalCandidatePicker<'recent> {

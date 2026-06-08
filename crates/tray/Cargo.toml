@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+build = "build.rs"
 
 [[bin]]
 name = "walls-tray"
@@ -14,10 +15,16 @@ path = "src/main.rs"
 anyhow.workspace = true
 fs2 = "0.4"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+resvg = "0.44"
+tiny-skia = "0.11"
+usvg = "0.44"
+ksni = { version = "0.3.4", default-features = false, features = ["blocking", "tokio"] }
+tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 tray-icon = { version = "0.24", default-features = false, features = ["gtk"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 walls-core = { path = "../core" }
 
 [dev-dependencies]
+serde_json.workspace = true
 tempfile = "3"

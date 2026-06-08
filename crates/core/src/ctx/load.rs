@@ -1,5 +1,5 @@
 use super::WallsCtx;
-use crate::config::{load_config, load_secrets};
+use crate::config::{load_or_create_config, load_secrets};
 use crate::error::{Result, WallsError};
 use crate::paths::WallsPaths;
 use crate::state::State;
@@ -29,10 +29,11 @@ impl WallsCtx {
     }
 
     pub fn load_with_paths(mut paths: WallsPaths) -> Result<Self> {
-        let config = load_config(&paths.config_file).map_err(|source| WallsError::ConfigLoad {
-            path: paths.config_file.clone(),
-            source,
-        })?;
+        let config =
+            load_or_create_config(&paths.config_file).map_err(|source| WallsError::ConfigLoad {
+                path: paths.config_file.clone(),
+                source,
+            })?;
         let secrets =
             load_secrets(&paths.secrets_file).map_err(|source| WallsError::SecretsLoad {
                 path: paths.secrets_file.clone(),

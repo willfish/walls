@@ -5,15 +5,20 @@ mod file_uri;
 pub mod fill_mode;
 mod gnome;
 mod kde;
+mod summary;
 mod wlroots;
 mod xfce;
 
-pub use cosmic::{patch_wallpaper_path, CosmicConfigApplier};
+pub use cosmic::{patch_cosmic_background, patch_wallpaper_path, CosmicConfigApplier};
 pub use detect::{detect_desktop, detect_desktop_from_env, Desktop};
 pub use feh_nitrogen::FehNitrogenApplier;
 pub use fill_mode::{ApplyTrigger, FillMode};
 pub use gnome::{gnome_gsettings_commands, GnomeApplier};
 pub use kde::{kde_dbus_send_args, plasma_script, unsupported_plugins_from_dbus_reply, KdeApplier};
+pub use summary::{
+    backend_setting_label, desktop_display_name, summarize_apply_environment,
+    summarize_apply_environment_from_env, ApplyEnvironmentSummary,
+};
 pub use wlroots::{
     hyprctl_monitors_args, hyprland_monitor_names, sway_output_bg_args, wlroots_scale_mode,
     wlroots_swaybg_commands, HyprlandApplier, SwayApplier, WlrootsApplier,
@@ -104,11 +109,16 @@ pub fn build_applier(apply: &ApplyConfig) -> anyhow::Result<Box<dyn Applier>> {
     }
 }
 
-fn resolve_backend(apply: &ApplyConfig) -> ApplyBackendSetting {
+/// Backend that will actually run for this config in the current session.
+pub fn resolved_apply_backend(apply: &ApplyConfig) -> ApplyBackendSetting {
     match apply.backend {
         ApplyBackendSetting::Auto => auto_backend_for_desktop(detect_desktop()),
         other => other,
     }
+}
+
+fn resolve_backend(apply: &ApplyConfig) -> ApplyBackendSetting {
+    resolved_apply_backend(apply)
 }
 
 pub fn auto_backend_for_desktop(desktop: Desktop) -> ApplyBackendSetting {

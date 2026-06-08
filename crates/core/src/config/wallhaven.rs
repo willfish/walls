@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WallhavenConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     #[serde(default)]
     pub collections: Vec<WallhavenCollection>,
     #[serde(default)]
@@ -42,9 +44,14 @@ pub enum WallhavenPrefer {
     CollectionsOnly,
 }
 
+fn default_enabled() -> bool {
+    true
+}
+
 impl Default for WallhavenConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             collections: Vec::new(),
             search: WallhavenSearch::default(),
             prefer: WallhavenPrefer::CollectionsThenSearch,

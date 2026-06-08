@@ -14,18 +14,26 @@
 )]
 
 pub mod apply;
+pub mod bin_resolve;
 pub mod config;
+pub mod cosmic_theme;
 pub mod ctx;
+pub mod downloads;
 pub mod error;
+pub mod feeds;
+pub mod inline_providers;
 pub mod library;
 pub mod lock;
 pub mod paths;
 pub mod pipeline;
 pub mod providers;
 pub mod quota;
+pub mod rotation;
 pub mod selection;
 pub mod sources;
 pub mod state;
+pub mod tray;
+pub mod tray_icon;
 pub mod unsplash;
 pub mod validate;
 pub mod wallhaven;

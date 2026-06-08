@@ -64,6 +64,8 @@ fn source_with_url(url: &str) -> TestSourceBuilder {
             api_key: None,
             image_path: None,
             title_path: None,
+            sort: None,
+            time: None,
         },
     }
 }

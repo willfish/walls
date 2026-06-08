@@ -33,6 +33,10 @@ skip = [
   { crate = "heck@0.4.1", reason = "Retained by gtk/glib macro crates; workspace CLI derives already use heck 0.5 through clap." },
   { crate = "linux-raw-sys@0.4.15", reason = "Retained by rustix 0.38 in ratatui-image; crossterm/tempfile use rustix 1.x." },
   { crate = "proc-macro-crate@1.3.1", reason = "Retained by gtk3-macros; glib-macros uses proc-macro-crate 2.x." },
+  { crate = "proc-macro-crate@3.5.0", reason = "Retained by ksni/zbus proc-macro stack; gtk/glib macros use proc-macro-crate 1.x/2.x." },
+  { crate = "toml_datetime@1.1.1+spec-1.1.0", reason = "Retained by ksni/zbus toml_edit 0.25; gtk/glib system-deps use toml_datetime 0.6." },
+  { crate = "toml_edit@0.25.12+spec-1.1.0", reason = "Retained by ksni/zbus proc-macro-crate 3.x; gtk/glib macros use older toml_edit." },
+  { crate = "winnow@1.0.3", reason = "Retained by ksni/zbus and toml_edit 0.25; gtk/glib toml_edit 0.19/0.20 use winnow 0.5." },
   { crate = "rand@0.8.6", reason = "Retained by ratatui-image; workspace code uses rand 0.10." },
   { crate = "rand@0.9.4", reason = "Retained by icy_sixel/quantette in the image preview stack; workspace code uses rand 0.10." },
   { crate = "rand_core@0.6.4", reason = "Retained by rand 0.8 in ratatui-image; workspace code uses rand_core 0.10 through rand 0.10." },
@@ -42,6 +46,11 @@ skip = [
   { crate = "thiserror@1.0.69", reason = "Retained by GTK/portable-pty/ratatui-image dependencies; workspace crates use thiserror 2." },
   { crate = "thiserror-impl@1.0.69", reason = "Retained with thiserror 1.x by GTK/portable-pty/ratatui-image dependencies." },
   { crate = "toml_edit@0.19.15", reason = "Retained by proc-macro-crate 1.x via gtk3-macros; glib/system-deps use newer toml_edit." },
+  { crate = "bitflags@1.3.2", reason = "Retained by png 0.17 via tiny-skia/resvg in walls-tray; image 0.25 uses bitflags 2.x." },
+  { crate = "image-webp@0.1.3", reason = "Retained by resvg 0.44 in walls-tray; image 0.25 uses image-webp 0.2.x." },
+  { crate = "png@0.17.16", reason = "Retained by tiny-skia 0.11 in walls-tray; image 0.25 uses png 0.18.x." },
+  { crate = "zune-core@0.4.12", reason = "Retained by resvg 0.44 in walls-tray; image 0.25 uses zune-core 0.5.x." },
+  { crate = "zune-jpeg@0.4.21", reason = "Retained by resvg 0.44 in walls-tray; image 0.25 uses zune-jpeg 0.5.x." },
 ]
 
 [sources]

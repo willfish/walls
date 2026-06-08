@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Inspired by Variety's frame+landscape, but cleaner: monitor + wallpaper, readable at 16px -->
+  <rect x="5" y="5" width="22" height="15" rx="2.25" stroke="#4A90D9" stroke-width="2"/>
+  <clipPath id="screen">
+    <rect x="6.75" y="6.75" width="18.5" height="11.5" rx="1.25"/>
+  </clipPath>
+  <g clip-path="url(#screen)">
+    <path d="M6 17.5 L11.5 12 L16 14.5 L26 8.5 L26 18 H6 Z" fill="#5B9AE8"/>
+    <circle cx="22.25" cy="10.25" r="2.1" fill="#A8CFFF"/>
+  </g>
+  <rect x="13" y="21.5" width="6" height="2" rx="0.5" fill="#4A90D9"/>
+  <rect x="11.5" y="23.75" width="9" height="1.5" rx="0.75" fill="#4A90D9"/>
+</svg>

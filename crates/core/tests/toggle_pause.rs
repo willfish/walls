@@ -1,4 +1,6 @@
-mod common;
+mod common {
+    include!("common/minimal.rs");
+}
 
 use walls_core::WallsCtx;
 

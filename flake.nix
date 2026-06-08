@@ -12,7 +12,6 @@
 
   outputs =
     {
-      self,
       nixpkgs,
       flake-utils,
       pre-commit-hooks,
@@ -121,7 +120,20 @@
             "--skip"
             "tui_with_pty_exits_cleanly_on_quit"
           ];
+          # Default config paths expand `~/.local/share/walls/*`; point HOME at TMPDIR
+          # so integration tests can create data dirs in the Nix build sandbox.
+          preCheck = ''
+            export HOME="$TMPDIR/walls-test-home"
+            mkdir -p "$HOME"
+          '';
           doCheck = true;
+
+          postInstall = lib.optionalString pkgs.stdenv.isLinux ''
+            mkdir -p $out/share/icons/hicolor/scalable/apps $out/share/applications
+            cp assets/icons/walls-tray.svg $out/share/icons/hicolor/scalable/apps/walls.svg
+            substitute ${./assets/applications/walls.desktop.in} $out/share/applications/walls.desktop \
+              --replace-fail '@walls@' "$out/bin/walls"
+          '';
 
           meta = with lib; {
             description = "Personal wallpaper manager (CLI + tray)";
