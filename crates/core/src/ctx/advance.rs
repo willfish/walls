@@ -146,8 +146,6 @@ impl<'ctx> AdvanceNext<'ctx> {
     }
 
     async fn apply_wallhaven_queue(&mut self) -> anyhow::Result<Option<PathBuf>> {
-        use anyhow::Context;
-
         if !self.wallhaven_enabled() {
             return Ok(None);
         }
@@ -158,10 +156,21 @@ impl<'ctx> AdvanceNext<'ctx> {
             return Ok(Some(path));
         }
 
-        crate::wallhaven::refill_wallhaven_cache(&client, &self.ctx.config, &mut self.ctx.state)
-            .await
-            .with_context(|| provider.failure_scope("queue refill").to_string())?;
-        self.ctx.save_state()?;
+        match crate::wallhaven::refill_wallhaven_cache(
+            &client,
+            &self.ctx.config,
+            &mut self.ctx.state,
+        )
+        .await
+        {
+            Ok(()) => self.ctx.save_state()?,
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "wallhaven: queue refill failed, trying next source"
+                );
+            }
+        }
         self.apply_wallhaven_queue_head(&client, &provider).await
     }
 
@@ -214,8 +223,6 @@ impl<'ctx> AdvanceNext<'ctx> {
     }
 
     async fn apply_unsplash_queue(&mut self) -> anyhow::Result<Option<PathBuf>> {
-        use anyhow::Context;
-
         if !self.unsplash_enabled() {
             return Ok(None);
         }
@@ -225,11 +232,17 @@ impl<'ctx> AdvanceNext<'ctx> {
             return Ok(Some(path));
         }
 
-        let provider = crate::providers::unsplash_provider(&self.ctx.config, &self.ctx.secrets);
-        crate::unsplash::refill_unsplash_cache(&client, &self.ctx.config, &mut self.ctx.state)
+        match crate::unsplash::refill_unsplash_cache(&client, &self.ctx.config, &mut self.ctx.state)
             .await
-            .with_context(|| provider.failure_scope("queue refill").to_string())?;
-        self.ctx.save_state()?;
+        {
+            Ok(()) => self.ctx.save_state()?,
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "unsplash: queue refill failed, trying next source"
+                );
+            }
+        }
         self.apply_unsplash_queue_head(&client).await
     }
 

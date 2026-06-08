@@ -236,6 +236,34 @@ async fn e2e_wallhaven_applies_preseeded_cached_file_without_network() {
 }
 
 #[tokio::test]
+async fn e2e_advance_falls_through_when_wallhaven_refill_fails() {
+    let server = MockServer::start().await;
+    let _api_base = common::lock_wallhaven_api_base(&server.uri());
+    Mock::given(method("GET"))
+        .and(path("/api/v1/search"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(json!({ "error": "Unauthorized" })))
+        .mount(&server)
+        .await;
+
+    let harness = FetchHarness::new();
+    let image = common::write_image(harness.path(), "images/fallback.jpg", b"fake jpeg");
+    harness.write_config(harness.base_config_with_wallhaven(
+        true,
+        json!([{
+            "enabled": true,
+            "type": "folder",
+            "path": image.parent().unwrap().display().to_string()
+        }]),
+        FetchHarness::wallhaven_provider(json!({})),
+    ));
+    harness.write_secrets(FetchHarness::wallhaven_secrets("bad-key"));
+    harness.write_state(json!({ "cache_queue": [], "history": [] }));
+
+    let applied = advance_expect_applied(harness.load_ctx()).await;
+    assert!(applied.ends_with("fallback.jpg"));
+}
+
+#[tokio::test]
 async fn e2e_unsplash_source_refills_and_downloads_via_mock() {
     let server = MockServer::start().await;
     let image_url = format!("{}/images/abc123.jpg", server.uri());

@@ -47,6 +47,33 @@ fn validate_config_reports_missing_folder_path() {
 }
 
 #[test]
+fn validate_config_reports_missing_reddit_credentials() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    std::fs::create_dir_all(&images).unwrap();
+    let noop = common::write_noop_script(root.path());
+    common::write_minimal_config(root.path(), &images, &noop);
+
+    let mut config = load_config_json(root.path());
+    config["change"]["internet_enabled"] = serde_json::json!(true);
+    config["sources"] = serde_json::json!([{
+        "enabled": true,
+        "type": "reddit",
+        "query": "wallpapers",
+        "sort": "hot"
+    }]);
+    common::write_config(root.path(), config);
+
+    let errors = validate_root(root.path());
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("secrets.reddit_client_id is empty")),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn validate_config_reports_missing_unsplash_key() {
     let root = tempfile::tempdir().unwrap();
     let images = root.path().join("images");

@@ -113,6 +113,13 @@ fn validate_source_entry(
                 errors.push(format!("source {:?}: {error}", src.label));
             }
         }
+        "reddit"
+            if config.change.internet_enabled && secrets.reddit_client_id.trim().is_empty() =>
+        {
+            errors.push(
+                "reddit source enabled but secrets.reddit_client_id is empty (Reddit blocks unauthenticated API access; create an app at reddit.com/prefs/apps)".into(),
+            );
+        }
         _ => {}
     }
 }
