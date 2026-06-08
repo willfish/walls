@@ -3,7 +3,7 @@
 use ratatui::prelude::*;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::ListItem;
-use walls_core::config::{reddit_summary, SourceEntry};
+use walls_core::config::{reddit_summary, source_secrets_detail_lines, SourceEntry};
 
 use super::app::{App, WallhavenProviderSummary};
 use super::style::{self, Theme};
@@ -79,13 +79,22 @@ fn source_rows(app: &App) -> Vec<SourceRow> {
         let label = source_display_name(src);
         let meta = source_display_meta(src);
         let selected = sub_sel == Some(index);
+        let detail_lines = if selected {
+            source_secrets_detail_lines(
+                src,
+                &app.ctx.secrets,
+                app.ctx.config.change.internet_enabled,
+            )
+        } else {
+            Vec::new()
+        };
         rows.push(SourceRow {
             selected,
             enabled: src.enabled,
             label: label.clone(),
             meta: meta.clone(),
             plain: format_source_row(selected, src.enabled, &label, &meta),
-            detail_lines: Vec::new(),
+            detail_lines,
         });
     }
 

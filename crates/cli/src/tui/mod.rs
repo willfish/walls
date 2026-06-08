@@ -1316,6 +1316,13 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
                 let v = app::App::get_source_field(src, &name);
                 fields.push((label, v, app::source_field_kind_for(src, &name)));
             }
+            if let Some(key) = walls_core::config::source_secrets_key(&src.source_type) {
+                fields.push((
+                    walls_core::config::secrets_credential_label(key).into(),
+                    walls_core::config::SECRETS_EDIT_HINT.into(),
+                    app::EditFieldKind::Text,
+                ));
+            }
         } else if let EditTarget::Wallhaven = &sess.target {
             for k in app::WALLHAVEN_BLOCK_FIELDS {
                 if let Some(v) = sess.draft_block_values.get(*k) {
@@ -1333,7 +1340,7 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
             }
             fields.push((
                 "API key".into(),
-                "(edit ~/.config/walls/secrets.json)".into(),
+                walls_core::config::SECRETS_EDIT_HINT.into(),
                 app::EditFieldKind::Text,
             ));
             fields.push((
@@ -2641,6 +2648,49 @@ mod tests {
         assert!(text.contains("month"), "{text}");
         assert!(!text.contains("Label"), "{text}");
         assert!(!text.contains("Type"), "{text}");
+        assert!(text.contains("Reddit API credentials"), "{text}");
+        assert!(text.contains("secrets.json"), "{text}");
+    }
+
+    #[test]
+    fn reddit_subnav_shows_missing_credentials_warning() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "internet_enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [ { "enabled": true, "type": "reddit", "query": "wallpapers", "sort": "hot" } ]
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = 0;
+
+        let text = render_text(&app, 120, 30);
+        assert!(text.contains("reddit api credentials: missing"), "{text}");
+        assert!(text.contains("reddit.com/prefs/apps"), "{text}");
+    }
+
+    #[test]
+    fn unsplash_edit_form_shows_secrets_hint() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [ { "enabled": false, "type": "unsplash", "label": "Nature", "query": "forest", "orientation": "landscape" } ]
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = 0;
+        app.start_edit_for_current();
+
+        let text = render_text(&app, 110, 30);
+        assert!(text.contains("Unsplash access key"), "{text}");
+        assert!(text.contains("secrets.json"), "{text}");
     }
 
     #[test]
@@ -2978,9 +3028,9 @@ mod tests {
         let buf0 = app.editing.as_ref().unwrap().field_buffer.clone();
         assert_eq!(buf0, "true", "enabled must be prefilled from config json");
 
-        // Move to query field (enabled0, type1, label2, url3, query4)
+        // Move to query field (enabled0, type1, label2, query3)
         let rt = tokio::runtime::Runtime::new().expect("rt");
-        for _ in 0..4 {
+        for _ in 0..3 {
             update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
         }
         let qbuf = app.editing.as_ref().unwrap().field_buffer.clone();
