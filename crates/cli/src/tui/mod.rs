@@ -1110,7 +1110,9 @@ fn rotation_details(app: &App) -> Vec<String> {
         ),
         format!(
             "tray icon: {}",
-            walls_core::tray_icon::tray_accent_label(app.ctx.config.tray.accent)
+            walls_core::tray_icon::tray_accent_label(walls_core::tray_icon::effective_tray_accent(
+                app.ctx.config.tray.accent,
+            ))
         ),
     ]
 }

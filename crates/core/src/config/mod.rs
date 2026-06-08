@@ -54,6 +54,7 @@ pub struct TrayConfig {
 pub enum TrayAccent {
     #[default]
     Blue,
+    Cosmic,
     Green,
     Pink,
     Purple,

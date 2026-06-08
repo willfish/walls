@@ -2,7 +2,9 @@
 
 use std::path::Path;
 
+use crate::apply::{detect_desktop, Desktop};
 use crate::config::{Config, TrayAccent};
+use crate::cosmic_theme;
 use image::imageops::FilterType;
 
 /// RGB accent palette for the brand tray SVG.
@@ -56,7 +58,7 @@ impl TrayAccentPalette {
             TrayAccent::Green => Self::green(),
             TrayAccent::Pink => Self::pink(),
             TrayAccent::Purple => Self::purple(),
-            TrayAccent::Blue | TrayAccent::Wallpaper => Self::blue(),
+            TrayAccent::Blue | TrayAccent::Wallpaper | TrayAccent::Cosmic => Self::blue(),
         }
     }
 
@@ -70,12 +72,37 @@ impl TrayAccentPalette {
     }
 }
 
+/// Whether the current session is COSMIC (`XDG_CURRENT_DESKTOP=COSMIC`).
+pub fn is_cosmic_session() -> bool {
+    detect_desktop() == Desktop::Cosmic
+}
+
+/// Whether `accent` can be selected on this session.
+pub fn tray_accent_available(accent: TrayAccent) -> bool {
+    match accent {
+        TrayAccent::Cosmic => is_cosmic_session(),
+        _ => true,
+    }
+}
+
+/// Config accent with session-specific options applied.
+pub fn effective_tray_accent(accent: TrayAccent) -> TrayAccent {
+    if tray_accent_available(accent) {
+        accent
+    } else {
+        TrayAccent::Blue
+    }
+}
+
 /// Resolve the tray palette from config and optional composed wallpaper path.
 pub fn resolve_tray_palette(config: &Config, wallpaper_path: Option<&Path>) -> TrayAccentPalette {
-    match config.tray.accent {
+    match effective_tray_accent(config.tray.accent) {
         TrayAccent::Wallpaper => wallpaper_path
             .and_then(dominant_color_from_image)
             .map_or_else(TrayAccentPalette::blue, TrayAccentPalette::from_dominant),
+        TrayAccent::Cosmic => {
+            cosmic_theme::cosmic_accent_palette().unwrap_or_else(TrayAccentPalette::blue)
+        }
         accent => TrayAccentPalette::from_accent(accent),
     }
 }
@@ -84,6 +111,7 @@ pub fn resolve_tray_palette(config: &Config, wallpaper_path: Option<&Path>) -> T
 pub fn tray_accent_label(accent: TrayAccent) -> &'static str {
     match accent {
         TrayAccent::Blue => "blue",
+        TrayAccent::Cosmic => "cosmic",
         TrayAccent::Green => "green",
         TrayAccent::Pink => "pink",
         TrayAccent::Purple => "purple",
@@ -95,6 +123,7 @@ pub fn tray_accent_label(accent: TrayAccent) -> &'static str {
 pub fn parse_tray_accent(value: &str) -> Option<TrayAccent> {
     match value.trim().to_ascii_lowercase().as_str() {
         "blue" => Some(TrayAccent::Blue),
+        "cosmic" => Some(TrayAccent::Cosmic),
         "green" => Some(TrayAccent::Green),
         "pink" => Some(TrayAccent::Pink),
         "purple" => Some(TrayAccent::Purple),
@@ -103,7 +132,18 @@ pub fn parse_tray_accent(value: &str) -> Option<TrayAccent> {
     }
 }
 
-pub const TRAY_ACCENT_CHOICES: &[&str] = &["blue", "green", "pink", "purple", "wallpaper"];
+const TRAY_ACCENT_CHOICES_BASE: &[&str] = &["blue", "green", "pink", "purple", "wallpaper"];
+const TRAY_ACCENT_CHOICES_WITH_COSMIC: &[&str] =
+    &["blue", "cosmic", "green", "pink", "purple", "wallpaper"];
+
+/// Tray accent values offered in config editors on this session.
+pub fn tray_accent_choices() -> &'static [&'static str] {
+    if is_cosmic_session() {
+        TRAY_ACCENT_CHOICES_WITH_COSMIC
+    } else {
+        TRAY_ACCENT_CHOICES_BASE
+    }
+}
 
 /// Canonical blue hex values in `assets/icons/walls-tray.svg` (desktop launcher uses the same file).
 pub const BRAND_PRIMARY_HEX: &str = "#4A90D9";
@@ -185,6 +225,7 @@ mod tests {
     #[test]
     fn parse_tray_accent_accepts_config_values() {
         assert_eq!(parse_tray_accent("Blue"), Some(TrayAccent::Blue));
+        assert_eq!(parse_tray_accent("cosmic"), Some(TrayAccent::Cosmic));
         assert_eq!(parse_tray_accent("wallpaper"), Some(TrayAccent::Wallpaper));
         assert_eq!(parse_tray_accent("magenta"), None);
     }
@@ -217,6 +258,28 @@ mod tests {
         let rgb = dominant_color_from_image(&path).expect("dominant color");
         assert!(rgb[1] > rgb[0], "green channel should dominate: {rgb:?}");
         assert!(rgb[1] > rgb[2], "green channel should dominate: {rgb:?}");
+    }
+
+    #[test]
+    fn tray_accent_choices_match_cosmic_session() {
+        let choices = tray_accent_choices();
+        if is_cosmic_session() {
+            assert!(choices.contains(&"cosmic"));
+        } else {
+            assert!(!choices.contains(&"cosmic"));
+        }
+    }
+
+    #[test]
+    fn effective_tray_accent_falls_back_off_cosmic_session() {
+        if is_cosmic_session() {
+            assert_eq!(
+                effective_tray_accent(TrayAccent::Cosmic),
+                TrayAccent::Cosmic
+            );
+        } else {
+            assert_eq!(effective_tray_accent(TrayAccent::Cosmic), TrayAccent::Blue);
+        }
     }
 
     #[test]

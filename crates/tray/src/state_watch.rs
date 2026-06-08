@@ -4,15 +4,18 @@ use std::fs;
 use std::time::SystemTime;
 
 use walls_core::config::{load_or_create_config, TrayAccent};
+use walls_core::cosmic_theme;
 use walls_core::paths::{expand_home, WallsPaths};
 use walls_core::rotation::rotation_inactive;
 use walls_core::state::State;
+use walls_core::tray_icon::effective_tray_accent;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrayVisualState {
     pub composed_path: Option<String>,
     pub rotation_inactive: bool,
     pub tray_accent: TrayAccent,
+    pub cosmic_theme_mtime: Option<SystemTime>,
     pub image_mtime: Option<SystemTime>,
 }
 
@@ -30,10 +33,17 @@ impl TrayVisualState {
             .map(expand_home)
             .and_then(|path| fs::metadata(path).ok())
             .and_then(|meta| meta.modified().ok());
+        let cosmic_theme_mtime = if effective_tray_accent(config.tray.accent) == TrayAccent::Cosmic
+        {
+            cosmic_theme::cosmic_theme_stamp()
+        } else {
+            None
+        };
         Ok(Self {
             composed_path,
             rotation_inactive: inactive,
             tray_accent: config.tray.accent,
+            cosmic_theme_mtime,
             image_mtime,
         })
     }
@@ -182,6 +192,63 @@ mod tests {
         config.tray.accent = walls_core::config::TrayAccent::Green;
         write_config(&watcher.paths.config_file, &config);
         assert!(watcher.poll());
+    }
+
+    #[test]
+    fn poll_detects_cosmic_theme_file_change() {
+        let root = tempfile::tempdir().unwrap();
+        let cosmic_root = root.path().join("cosmic");
+        fs::create_dir_all(cosmic_root.join("com.system76.CosmicTheme.Mode/v1")).unwrap();
+        fs::create_dir_all(cosmic_root.join("com.system76.CosmicTheme.Dark/v1")).unwrap();
+        fs::write(
+            cosmic_root.join("com.system76.CosmicTheme.Mode/v1/is_dark"),
+            "true",
+        )
+        .unwrap();
+        fs::write(
+            cosmic_root.join("com.system76.CosmicTheme.Dark/v1/accent"),
+            r"(
+    base: ( red: 0.1, green: 0.2, blue: 0.3, alpha: 1.0, ),
+    hover: ( red: 0.2, green: 0.3, blue: 0.4, alpha: 1.0, ),
+    focus: ( red: 0.3, green: 0.4, blue: 0.5, alpha: 1.0, ),
+    border: ( red: 0.4, green: 0.5, blue: 0.6, alpha: 1.0, ),
+)",
+        )
+        .unwrap();
+
+        let xdg = root.path().join("xdg");
+        fs::create_dir_all(&xdg).unwrap();
+        std::env::set_var("XDG_CONFIG_HOME", &xdg);
+
+        let mut watcher = setup_watcher(root.path(), &sample_state("/tmp/a.jpg", false));
+        let mut config = load_or_create_config(&watcher.paths.config_file).unwrap();
+        config.tray.accent = walls_core::config::TrayAccent::Cosmic;
+        write_config(&watcher.paths.config_file, &config);
+        assert!(watcher.poll());
+
+        let cosmic_config = xdg.join("cosmic");
+        fs::create_dir_all(cosmic_config.join("com.system76.CosmicTheme.Mode/v1")).unwrap();
+        fs::create_dir_all(cosmic_config.join("com.system76.CosmicTheme.Dark/v1")).unwrap();
+        fs::write(
+            cosmic_config.join("com.system76.CosmicTheme.Mode/v1/is_dark"),
+            "true",
+        )
+        .unwrap();
+        fs::write(
+            cosmic_config.join("com.system76.CosmicTheme.Dark/v1/accent"),
+            r"(
+    base: ( red: 0.5, green: 0.6, blue: 0.7, alpha: 1.0, ),
+    hover: ( red: 0.6, green: 0.7, blue: 0.8, alpha: 1.0, ),
+    focus: ( red: 0.7, green: 0.8, blue: 0.9, alpha: 1.0, ),
+    border: ( red: 0.8, green: 0.9, blue: 1.0, alpha: 1.0, ),
+)",
+        )
+        .unwrap();
+
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(watcher.poll());
+
+        std::env::remove_var("XDG_CONFIG_HOME");
     }
 
     #[test]

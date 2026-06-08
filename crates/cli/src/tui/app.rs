@@ -193,7 +193,10 @@ fn rotation_block_draft(config: &Config) -> std::collections::HashMap<String, St
     );
     vals.insert(
         "tray_accent".into(),
-        walls_core::tray_icon::tray_accent_label(config.tray.accent).into(),
+        walls_core::tray_icon::tray_accent_label(walls_core::tray_icon::effective_tray_accent(
+            config.tray.accent,
+        ))
+        .into(),
     );
     vals
 }
@@ -303,7 +306,7 @@ pub(crate) fn block_field_kind(block: usize, key: &str) -> EditFieldKind {
             "enabled" | "on_start" | "internet" | "safe_mode" | "change_lock_screen" => {
                 EditFieldKind::Bool
             }
-            "tray_accent" => EditFieldKind::Choice(walls_core::tray_icon::TRAY_ACCENT_CHOICES),
+            "tray_accent" => EditFieldKind::Choice(walls_core::tray_icon::tray_accent_choices()),
             _ => EditFieldKind::Text,
         },
         2 => match key {
@@ -449,7 +452,10 @@ fn block_field_value_at(
             "safe_mode" => config.change.safe_mode.to_string(),
             "change_lock_screen" => config.change.change_lock_screen.to_string(),
             "download_preference_ratio" => config.change.download_preference_ratio.to_string(),
-            "tray_accent" => walls_core::tray_icon::tray_accent_label(config.tray.accent).into(),
+            "tray_accent" => walls_core::tray_icon::tray_accent_label(
+                walls_core::tray_icon::effective_tray_accent(config.tray.accent),
+            )
+            .into(),
             _ => String::new(),
         },
         2 => match *key {
@@ -531,7 +537,9 @@ fn apply_rotation_block_draft(
     }
     if let Some(v) = draft.get("tray_accent") {
         if let Some(accent) = walls_core::tray_icon::parse_tray_accent(v) {
-            config.tray.accent = accent;
+            if walls_core::tray_icon::tray_accent_available(accent) {
+                config.tray.accent = accent;
+            }
         }
     }
 }

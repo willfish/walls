@@ -16,6 +16,7 @@
 pub mod apply;
 pub mod bin_resolve;
 pub mod config;
+pub mod cosmic_theme;
 pub mod ctx;
 pub mod downloads;
 pub mod error;
