@@ -2,7 +2,7 @@ mod common {
     include!("common/minimal.rs");
 }
 
-use walls_core::validate::{validate_config, validate_source_edit};
+use walls_core::validate::{validate_config, validate_source_edit, validate_wallhaven_edit};
 use walls_core::WallsCtx;
 
 fn load_config_json(root: &std::path::Path) -> serde_json::Value {
@@ -331,4 +331,176 @@ fn validate_config_reports_zero_quota_size() {
             .any(|error| error.contains("quota.size_mb must be greater than zero")),
         "{errors:?}"
     );
+}
+
+#[test]
+fn validate_config_reports_invalid_wallhaven_provider_settings() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    std::fs::create_dir_all(&images).unwrap();
+    let noop = common::write_noop_script(root.path());
+    common::write_minimal_config(root.path(), &images, &noop);
+
+    let mut config = load_config_json(root.path());
+    config["wallhaven"] = serde_json::json!({
+        "enabled": true,
+        "collections": [
+            { "username": "", "id": 0 }
+        ],
+        "search": {
+            "q": "forest",
+            "categories": "12",
+            "purity": "000",
+            "sorting": "popular",
+            "order": "sideways",
+            "atleast": "large"
+        }
+    });
+    common::write_config(root.path(), config);
+
+    let errors = validate_root(root.path());
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("wallhaven.search.categories must be three binary digits")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("wallhaven.search.purity must enable at least one option")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("wallhaven.search.sorting must be one of")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("wallhaven.search.order must be one of")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("wallhaven.search.atleast must use WIDTHxHEIGHT format")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("wallhaven.collections[0].username must not be empty")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("wallhaven.collections[0].id must be greater than zero")),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn validate_wallhaven_edit_reports_provider_errors_without_global_config_checks() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    std::fs::create_dir_all(&images).unwrap();
+    let noop = common::write_noop_script(root.path());
+    common::write_minimal_config(root.path(), &images, &noop);
+
+    let mut config = load_config_json(root.path());
+    config["sources"] = serde_json::json!([{
+        "enabled": true,
+        "type": "folder",
+        "label": "Missing",
+        "path": "/nonexistent/walls-test-folder"
+    }]);
+    config["wallhaven"] = serde_json::json!({
+        "enabled": true,
+        "search": {
+            "categories": "abc",
+            "purity": "001",
+            "sorting": "random",
+            "order": "desc",
+            "atleast": "1920x1080"
+        }
+    });
+    common::write_config(root.path(), config);
+
+    let ctx = WallsCtx::load_from(root.path()).unwrap();
+    let errors = validate_wallhaven_edit(&ctx.config, &ctx.secrets);
+
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("wallhaven.search.categories must be three binary digits")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("cannot select only NSFW without")),
+        "{errors:?}"
+    );
+    assert!(
+        !errors.iter().any(|error| error.contains("does not exist")),
+        "scoped Wallhaven edit validation should not report unrelated source errors: {errors:?}"
+    );
+}
+
+#[test]
+fn validate_config_allows_keyless_wallhaven_with_safe_purity() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    std::fs::create_dir_all(&images).unwrap();
+    let noop = common::write_noop_script(root.path());
+    common::write_minimal_config(root.path(), &images, &noop);
+
+    let mut config = load_config_json(root.path());
+    config["wallhaven"] = serde_json::json!({
+        "enabled": true,
+        "search": {
+            "q": "forest",
+            "categories": "111",
+            "purity": "100",
+            "sorting": "random",
+            "order": "desc",
+            "atleast": "1920x1080"
+        }
+    });
+    common::write_config(root.path(), config);
+
+    let errors = validate_root(root.path());
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn validate_config_skips_disabled_wallhaven_provider_settings() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    std::fs::create_dir_all(&images).unwrap();
+    let noop = common::write_noop_script(root.path());
+    common::write_minimal_config(root.path(), &images, &noop);
+
+    let mut config = load_config_json(root.path());
+    config["wallhaven"] = serde_json::json!({
+        "enabled": false,
+        "collections": [
+            { "username": "", "id": 0 }
+        ],
+        "search": {
+            "categories": "abc",
+            "purity": "000",
+            "sorting": "popular",
+            "order": "sideways",
+            "atleast": "large"
+        }
+    });
+    common::write_config(root.path(), config);
+
+    let errors = validate_root(root.path());
+    assert!(errors.is_empty(), "{errors:?}");
 }

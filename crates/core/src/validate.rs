@@ -2,6 +2,16 @@ use crate::config::UnsplashSourceConfig;
 use crate::config::{ApplyBackendSetting, Config, Secrets, SourceEntry};
 use crate::paths::{expand_home, WallsPaths};
 
+const WALLHAVEN_SORTING_CHOICES: &[&str] = &[
+    "date",
+    "relevance",
+    "random",
+    "views",
+    "favorites",
+    "toplist",
+];
+const WALLHAVEN_ORDER_CHOICES: &[&str] = &["desc", "asc"];
+
 /// Log non-fatal config problems at load time (see also `walls config validate`).
 pub fn warn_validation_issues(config: &Config, secrets: &Secrets, paths: &WallsPaths) {
     for issue in validate_config(config, secrets, paths) {
@@ -124,7 +134,100 @@ fn validate_source_entry(
     }
 }
 
-fn validate_wallhaven_provider(_config: &Config, _secrets: &Secrets, _errors: &mut Vec<String>) {}
+fn validate_wallhaven_provider(config: &Config, secrets: &Secrets, errors: &mut Vec<String>) {
+    if !config.wallhaven.enabled {
+        return;
+    }
+
+    let search = &config.wallhaven.search;
+    validate_wallhaven_bitfield(
+        "wallhaven.search.categories",
+        &search.categories,
+        true,
+        errors,
+    );
+    validate_wallhaven_bitfield("wallhaven.search.purity", &search.purity, true, errors);
+
+    if secrets.wallhaven_api_key.trim().is_empty()
+        && search.purity.as_bytes().get(0..2) == Some(b"00")
+        && search.purity.as_bytes().get(2) == Some(&b'1')
+    {
+        errors.push(
+            "wallhaven.search.purity cannot select only NSFW without secrets.wallhaven_api_key"
+                .into(),
+        );
+    }
+
+    validate_choice(
+        "wallhaven.search.sorting",
+        &search.sorting,
+        WALLHAVEN_SORTING_CHOICES,
+        errors,
+    );
+    validate_choice(
+        "wallhaven.search.order",
+        &search.order,
+        WALLHAVEN_ORDER_CHOICES,
+        errors,
+    );
+    validate_resolution("wallhaven.search.atleast", &search.atleast, errors);
+
+    for (index, collection) in config.wallhaven.collections.iter().enumerate() {
+        if collection.username.trim().is_empty() {
+            errors.push(format!(
+                "wallhaven.collections[{index}].username must not be empty"
+            ));
+        }
+        if collection.id == 0 {
+            errors.push(format!(
+                "wallhaven.collections[{index}].id must be greater than zero"
+            ));
+        }
+    }
+}
+
+fn validate_wallhaven_bitfield(
+    field: &str,
+    value: &str,
+    require_enabled_bit: bool,
+    errors: &mut Vec<String>,
+) {
+    if value.len() != 3 || !value.bytes().all(|byte| matches!(byte, b'0' | b'1')) {
+        errors.push(format!(
+            "{field} must be three binary digits, for example 100 or 111"
+        ));
+        return;
+    }
+
+    if require_enabled_bit && value.bytes().all(|byte| byte == b'0') {
+        errors.push(format!("{field} must enable at least one option"));
+    }
+}
+
+fn validate_choice(field: &str, value: &str, choices: &[&str], errors: &mut Vec<String>) {
+    if choices.contains(&value) {
+        return;
+    }
+
+    errors.push(format!("{field} must be one of: {}", choices.join(", ")));
+}
+
+fn validate_resolution(field: &str, value: &str, errors: &mut Vec<String>) {
+    let Some((width, height)) = value.split_once('x') else {
+        errors.push(format!(
+            "{field} must use WIDTHxHEIGHT format, for example 1920x1080"
+        ));
+        return;
+    };
+
+    let width = width.parse::<u32>().ok();
+    let height = height.parse::<u32>().ok();
+    if !matches!((width, height), (Some(width), Some(height)) if width > 0 && height > 0) {
+        errors.push(format!(
+            "{field} must use positive numeric WIDTHxHEIGHT values"
+        ));
+    }
+}
 
 fn validate_tray_autostart(config: &Config, errors: &mut Vec<String>) {
     let Ok(config_home) = autostart_config_home() else {
