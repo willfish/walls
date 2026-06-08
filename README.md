@@ -143,6 +143,7 @@ walls-tray         # tray menu → walls prev/next/toggle-pause
 | `walls fetch <paths...> [--move]` | Works |
 | `walls trash` | Works |
 | `walls config validate` | Works |
+| `walls config sync` | Reconcile tray autostart desktop entry with `config.json` |
 | `walls pause` / `walls resume` / `walls toggle-pause` | Works |
 | `walls next [--manual] [--refresh <level>]` / `walls prev` | Works (auto `next` respects pause/rotation-off; `--manual` for explicit changes; refresh levels: `all`, `filters-and-texts`, `texts`, `clock-only`) |
 | `walls tui` | Works — tabs: Status/Now/History/Browse/Search; `:` commands; `f`/`d` favorite/trash |
@@ -167,8 +168,11 @@ Configure rotation in `config.json`:
 - `change.enabled` — master switch
 - `change.interval_secs` — seconds between automatic changes (tray scheduler)
 - `change.on_start` — change once when `walls-tray` starts
+- `tray.autostart.desktops` — per-desktop login autostart for `walls-tray` (synced to `~/.config/autostart/walls-tray.desktop`; toggle in TUI Config → Rotation)
 
 `walls pause` stops automatic rotation; use `walls next --manual` (or tray/TUI next) while paused.
+
+`walls config sync` reconciles the tray autostart entry after hand-editing `config.json`. Autostart is skipped on desktops where tray is unavailable (Awesome, Fluxbox, Enlightenment, Trinity, Lingmo).
 
 Optional legacy `systemd/` units remain for headless setups without a tray host; prefer the tray scheduler when a graphical session is available.
 

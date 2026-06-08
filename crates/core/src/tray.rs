@@ -86,20 +86,13 @@ pub fn decide_tray_action_from_env(
     TrayAction::Spawn
 }
 
-/// Live environment lookup.
-pub fn decide_tray_action() -> TrayAction {
-    decide_tray_action_from_env(
-        std::env::var("WALLS_TRAY").ok().as_deref(),
-        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
-        std::env::var("XDG_SESSION_DESKTOP").ok().as_deref(),
-        std::env::var("DESKTOP_STARTUP_ID").ok().as_deref(),
-        std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
-        std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
-        std::env::var("DISPLAY").ok().as_deref(),
-    )
+/// User-facing desktop name.
+pub fn desktop_display_name(desktop: Desktop) -> &'static str {
+    desktop_name(desktop)
 }
 
-fn unsupported_tray_reason(desktop: Desktop) -> Option<String> {
+/// Why tray is unavailable on this desktop, if at all.
+pub fn unsupported_tray_reason(desktop: Desktop) -> Option<String> {
     match desktop {
         Desktop::Enlightenment
         | Desktop::Awesome
@@ -111,6 +104,19 @@ fn unsupported_tray_reason(desktop: Desktop) -> Option<String> {
         )),
         _ => None,
     }
+}
+
+/// Live environment lookup.
+pub fn decide_tray_action() -> TrayAction {
+    decide_tray_action_from_env(
+        std::env::var("WALLS_TRAY").ok().as_deref(),
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+        std::env::var("XDG_SESSION_DESKTOP").ok().as_deref(),
+        std::env::var("DESKTOP_STARTUP_ID").ok().as_deref(),
+        std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
+        std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
+        std::env::var("DISPLAY").ok().as_deref(),
+    )
 }
 
 fn desktop_name(desktop: Desktop) -> &'static str {

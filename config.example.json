@@ -55,7 +55,14 @@
     "strategy": "random"
   },
   "tray": {
-    "accent": "blue"
+    "accent": "blue",
+    "autostart": {
+      "desktops": {
+        "cosmic": false,
+        "kde": false,
+        "gnome": false
+      }
+    }
   },
   "sources": [
     { "enabled": true, "type": "favorites", "label": "The Favorites folder" },
