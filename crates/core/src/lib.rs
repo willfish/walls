@@ -32,6 +32,7 @@ pub mod selection;
 pub mod sources;
 pub mod state;
 pub mod tray;
+pub mod tray_icon;
 pub mod unsplash;
 pub mod validate;
 pub mod wallhaven;

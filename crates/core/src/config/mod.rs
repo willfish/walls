@@ -39,6 +39,25 @@ pub struct Config {
     pub sources: Vec<SourceEntry>,
     #[serde(default)]
     pub wallhaven: WallhavenConfig,
+    #[serde(default)]
+    pub tray: TrayConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct TrayConfig {
+    #[serde(default)]
+    pub accent: TrayAccent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TrayAccent {
+    #[default]
+    Blue,
+    Green,
+    Pink,
+    Purple,
+    Wallpaper,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

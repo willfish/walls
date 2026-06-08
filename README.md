@@ -147,9 +147,18 @@ walls-tray         # tray menu → walls prev/next/toggle-pause
 | `walls next [--manual] [--refresh <level>]` / `walls prev` | Works (auto `next` respects pause/rotation-off; `--manual` for explicit changes; refresh levels: `all`, `filters-and-texts`, `texts`, `clock-only`) |
 | `walls tui` | Works — tabs: Status/Now/History/Browse/Search; `:` commands; `f`/`d` favorite/trash |
 | `walls tui` with `--features tui-preview` | Optional Now-tab image preview in terminals supporting Kitty graphics (Ghostty/Kitty) or iTerm2 inline images; metadata-only fallback otherwise; set `WALLS_TUI_PREVIEW=0` to force metadata-only |
-| `walls-tray` | Works (prev/next/pause, Open TUI, thumbnail icon) |
+| `walls-tray` | Works (prev/next/pause, Open TUI, brand tray icon from `assets/icons/walls-tray.svg`) |
 
-Set `WALLS_TUI_CMD` to override the terminal launch command (`{walls}` is substituted). Defaults to `$TERMINAL -e walls tui` (terminal: `alacritty`).
+**Terminal for tray “Open TUI”** (precedence order):
+
+1. `WALLS_TUI_CMD` — full override; `{walls}` is substituted (e.g. `ghostty -e {walls} tui`)
+2. `$TERMINAL` — if set in the tray process environment (e.g. systemd `Environment=TERMINAL=ghostty`)
+3. `xdg-terminal-exec` — system default terminal when on `PATH` (typical on modern Linux desktops)
+4. `alacritty` — last-resort fallback
+
+The **desktop launcher** (`walls.desktop`, installed on Linux via Nix) uses `Terminal=true`, so your desktop’s default terminal emulator runs `walls tui` — no extra config.
+
+Tray/desktop icon SVGs live under `assets/icons/` (`walls-tray.svg` for launchers and the active tray icon, `walls-tray-paused.svg` when rotation is inactive). Rebuild `walls-tray` after editing. Set `WALLS_TRAY_WALLPAPER_THUMBNAIL=1` to restore the old live-wallpaper thumbnail icon (paused still uses the paused brand icon).
 
 ## Automatic rotation
 

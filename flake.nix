@@ -122,6 +122,13 @@
           ];
           doCheck = true;
 
+          postInstall = lib.optionalString pkgs.stdenv.isLinux ''
+            mkdir -p $out/share/icons/hicolor/scalable/apps $out/share/applications
+            cp assets/icons/walls-tray.svg $out/share/icons/hicolor/scalable/apps/walls.svg
+            substitute ${./assets/applications/walls.desktop.in} $out/share/applications/walls.desktop \
+              --replace-fail '@walls@' "$out/bin/walls"
+          '';
+
           meta = with lib; {
             description = "Personal wallpaper manager (CLI + tray)";
             license = licenses.mit;

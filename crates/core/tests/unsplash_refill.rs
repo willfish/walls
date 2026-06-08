@@ -73,6 +73,7 @@ fn config_defaults_keep_existing_manual_construction_shape() {
         selection: SelectionConfig::default(),
         sources: vec![],
         wallhaven: Default::default(),
+        tray: Default::default(),
     };
 
     assert!(config.sources.is_empty());

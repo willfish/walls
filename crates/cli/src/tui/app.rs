@@ -111,6 +111,7 @@ pub(crate) const ROTATION_BLOCK_FIELDS: &[&str] = &[
     "safe_mode",
     "change_lock_screen",
     "download_preference_ratio",
+    "tray_accent",
 ];
 
 pub(crate) const WALLHAVEN_BLOCK_FIELDS: &[&str] = &[
@@ -189,6 +190,10 @@ fn rotation_block_draft(config: &Config) -> std::collections::HashMap<String, St
     vals.insert(
         "download_preference_ratio".into(),
         config.change.download_preference_ratio.to_string(),
+    );
+    vals.insert(
+        "tray_accent".into(),
+        walls_core::tray_icon::tray_accent_label(config.tray.accent).into(),
     );
     vals
 }
@@ -270,6 +275,7 @@ pub(crate) fn block_field_label(block: usize, key: &str) -> String {
             "safe_mode" => "Safe mode".into(),
             "change_lock_screen" => "Change lock screen".into(),
             "download_preference_ratio" => "Download preference ratio (0.0-1.0)".into(),
+            "tray_accent" => "Tray icon accent".into(),
             other => other.into(),
         },
         2 => match key {
@@ -297,6 +303,7 @@ pub(crate) fn block_field_kind(block: usize, key: &str) -> EditFieldKind {
             "enabled" | "on_start" | "internet" | "safe_mode" | "change_lock_screen" => {
                 EditFieldKind::Bool
             }
+            "tray_accent" => EditFieldKind::Choice(walls_core::tray_icon::TRAY_ACCENT_CHOICES),
             _ => EditFieldKind::Text,
         },
         2 => match key {
@@ -442,6 +449,7 @@ fn block_field_value_at(
             "safe_mode" => config.change.safe_mode.to_string(),
             "change_lock_screen" => config.change.change_lock_screen.to_string(),
             "download_preference_ratio" => config.change.download_preference_ratio.to_string(),
+            "tray_accent" => walls_core::tray_icon::tray_accent_label(config.tray.accent).into(),
             _ => String::new(),
         },
         2 => match *key {
@@ -519,6 +527,11 @@ fn apply_rotation_block_draft(
     if let Some(v) = draft.get("download_preference_ratio") {
         if let Ok(f) = v.parse::<f64>() {
             config.change.download_preference_ratio = f.clamp(0.0, 1.0);
+        }
+    }
+    if let Some(v) = draft.get("tray_accent") {
+        if let Some(accent) = walls_core::tray_icon::parse_tray_accent(v) {
+            config.tray.accent = accent;
         }
     }
 }

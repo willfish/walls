@@ -1108,6 +1108,10 @@ fn rotation_details(app: &App) -> Vec<String> {
             "download preference: {:.0}% online",
             app.ctx.config.change.download_preference_ratio * 100.0
         ),
+        format!(
+            "tray icon: {}",
+            walls_core::tray_icon::tray_accent_label(app.ctx.config.tray.accent)
+        ),
     ]
 }
 
@@ -1767,6 +1771,7 @@ mod tests {
         assert!(text.contains("safe mode: true"), "{text}");
         assert!(text.contains("lock screen: true"), "{text}");
         assert!(text.contains("download preference: 35% online"), "{text}");
+        assert!(text.contains("tray icon: blue"), "{text}");
         assert!(!text.contains("paused:"), "{text}");
     }
 

@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::config::ChangeConfig;
+use crate::config::{ChangeConfig, Config};
 use crate::ctx::WallsCtx;
 use crate::state::State;
 
@@ -94,6 +94,18 @@ pub async fn advance_manual(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf
     ctx.advance_next_manual().await
 }
 
+/// Whether automatic rotation is inactive — tray should show the paused icon.
+///
+/// True when rotation is explicitly paused or disabled, or when no sources are enabled.
+pub fn rotation_inactive(state: &State, config: &Config) -> bool {
+    state.paused || !config.change.enabled || !any_sources_enabled(config)
+}
+
+/// Any configured source (including Wallhaven) is enabled.
+pub fn any_sources_enabled(config: &Config) -> bool {
+    config.sources.iter().any(|source| source.enabled) || config.wallhaven.enabled
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,5 +156,60 @@ mod tests {
             &change(true, false, 300),
             &state(false, 0)
         ));
+    }
+
+    fn config_with_sources(enabled: bool) -> Config {
+        let mut config = crate::config::default_config().expect("default config");
+        config.change.enabled = true;
+        config.sources = vec![crate::config::SourceEntry {
+            enabled,
+            source_type: "folder".into(),
+            path: Some("/tmp".into()),
+            label: None,
+            query: None,
+            url: None,
+            collection: None,
+            user: None,
+            topic: None,
+            orientation: None,
+            api_key: None,
+            image_path: None,
+            title_path: None,
+            sort: None,
+            time: None,
+        }];
+        config
+    }
+
+    #[test]
+    fn rotation_inactive_when_explicitly_paused_or_disabled() {
+        let config = config_with_sources(true);
+        assert!(rotation_inactive(&state(true, 0), &config));
+        let mut disabled = config.clone();
+        disabled.change.enabled = false;
+        assert!(rotation_inactive(&state(false, 0), &disabled));
+    }
+
+    #[test]
+    fn rotation_inactive_when_all_sources_off() {
+        let mut config = config_with_sources(false);
+        config.wallhaven.enabled = false;
+        assert!(!any_sources_enabled(&config));
+        assert!(rotation_inactive(&state(false, 0), &config));
+    }
+
+    #[test]
+    fn rotation_active_when_rotation_on_and_sources_enabled() {
+        let config = config_with_sources(true);
+        assert!(any_sources_enabled(&config));
+        assert!(!rotation_inactive(&state(false, 0), &config));
+    }
+
+    #[test]
+    fn wallhaven_enabled_counts_as_active_source() {
+        let mut config = config_with_sources(false);
+        config.wallhaven.enabled = true;
+        assert!(any_sources_enabled(&config));
+        assert!(!rotation_inactive(&state(false, 0), &config));
     }
 }
