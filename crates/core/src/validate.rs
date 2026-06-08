@@ -1,5 +1,5 @@
 use crate::config::UnsplashSourceConfig;
-use crate::config::{ApplyBackendSetting, Config, Secrets, SourceEntry};
+use crate::config::{ApplyBackendSetting, Config, Secrets, SourceEntry, SourceKind};
 use crate::paths::{expand_home, WallsPaths};
 
 const WALLHAVEN_SORTING_CHOICES: &[&str] = &[
@@ -89,11 +89,11 @@ fn validate_source_entry(
         return;
     }
 
-    match src.source_type.as_str() {
-        "folder" | "image" | "favorites" | "fetched" => {
-            let expanded = match src.source_type.as_str() {
-                "favorites" => paths.favorites_dir.clone(),
-                "fetched" => paths.fetched_dir.clone(),
+    match SourceKind::parse(&src.source_type) {
+        SourceKind::Folder | SourceKind::Image | SourceKind::Favorites | SourceKind::Fetched => {
+            let expanded = match SourceKind::parse(&src.source_type) {
+                SourceKind::Favorites => paths.favorites_dir.clone(),
+                SourceKind::Fetched => paths.fetched_dir.clone(),
                 _ => {
                     let Some(path) = src.path.as_ref() else {
                         errors.push(format!(
@@ -113,7 +113,7 @@ fn validate_source_entry(
                 ));
             }
         }
-        "unsplash" => {
+        SourceKind::Unsplash => {
             if config.change.internet_enabled && secrets.unsplash_access_key.is_empty() {
                 errors.push(
                     "unsplash source enabled but secrets.unsplash_access_key is empty".into(),
@@ -123,7 +123,7 @@ fn validate_source_entry(
                 errors.push(format!("source {:?}: {error}", src.label));
             }
         }
-        "reddit"
+        SourceKind::Reddit
             if config.change.internet_enabled && secrets.reddit_client_id.trim().is_empty() =>
         {
             errors.push(

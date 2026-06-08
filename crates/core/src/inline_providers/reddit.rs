@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT};
 
-use crate::config::{reddit_json_url, reddit_oauth_listing_url};
+use crate::config::{reddit_json_url, reddit_oauth_listing_url, SourceKind};
 use crate::ctx::WallsCtx;
 use crate::inline_providers::common::{
     self, api_base, download_bytes, provider_for, reddit_user_agent, write_cache_and_apply,
@@ -25,7 +25,9 @@ pub async fn try_reddit(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
         .config
         .sources
         .iter()
-        .find(|s| s.enabled && s.source_type == "reddit")
+        .find(|source| {
+            source.enabled && SourceKind::parse(&source.source_type) == SourceKind::Reddit
+        })
         .cloned()
     else {
         return Ok(None);

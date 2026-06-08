@@ -1,15 +1,15 @@
 use anyhow::Context;
 
-use crate::config::{Config, SourceEntry, UnsplashSourceConfig};
+use crate::config::{Config, SourceEntry, SourceKind, UnsplashSourceConfig};
 use crate::state::State;
 
 use super::cache::queue_id;
 use super::client::UnsplashClient;
 
 pub fn enabled_unsplash_sources(sources: &[SourceEntry]) -> impl Iterator<Item = &SourceEntry> {
-    sources
-        .iter()
-        .filter(|source| source.enabled && source.source_type == "unsplash")
+    sources.iter().filter(|source| {
+        source.enabled && SourceKind::parse(&source.source_type) == SourceKind::Unsplash
+    })
 }
 
 pub async fn refill_unsplash_cache(

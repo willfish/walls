@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use crate::config::SourceKind;
 use crate::ctx::WallsCtx;
 use crate::inline_providers::common::{
     api_base, download_bytes, first_enabled_source, provider_for, write_cache_and_apply,
@@ -10,7 +11,7 @@ use anyhow::Context;
 pub async fn try_apod(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
     let Some(src) = first_enabled_source(
         &ctx.config.sources,
-        "apod",
+        SourceKind::Apod,
         true,
         ctx.config.change.internet_enabled,
     ) else {

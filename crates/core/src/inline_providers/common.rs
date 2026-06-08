@@ -5,25 +5,25 @@ use rand::RngExt;
 use reqwest::Client;
 
 use crate::apply::ApplyTrigger;
-use crate::config::SourceEntry;
+use crate::config::{SourceEntry, SourceKind};
 use crate::ctx::WallsCtx;
 use crate::downloads::write_file_atomic;
 use crate::provider_http;
 use crate::providers::{provider_for_source, ProviderDescriptor};
 use crate::state::CurrentWallMetadata;
 
-pub(crate) fn first_enabled_source<'a>(
-    sources: &'a [SourceEntry],
-    source_type: &str,
+pub(crate) fn first_enabled_source(
+    sources: &[SourceEntry],
+    source_kind: SourceKind,
     internet_required: bool,
     internet_enabled: bool,
-) -> Option<&'a SourceEntry> {
+) -> Option<&SourceEntry> {
     if internet_required && !internet_enabled {
         return None;
     }
     sources
         .iter()
-        .find(|s| s.enabled && s.source_type == source_type)
+        .find(|source| source.enabled && SourceKind::parse(&source.source_type) == source_kind)
 }
 
 pub(crate) fn provider_for(entry: &SourceEntry) -> ProviderDescriptor {

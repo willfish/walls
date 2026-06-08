@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use crate::config::SourceKind;
 use crate::ctx::WallsCtx;
 use crate::inline_providers::common::{
     api_base, download_bytes, first_enabled_source, pick_random, provider_for,
@@ -11,7 +12,7 @@ use anyhow::Context;
 pub async fn try_pixabay(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
     let Some(src) = first_enabled_source(
         &ctx.config.sources,
-        "pixabay",
+        SourceKind::Pixabay,
         true,
         ctx.config.change.internet_enabled,
     ) else {

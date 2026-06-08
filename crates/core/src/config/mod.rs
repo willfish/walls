@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 mod apply;
 mod display;
 mod reddit;
+mod source_kind;
 mod source_schema;
 mod unsplash;
 mod wallhaven;
@@ -20,6 +21,7 @@ pub use reddit::{
     reddit_sort_needs_time, reddit_sort_value, reddit_subreddit, reddit_summary, reddit_time_value,
     REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
 };
+pub use source_kind::SourceKind;
 pub use source_schema::{
     normalize_config_sources, normalize_source_entry, secrets_credential_label,
     secrets_credential_present, secrets_credential_warning, source_config_fields,

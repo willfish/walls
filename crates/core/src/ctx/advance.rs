@@ -353,6 +353,7 @@ impl<'ctx> AdvanceNext<'ctx> {
     // a SourceEntry {type: "bing"} can deliver a real wallpaper.
     // Fetches current daily image using reqwest (already a dep).
     async fn apply_bing(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        use crate::config::SourceKind;
         use crate::providers::provider_for_source;
         use anyhow::Context;
         let bing_sources: Vec<_> = self
@@ -360,7 +361,9 @@ impl<'ctx> AdvanceNext<'ctx> {
             .config
             .sources
             .iter()
-            .filter(|s| s.enabled && s.source_type == "bing")
+            .filter(|source| {
+                source.enabled && SourceKind::parse(&source.source_type) == SourceKind::Bing
+            })
             .collect();
         if bing_sources.is_empty() || !self.ctx.config.change.internet_enabled {
             return Ok(None);
@@ -409,6 +412,7 @@ impl<'ctx> AdvanceNext<'ctx> {
     // Minimal support for JSON image feed (url + optional image_path like "$.download_url").
     // Used by the default in config.example.json for the "json" provider type.
     async fn apply_json_feed(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        use crate::config::SourceKind;
         use crate::providers::provider_for_source;
         use anyhow::Context;
         let json_sources: Vec<_> = self
@@ -416,7 +420,9 @@ impl<'ctx> AdvanceNext<'ctx> {
             .config
             .sources
             .iter()
-            .filter(|s| s.enabled && s.source_type == "json")
+            .filter(|source| {
+                source.enabled && SourceKind::parse(&source.source_type) == SourceKind::Json
+            })
             .collect();
         if json_sources.is_empty() || !self.ctx.config.change.internet_enabled {
             return Ok(None);
@@ -470,6 +476,7 @@ impl<'ctx> AdvanceNext<'ctx> {
     // Minimal support for Media RSS (url pointing to RSS with enclosure or media:content).
     // Supports the default in example for "mediarss" type.
     async fn apply_media_rss(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        use crate::config::SourceKind;
         use crate::providers::provider_for_source;
         use anyhow::Context;
         let rss_sources: Vec<_> = self
@@ -477,7 +484,9 @@ impl<'ctx> AdvanceNext<'ctx> {
             .config
             .sources
             .iter()
-            .filter(|s| s.enabled && s.source_type == "mediarss")
+            .filter(|source| {
+                source.enabled && SourceKind::parse(&source.source_type) == SourceKind::MediaRss
+            })
             .collect();
         if rss_sources.is_empty() || !self.ctx.config.change.internet_enabled {
             return Ok(None);
