@@ -135,8 +135,10 @@ async fn wallhaven_search_works_without_api_key() {
         .await;
 
     let client = WallhavenClient::new(server.uri(), "").unwrap();
-    let mut params = WallhavenSearch::default();
-    params.purity = "111".into();
+    let params = WallhavenSearch {
+        purity: "111".into(),
+        ..Default::default()
+    };
     let resp = client.search(&params, 1).await.unwrap();
 
     assert_eq!(resp.data[0].id, "94x38z");

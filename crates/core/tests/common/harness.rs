@@ -74,6 +74,7 @@ impl FetchHarness {
             "apply": apply_block(&self.noop),
             "display": { "mode": "os" },
             "selection": { "avoid_recent": 50, "refetch_when_cache_below": 5 },
+            "wallhaven": { "enabled": false },
             "sources": sources,
         })
     }
