@@ -2639,7 +2639,8 @@ mod tests {
         app.config_sub_cursor = 0;
         app.start_edit_for_current();
 
-        let text = render_text(&app, 100, 28);
+        // Wide tui-preview layout splits the form column; use enough width for the secrets hint.
+        let text = render_text(&app, 140, 28);
         assert!(text.contains("Edit Reddit"), "{text}");
         assert!(text.contains("Subreddit"), "{text}");
         assert!(text.contains("wallpapers"), "{text}");
@@ -2649,7 +2650,10 @@ mod tests {
         assert!(!text.contains("Label"), "{text}");
         assert!(!text.contains("Type"), "{text}");
         assert!(text.contains("Reddit API credentials"), "{text}");
-        assert!(text.contains("secrets.json"), "{text}");
+        assert!(
+            text.contains(walls_core::config::SECRETS_EDIT_HINT),
+            "{text}"
+        );
     }
 
     #[test]
@@ -2688,9 +2692,12 @@ mod tests {
         app.config_sub_cursor = 0;
         app.start_edit_for_current();
 
-        let text = render_text(&app, 110, 30);
+        let text = render_text(&app, 140, 30);
         assert!(text.contains("Unsplash access key"), "{text}");
-        assert!(text.contains("secrets.json"), "{text}");
+        assert!(
+            text.contains(walls_core::config::SECRETS_EDIT_HINT),
+            "{text}"
+        );
     }
 
     #[test]
