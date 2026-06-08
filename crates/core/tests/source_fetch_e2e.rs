@@ -5,6 +5,7 @@
 
 mod common {
     include!("common/harness.rs");
+    include!("common/wallhaven_mock.rs");
 }
 
 use std::fs;
@@ -195,47 +196,26 @@ async fn e2e_mediarss_source_fetches_via_mock_rss() {
 #[tokio::test]
 async fn e2e_wallhaven_source_refills_and_downloads_via_mock() {
     let server = MockServer::start().await;
-    let image_url = format!("{}/wallhaven-94x38z.jpg", server.uri());
-
-    Mock::given(method("GET"))
-        .and(path("/api/v1/search"))
-        .and(header("X-API-Key", "test-key"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            include_str!("fixtures/wallhaven-search.json"),
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/api/v1/w/94x38z"))
-        .and(header("X-API-Key", "test-key"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "data": { "id": "94x38z", "path": image_url }
-        })))
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/wallhaven-94x38z.jpg"))
-        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"wallhaven-jpeg"))
-        .mount(&server)
-        .await;
-    std::env::set_var("WALLHAVEN_API_BASE", server.uri());
+    let _api_base = common::mount_wallhaven_fetch_flow(&server, "test-key").await;
 
     let harness = FetchHarness::new();
-    harness.write_config(json!({
-        "change": { "enabled": true, "internet_enabled": true },
-        "paths": common::paths_block(harness.path()),
-        "apply": common::apply_block(&harness.noop),
-        "display": { "mode": "os" },
-        "selection": { "refetch_when_cache_below": 5 },
-        "sources": [],
-        "wallhaven": {
-            "enabled": true,
-            "prefer": "search_only",
-            "search": { "q": "nature", "purity": "100" }
-        }
-    }));
-    harness.write_secrets(json!({ "wallhaven_api_key": "test-key" }));
+    harness
+        .write_config(harness.wallhaven_only_config(FetchHarness::wallhaven_provider(json!({}))));
+    harness.write_secrets(FetchHarness::wallhaven_secrets("test-key"));
+
+    let applied = advance_expect_applied(harness.load_ctx()).await;
+    assert!(applied.ends_with("wallhaven-94x38z.jpg"));
+}
+
+#[tokio::test]
+async fn e2e_wallhaven_refills_without_api_key_via_mock() {
+    let server = MockServer::start().await;
+    let _api_base = common::mount_wallhaven_fetch_flow(&server, "").await;
+
+    let harness = FetchHarness::new();
+    harness
+        .write_config(harness.wallhaven_only_config(FetchHarness::wallhaven_provider(json!({}))));
+    harness.write_secrets(json!({}));
 
     let applied = advance_expect_applied(harness.load_ctx()).await;
     assert!(applied.ends_with("wallhaven-94x38z.jpg"));

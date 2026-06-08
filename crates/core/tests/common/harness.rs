@@ -67,16 +67,54 @@ impl FetchHarness {
         WallsCtx::load_from(self.path()).unwrap()
     }
 
+    /// Wallhaven provider disabled — default for single-source e2e tests.
+    pub fn wallhaven_disabled() -> Value {
+        json!({ "enabled": false })
+    }
+
+    /// Enabled Wallhaven provider block (search/collections via `search` / `prefer` overrides).
+    pub fn wallhaven_provider(wallhaven: Value) -> Value {
+        let mut block = json!({
+            "enabled": true,
+            "prefer": "search_only",
+            "search": { "q": "nature", "purity": "100" },
+        });
+        if let Some(obj) = wallhaven.as_object() {
+            for (k, v) in obj {
+                block[k] = v.clone();
+            }
+        }
+        block
+    }
+
+    pub fn wallhaven_secrets(api_key: &str) -> Value {
+        json!({ "wallhaven_api_key": api_key })
+    }
+
     pub fn base_config(&self, internet_enabled: bool, sources: Value) -> Value {
+        self.base_config_with_wallhaven(internet_enabled, sources, Self::wallhaven_disabled())
+    }
+
+    pub fn base_config_with_wallhaven(
+        &self,
+        internet_enabled: bool,
+        sources: Value,
+        wallhaven: Value,
+    ) -> Value {
         json!({
             "change": { "enabled": true, "internet_enabled": internet_enabled },
             "paths": paths_block(self.path()),
             "apply": apply_block(&self.noop),
             "display": { "mode": "os" },
             "selection": { "avoid_recent": 50, "refetch_when_cache_below": 5 },
-            "wallhaven": { "enabled": false },
+            "wallhaven": wallhaven,
             "sources": sources,
         })
+    }
+
+    /// Online config with only the global Wallhaven provider (no `sources` entries).
+    pub fn wallhaven_only_config(&self, wallhaven: Value) -> Value {
+        self.base_config_with_wallhaven(true, json!([]), wallhaven)
     }
 
     pub fn write_offline_empty_sources_config(&self) {
