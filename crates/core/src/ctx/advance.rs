@@ -399,10 +399,7 @@ impl<'ctx> AdvanceNext<'ctx> {
             .with_context(|| provider.failure_scope("bing bytes").to_string())?;
 
         let dest = self.ctx.paths.cache_dir.join("bing-daily.jpg");
-        tokio::fs::create_dir_all(&self.ctx.paths.cache_dir)
-            .await
-            .ok();
-        tokio::fs::write(&dest, &bytes)
+        crate::downloads::write_file_atomic(&dest, &bytes)
             .await
             .with_context(|| provider.failure_scope("bing write cache").to_string())?;
 
@@ -467,10 +464,7 @@ impl<'ctx> AdvanceNext<'ctx> {
             .with_context(|| provider.failure_scope("json bytes").to_string())?;
 
         let dest = self.ctx.paths.cache_dir.join("json-feed.jpg");
-        tokio::fs::create_dir_all(&self.ctx.paths.cache_dir)
-            .await
-            .ok();
-        tokio::fs::write(&dest, &bytes)
+        crate::downloads::write_file_atomic(&dest, &bytes)
             .await
             .with_context(|| provider.failure_scope("json write cache").to_string())?;
 
@@ -528,10 +522,7 @@ impl<'ctx> AdvanceNext<'ctx> {
             .with_context(|| provider.failure_scope("mediarss bytes").to_string())?;
 
         let dest = self.ctx.paths.cache_dir.join("mediarss.jpg");
-        tokio::fs::create_dir_all(&self.ctx.paths.cache_dir)
-            .await
-            .ok();
-        tokio::fs::write(&dest, &bytes)
+        crate::downloads::write_file_atomic(&dest, &bytes)
             .await
             .with_context(|| provider.failure_scope("mediarss write cache").to_string())?;
 

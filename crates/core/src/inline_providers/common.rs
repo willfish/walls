@@ -7,6 +7,7 @@ use reqwest::Client;
 use crate::apply::ApplyTrigger;
 use crate::config::SourceEntry;
 use crate::ctx::WallsCtx;
+use crate::downloads::write_file_atomic;
 use crate::providers::{provider_for_source, ProviderDescriptor};
 use crate::state::CurrentWallMetadata;
 
@@ -53,8 +54,7 @@ pub(crate) async fn write_cache_and_apply(
     metadata: CurrentWallMetadata,
 ) -> anyhow::Result<PathBuf> {
     let dest = ctx.paths.cache_dir.join(cache_file);
-    tokio::fs::create_dir_all(&ctx.paths.cache_dir).await.ok();
-    tokio::fs::write(&dest, bytes).await?;
+    write_file_atomic(&dest, bytes).await?;
     ctx.apply_file_inner_with_metadata(
         &dest,
         ApplyTrigger::Auto,

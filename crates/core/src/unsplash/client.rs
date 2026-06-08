@@ -5,6 +5,7 @@ use anyhow::{ensure, Context};
 use reqwest::{Client, Response, StatusCode};
 
 use crate::config::UnsplashSourceConfig;
+use crate::downloads::{copy_file_atomic, write_file_atomic};
 use crate::quota::enforce_download_quota;
 
 use super::types::Photo;
@@ -115,7 +116,7 @@ impl UnsplashClient {
         let dest = self.download_to_cache(photo, cache_dir).await?;
         if let Some(name) = dest.file_name() {
             let dl_path = download_dir.join(name);
-            tokio::fs::copy(&dest, &dl_path).await.ok();
+            copy_file_atomic(&dest, &dl_path).await.ok();
         }
         if quota_enabled {
             enforce_download_quota(download_dir, quota_mb)?;
@@ -135,7 +136,7 @@ impl UnsplashClient {
             .send_with_retries(|| self.http.get(photo.urls.wallpaper_url()))
             .await?;
         let bytes = pipe_limited_body(response, self.max_download_bytes).await?;
-        tokio::fs::write(&dest, &bytes).await?;
+        write_file_atomic(&dest, &bytes).await?;
         Ok(dest)
     }
 
