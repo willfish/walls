@@ -2,7 +2,7 @@ mod common {
     include!("common/minimal.rs");
 }
 
-use walls_core::validate::{validate_config, validate_config_with_scope, ValidateScope};
+use walls_core::validate::{validate_config, validate_source_edit};
 use walls_core::WallsCtx;
 
 fn load_config_json(root: &std::path::Path) -> serde_json::Value {
@@ -157,7 +157,7 @@ fn validate_config_reports_custom_script_when_backend_does_not_use_it() {
 }
 
 #[test]
-fn scoped_validate_ignores_other_enabled_sources_with_missing_paths() {
+fn source_edit_validate_ignores_other_enabled_sources_with_missing_paths() {
     let root = tempfile::tempdir().unwrap();
     let images = root.path().join("images");
     std::fs::create_dir_all(&images).unwrap();
@@ -183,15 +183,45 @@ fn scoped_validate_ignores_other_enabled_sources_with_missing_paths() {
         "{full:?}"
     );
 
-    let scoped = validate_config_with_scope(
-        &ctx.config,
-        &ctx.secrets,
-        &ctx.paths,
-        ValidateScope::single_source(0),
-    );
+    let scoped = validate_source_edit(0, &ctx.config, &ctx.secrets, &ctx.paths);
     assert!(
         scoped.is_empty(),
         "favorites should not be blocked by another source's missing folder path: {scoped:?}"
+    );
+}
+
+#[test]
+fn source_edit_validate_reports_empty_type() {
+    let root = tempfile::tempdir().unwrap();
+    let config = serde_json::from_value::<walls_core::config::Config>(serde_json::json!({
+        "paths": {
+            "cache_dir": root.path().join("cache").display().to_string(),
+            "download_dir": root.path().join("downloaded").display().to_string(),
+            "favorites_dir": root.path().join("favorites").display().to_string(),
+            "fetched_dir": root.path().join("fetched").display().to_string(),
+            "compose_dir": root.path().join("wallpaper").display().to_string()
+        },
+        "sources": [
+            { "enabled": true, "type": "", "label": "Broken" }
+        ]
+    }))
+    .unwrap();
+    let paths = walls_core::paths::WallsPaths {
+        config_dir: root.path().to_path_buf(),
+        config_file: root.path().join("config.json"),
+        secrets_file: root.path().join("secrets.json"),
+        state_file: root.path().join("state.json"),
+        cache_dir: root.path().join("cache"),
+        download_dir: root.path().join("downloaded"),
+        favorites_dir: root.path().join("favorites"),
+        fetched_dir: root.path().join("fetched"),
+        compose_dir: root.path().join("wallpaper"),
+    };
+
+    let errors = validate_source_edit(0, &config, &walls_core::config::Secrets::default(), &paths);
+    assert!(
+        errors.iter().any(|e| e.contains("type is required")),
+        "{errors:?}"
     );
 }
 

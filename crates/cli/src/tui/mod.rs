@@ -3062,6 +3062,7 @@ mod tests {
                 "change": { "enabled": true, "interval_secs": 60, "internet_enabled": true },
                 "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
                 "sources": [
+                    { "enabled": true, "type": "folder", "label": "my images", "path": "/tmp/c" },
                     { "enabled": true, "type": "wallhaven", "label": "wallhaven space", "query": "space" },
                     { "enabled": false, "type": "reddit", "query": "wallpapers", "sort": "top", "time": "month" }
                 ]
@@ -3109,7 +3110,7 @@ mod tests {
         app.config_cursor = 1; // sources block
                                // ensure subnav targets the first source (wallhaven space)
         app.config_in_subnav = true;
-        app.config_sub_cursor = 0;
+        app.config_sub_cursor = 1;
         app.start_edit_for_current();
         let src_text = render_text(&app, 80, 24);
         eprintln!(
@@ -3171,13 +3172,17 @@ mod tests {
         app.config_in_subnav = true;
         app.config_sub_cursor = 0;
         app.start_edit_for_current();
-        // Make a bad change that will fail strict validate_config on save (e.g. clear a required-ish or set bad type for wallhaven; simplest: empty the type for a source that needs it, or use invalid for block)
-        // For source, "type" is editable; set to empty to trigger type-aware validation on save.
-        // Move cursor to "type" field (idx 1), clear it, commit (which now also saves/persists), then Save (exits edit) to drive the error render while errors are set.
-        update(&mut app, UiAction::EditFieldDown, rt.handle()).ok(); // to type field
+        // Make a bad change that will fail scoped source validation on save (missing folder path).
+        // Folder sources expose path as a free-text field (type is a choice picker, not backspace-editable).
+        for _ in 0..3 {
+            update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
+        }
         for _ in 0..20 {
             update(&mut app, UiAction::EditFieldBackspace, rt.handle()).ok();
-        } // clear
+        }
+        for c in "/no/such/folder/path".chars() {
+            update(&mut app, UiAction::EditFieldChar(c), rt.handle()).ok();
+        }
         update(&mut app, UiAction::EditFieldCommit, rt.handle()).ok();
         update(&mut app, UiAction::SaveEditItem, rt.handle()).ok();
         let err_text = render_text(&app, 80, 24);

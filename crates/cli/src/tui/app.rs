@@ -8,7 +8,7 @@ use walls_core::config::{
 };
 use walls_core::expand_home;
 use walls_core::sources::list_images_with_paths;
-use walls_core::validate::{validate_config, validate_config_with_scope, ValidateScope};
+use walls_core::validate::{validate_config, validate_source_edit, validate_wallhaven_edit};
 use walls_core::WallsCtx;
 
 use super::style::ColorMode;
@@ -1533,7 +1533,7 @@ impl App {
             "enabled" => {
                 draft.enabled = Self::parse_bool_like(trimmed).unwrap_or(draft.enabled);
             }
-            "type" if !trimmed.is_empty() => {
+            "type" => {
                 draft.source_type = trimmed.to_string();
             }
             "label" => draft.label = v,
@@ -1658,6 +1658,19 @@ impl App {
         block == 1 // the "Sources" block (was Local sources)
     }
 
+    fn validation_issues_for_edit(
+        target: &EditTarget,
+        config: &Config,
+        secrets: &walls_core::config::Secrets,
+        paths: &walls_core::paths::WallsPaths,
+    ) -> Vec<String> {
+        match target {
+            EditTarget::Source(i) => validate_source_edit(*i, config, secrets, paths),
+            EditTarget::Wallhaven => validate_wallhaven_edit(config, secrets),
+            EditTarget::Block(_) => Vec::new(),
+        }
+    }
+
     #[allow(dead_code)]
     pub fn toggle_config_subnav(&mut self) {
         if self.tab == Tab::Config && self.is_sources_list_block(self.config_cursor) {
@@ -1704,17 +1717,12 @@ impl App {
                 }
                 _ => {}
             }
-            let issues = match &sess.target {
-                EditTarget::Source(i) => walls_core::validate::validate_config_with_scope(
-                    &temp,
-                    &self.ctx.secrets,
-                    &self.ctx.paths,
-                    ValidateScope::single_source(*i),
-                ),
-                _ => {
-                    walls_core::validate::validate_config(&temp, &self.ctx.secrets, &self.ctx.paths)
-                }
-            };
+            let issues = Self::validation_issues_for_edit(
+                &sess.target,
+                &temp,
+                &self.ctx.secrets,
+                &self.ctx.paths,
+            );
             // keep only issues mentioning the target roughly
             sess.validation_errors = issues
                 .into_iter()
@@ -1821,16 +1829,12 @@ impl App {
             }
             _ => {}
         }
-        // strict validate (source edits only check the item being saved)
-        let issues = match &sess.target {
-            EditTarget::Source(i) => validate_config_with_scope(
-                &config,
-                &self.ctx.secrets,
-                &self.ctx.paths,
-                ValidateScope::single_source(*i),
-            ),
-            _ => validate_config(&config, &self.ctx.secrets, &self.ctx.paths),
-        };
+        let issues = Self::validation_issues_for_edit(
+            &sess.target,
+            &config,
+            &self.ctx.secrets,
+            &self.ctx.paths,
+        );
         if !issues.is_empty() {
             if let Some(s) = &mut self.editing {
                 s.validation_errors = issues.clone();
