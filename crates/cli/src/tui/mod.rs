@@ -1305,7 +1305,12 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
         if !sess.validation_errors.is_empty() {
             lines.push("!! Validation errors:".into());
             for e in &sess.validation_errors {
-                lines.push(format!("!! - {}", e));
+                if let Some((message, hint)) = e.split_once(" (hint: ") {
+                    lines.push(format!("!! - {}", message));
+                    lines.push(format!("!!   hint: {}", hint.trim_end_matches(')')));
+                } else {
+                    lines.push(format!("!! - {}", e));
+                }
             }
             lines.push("".into());
         }
@@ -1838,7 +1843,7 @@ mod tests {
         assert!(text.contains("selection: Random"), "{text}");
         assert!(text.contains("avoid recent: 50"), "{text}");
         assert!(
-            text.contains("warning: quota.size_mb must be greater than zero"),
+            text.contains("warning: quota.size_mb: must be greater than zero"),
             "{text}"
         );
     }
@@ -1909,7 +1914,7 @@ mod tests {
         );
         assert!(
             text.contains(
-                "warning: apply.custom_script is required when apply.backend is custom-script"
+                "warning: apply.custom_script: is required when apply.backend is custom-script"
             ),
             "{text}"
         );
@@ -3256,6 +3261,11 @@ mod tests {
         assert!(
             has_inline_err,
             "validation problems must be visible inline in the form body (top, red-cued) before/during/after s, not opaque fail only in status; form head: {}",
+            &err_text[..err_text.len().min(600)]
+        );
+        assert!(
+            err_text.contains("sources[0].path") && err_text.contains("hint:"),
+            "inline validation should include the config path and recovery hint; form head: {}",
             &err_text[..err_text.len().min(600)]
         );
     }

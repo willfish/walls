@@ -2,7 +2,10 @@ mod common {
     include!("common/minimal.rs");
 }
 
-use walls_core::validate::{validate_config, validate_source_edit, validate_wallhaven_edit};
+use walls_core::validate::{
+    validate_config, validate_config_diagnostics, validate_source_edit, validate_wallhaven_edit,
+    ValidationSeverity,
+};
 use walls_core::WallsCtx;
 
 fn load_config_json(root: &std::path::Path) -> serde_json::Value {
@@ -12,6 +15,13 @@ fn load_config_json(root: &std::path::Path) -> serde_json::Value {
 fn validate_root(root: &std::path::Path) -> Vec<String> {
     let ctx = WallsCtx::load_from(root).unwrap();
     validate_config(&ctx.config, &ctx.secrets, &ctx.paths)
+}
+
+fn validate_root_diagnostics(
+    root: &std::path::Path,
+) -> Vec<walls_core::validate::ValidationDiagnostic> {
+    let ctx = WallsCtx::load_from(root).unwrap();
+    validate_config_diagnostics(&ctx.config, &ctx.secrets, &ctx.paths)
 }
 
 #[test]
@@ -47,6 +57,45 @@ fn validate_config_reports_missing_folder_path() {
 }
 
 #[test]
+fn validate_config_diagnostics_include_path_severity_hint_and_json_shape() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    std::fs::create_dir_all(&images).unwrap();
+    let noop = common::write_noop_script(root.path());
+    common::write_minimal_config(root.path(), &images, &noop);
+
+    let mut config = load_config_json(root.path());
+    config["sources"] = serde_json::json!([{
+        "enabled": true,
+        "type": "folder",
+        "path": "/nonexistent/walls-test-folder"
+    }]);
+    common::write_config(root.path(), config);
+
+    let diagnostics = validate_root_diagnostics(root.path());
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.path == "sources[0].path")
+        .expect("source path diagnostic");
+
+    assert_eq!(diagnostic.severity, ValidationSeverity::Error);
+    assert!(diagnostic.message.contains("does not exist"));
+    assert!(diagnostic
+        .hint
+        .as_deref()
+        .is_some_and(|hint| hint.contains("disable this source")));
+
+    let json = serde_json::to_value(diagnostic).unwrap();
+    assert_eq!(json["severity"], "error");
+    assert_eq!(json["path"], "sources[0].path");
+    assert!(json["message"].as_str().unwrap().contains("does not exist"));
+    assert!(json["hint"]
+        .as_str()
+        .unwrap()
+        .contains("disable this source"));
+}
+
+#[test]
 fn validate_config_reports_missing_reddit_credentials() {
     let root = tempfile::tempdir().unwrap();
     let images = root.path().join("images");
@@ -68,7 +117,7 @@ fn validate_config_reports_missing_reddit_credentials() {
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("secrets.reddit_client_id is empty")),
+            .any(|error| error.contains("secrets.reddit_client_id: reddit source")),
         "{errors:?}"
     );
 }
@@ -94,7 +143,7 @@ fn validate_config_reports_missing_unsplash_key() {
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("secrets.unsplash_access_key is empty")),
+            .any(|error| error.contains("secrets.unsplash_access_key: unsplash source")),
         "{errors:?}"
     );
 }
@@ -134,79 +183,79 @@ fn validate_config_reports_enabled_provider_schema_errors() {
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("source Some(\"Reddit\"): query is required")),
+            .any(|error| error.contains("sources[1].query: query is required")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("source Some(\"Reddit\").sort must be one of")),
+            .any(|error| error.contains("sources[1].sort: must be one of")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("source Some(\"Reddit\").time must be one of")),
+            .any(|error| error.contains("sources[1].time: must be one of")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("source Some(\"Unsplash\").orientation must be one of")),
+            .any(|error| error.contains("sources[2].orientation: must be one of")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("source Some(\"JSON\"): url is required")),
+            .any(|error| error.contains("sources[3].url: url is required")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| { error.contains("sources[4].url: must use http or https") }),
         "{errors:?}"
     );
     assert!(
         errors.iter().any(|error| {
-            error.contains("source Some(\"Bad JSON\").url must use http or https")
-        }),
-        "{errors:?}"
-    );
-    assert!(
-        errors.iter().any(|error| {
-            error.contains("source Some(\"Bad JSON\").image_path must be a JSON path")
+            error.contains("sources[4].image_path: image_path must be a JSON path")
         }),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("source Some(\"RSS\").url must be a valid URL")),
+            .any(|error| error.contains("sources[5].url: must be a valid URL")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("source Some(\"Attribution\"): url is required")),
+            .any(|error| error.contains("sources[6].url: url is required")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("source Some(\"Pixabay\"): api_key is required")),
+            .any(|error| error.contains("sources[7].api_key: api_key is required")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("source Some(\"Immich\"): api_key is required")),
+            .any(|error| error.contains("sources[8].api_key: api_key is required")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("spotlight source requires path or url")),
+            .any(|error| error.contains("sources[9].path: spotlight source")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("source Some(\"Weighting\"): query is required")),
+            .any(|error| error.contains("sources[10].query: query is required")),
         "{errors:?}"
     );
 }
@@ -291,7 +340,7 @@ fn source_edit_validate_reports_only_selected_provider_schema_errors() {
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("source Some(\"Selected\"): url is required")),
+            .any(|error| error.contains("sources[0].url: url is required")),
         "{errors:?}"
     );
     assert!(
@@ -317,7 +366,7 @@ fn validate_config_reports_missing_custom_script_for_custom_script_backend() {
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("apply.custom_script not found or not a file")),
+            .any(|error| error.contains("apply.custom_script: not found or not a file")),
         "{errors:?}"
     );
 }
@@ -337,7 +386,7 @@ fn validate_config_reports_required_custom_script_for_custom_script_backend() {
     let errors = validate_root(root.path());
     assert!(
         errors.iter().any(|error| error
-            .contains("apply.custom_script is required when apply.backend is custom-script")),
+            .contains("apply.custom_script: is required when apply.backend is custom-script")),
         "{errors:?}"
     );
 }
@@ -358,7 +407,7 @@ fn validate_config_reports_non_executable_custom_script_on_unix() {
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("apply.custom_script is not executable")),
+            .any(|error| error.contains("apply.custom_script: is not executable")),
         "{errors:?}"
     );
 }
@@ -379,7 +428,7 @@ fn validate_config_reports_custom_script_when_backend_does_not_use_it() {
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("apply.custom_script is set but apply.backend is gnome")),
+            .any(|error| error.contains("apply.custom_script: is set but apply.backend is gnome")),
         "{errors:?}"
     );
 }
@@ -529,7 +578,7 @@ fn validate_config_reports_zero_quota_size() {
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("quota.size_mb must be greater than zero")),
+            .any(|error| error.contains("quota.size_mb: must be greater than zero")),
         "{errors:?}"
     );
 }
@@ -563,43 +612,43 @@ fn validate_config_reports_invalid_wallhaven_provider_settings() {
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("wallhaven.search.categories must be three binary digits")),
+            .any(|error| error.contains("wallhaven.search.categories: must be three binary digits")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("wallhaven.search.purity must enable at least one option")),
+            .any(|error| error.contains("wallhaven.search.purity: must enable at least one option")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("wallhaven.search.sorting must be one of")),
+            .any(|error| error.contains("wallhaven.search.sorting: must be one of")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("wallhaven.search.order must be one of")),
+            .any(|error| error.contains("wallhaven.search.order: must be one of")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("wallhaven.search.atleast must use WIDTHxHEIGHT format")),
+            .any(|error| error.contains("wallhaven.search.atleast: must use WIDTHxHEIGHT format")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("wallhaven.collections[0].username must not be empty")),
+            .any(|error| error.contains("wallhaven.collections[0].username: must not be empty")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("wallhaven.collections[0].id must be greater than zero")),
+            .any(|error| error.contains("wallhaven.collections[0].id: must be greater than zero")),
         "{errors:?}"
     );
 }
@@ -637,7 +686,7 @@ fn validate_wallhaven_edit_reports_provider_errors_without_global_config_checks(
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("wallhaven.search.categories must be three binary digits")),
+            .any(|error| error.contains("wallhaven.search.categories: must be three binary digits")),
         "{errors:?}"
     );
     assert!(

@@ -72,7 +72,11 @@ enum Command {
 #[derive(Subcommand)]
 enum ConfigSub {
     /// Validate config.json and secrets
-    Validate,
+    Validate {
+        /// Emit structured validation diagnostics as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Reconcile derived config artifacts (tray autostart)
     Sync,
 }
@@ -128,7 +132,7 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Fetch { paths, r#move }) => cmd_fetch(paths, r#move)?,
         Some(Command::Trash) => cmd_trash()?,
         Some(Command::Config { sub }) => match sub {
-            ConfigSub::Validate => cmd_config_validate()?,
+            ConfigSub::Validate { json } => cmd_config_validate(json)?,
             ConfigSub::Sync => cmd_config_sync()?,
         },
         #[cfg(feature = "tui")]
@@ -222,17 +226,25 @@ fn cmd_toggle_pause() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cmd_config_validate() -> anyhow::Result<()> {
+fn cmd_config_validate(json: bool) -> anyhow::Result<()> {
     let ctx = WallsCtx::load()?;
-    let errors = walls_core::validate::validate_config(&ctx.config, &ctx.secrets, &ctx.paths);
-    if errors.is_empty() {
+    let diagnostics =
+        walls_core::validate::validate_config_diagnostics(&ctx.config, &ctx.secrets, &ctx.paths);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&diagnostics)?);
+    } else if diagnostics.is_empty() {
         println!("config ok");
         return Ok(());
+    } else {
+        for diagnostic in &diagnostics {
+            eprintln!("{diagnostic}");
+        }
     }
-    for err in &errors {
-        eprintln!("error: {err}");
+    if diagnostics.is_empty() {
+        Ok(())
+    } else {
+        std::process::exit(1);
     }
-    std::process::exit(1);
 }
 
 fn cmd_config_sync() -> anyhow::Result<()> {
