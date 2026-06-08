@@ -67,7 +67,12 @@
   "sources": [
     { "enabled": true, "type": "favorites", "label": "The Favorites folder" },
     { "enabled": true, "type": "fetched", "label": "The Fetched folder" },
-    { "enabled": true, "type": "folder", "path": "/usr/share/backgrounds" },
+    {
+      "enabled": false,
+      "type": "folder",
+      "label": "System backgrounds",
+      "path": "/usr/share/backgrounds"
+    },
     {
       "enabled": false,
       "type": "unsplash",
