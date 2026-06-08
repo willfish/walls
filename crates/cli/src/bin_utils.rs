@@ -254,6 +254,24 @@ fn proc_exists(pid: u32) -> bool {
     PathBuf::from(format!("/proc/{pid}")).exists()
 }
 
+/// Detach a child from the TUI terminal session so it survives quitting/closing the launcher tab.
+#[cfg(unix)]
+fn configure_detached_spawn(cmd: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn configure_detached_spawn(_cmd: &mut Command) {}
+
 fn spawn_tray() -> EnsureTrayOutcome {
     let tray = resolve_tray_bin();
     if tray.parent().is_some() && !tray.is_file() {
@@ -267,7 +285,7 @@ fn spawn_tray() -> EnsureTrayOutcome {
 
     use std::process::Stdio;
 
-    let mut cmd = std::process::Command::new(&tray);
+    let mut cmd = Command::new(&tray);
     if let Ok(walls) = std::env::current_exe() {
         cmd.env("WALLS_BIN", &walls);
     }
@@ -275,6 +293,7 @@ fn spawn_tray() -> EnsureTrayOutcome {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    configure_detached_spawn(&mut cmd);
 
     match cmd.spawn() {
         Ok(_) => {

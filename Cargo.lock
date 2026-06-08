@@ -4352,6 +4352,7 @@ dependencies = [
  "assert_cmd",
  "clap",
  "image",
+ "libc",
  "portable-pty",
  "predicates",
  "ratatui",
