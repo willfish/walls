@@ -77,6 +77,10 @@ fn validate_source_entry(
     errors: &mut Vec<String>,
 ) {
     let _ = index;
+    if !src.enabled {
+        return;
+    }
+
     if src.source_type.trim().is_empty() {
         errors.push(format!(
             "source {:?}: type is required",
@@ -85,34 +89,52 @@ fn validate_source_entry(
         return;
     }
 
-    if !src.enabled {
-        return;
-    }
-
-    match SourceKind::parse(&src.source_type) {
+    let source_kind = SourceKind::parse(&src.source_type);
+    match source_kind {
         SourceKind::Folder | SourceKind::Image | SourceKind::Favorites | SourceKind::Fetched => {
-            let expanded = match SourceKind::parse(&src.source_type) {
-                SourceKind::Favorites => paths.favorites_dir.clone(),
-                SourceKind::Fetched => paths.fetched_dir.clone(),
-                _ => {
-                    let Some(path) = src.path.as_ref() else {
-                        errors.push(format!(
-                            "source {:?}: missing path for type {}",
-                            src.label, src.source_type
-                        ));
-                        return;
-                    };
-                    expand_home(path)
-                }
-            };
-            if !expanded.exists() {
-                errors.push(format!(
-                    "source {:?}: path does not exist: {}",
-                    src.label,
-                    expanded.display()
-                ));
-            }
+            validate_local_source(src, source_kind, paths, errors);
         }
+        _ => validate_provider_source(src, source_kind, config, secrets, errors),
+    }
+}
+
+fn validate_local_source(
+    src: &SourceEntry,
+    source_kind: SourceKind,
+    paths: &WallsPaths,
+    errors: &mut Vec<String>,
+) {
+    let expanded = match source_kind {
+        SourceKind::Favorites => paths.favorites_dir.clone(),
+        SourceKind::Fetched => paths.fetched_dir.clone(),
+        _ => {
+            let Some(path) = src.path.as_ref() else {
+                errors.push(format!(
+                    "source {:?}: missing path for type {}",
+                    src.label, src.source_type
+                ));
+                return;
+            };
+            expand_home(path)
+        }
+    };
+    if !expanded.exists() {
+        errors.push(format!(
+            "source {:?}: path does not exist: {}",
+            src.label,
+            expanded.display()
+        ));
+    }
+}
+
+fn validate_provider_source(
+    src: &SourceEntry,
+    source_kind: SourceKind,
+    config: &Config,
+    secrets: &Secrets,
+    errors: &mut Vec<String>,
+) {
+    match source_kind {
         SourceKind::Unsplash => {
             if config.change.internet_enabled && secrets.unsplash_access_key.is_empty() {
                 errors.push(
@@ -122,6 +144,14 @@ fn validate_source_entry(
             if let Err(error) = UnsplashSourceConfig::from_source(src) {
                 errors.push(format!("source {:?}: {error}", src.label));
             }
+            if let Some(orientation) = src.orientation.as_deref() {
+                validate_choice(
+                    &source_field(src, "orientation"),
+                    orientation,
+                    &["landscape", "portrait", "squarish"],
+                    errors,
+                );
+            }
         }
         SourceKind::Reddit
             if config.change.internet_enabled && secrets.reddit_client_id.trim().is_empty() =>
@@ -129,9 +159,122 @@ fn validate_source_entry(
             errors.push(
                 "reddit source enabled but secrets.reddit_client_id is empty (Reddit blocks unauthenticated API access; create an app at reddit.com/prefs/apps)".into(),
             );
+            validate_reddit_source(src, errors);
         }
-        _ => {}
+        SourceKind::Reddit => validate_reddit_source(src, errors),
+        SourceKind::Bing | SourceKind::Apod => {}
+        SourceKind::Json => {
+            validate_required_url(src, "url", src.url.as_deref(), errors);
+            if let Some(image_path) = src.image_path.as_deref() {
+                if !image_path.trim().starts_with("$.") && image_path.trim() != "$" {
+                    errors.push(format!(
+                        "{} must be a JSON path starting with '$' or '$.'",
+                        source_field(src, "image_path")
+                    ));
+                }
+            }
+        }
+        SourceKind::MediaRss | SourceKind::Attribution => {
+            validate_required_url(src, "url", src.url.as_deref(), errors);
+        }
+        SourceKind::Pixabay => {
+            validate_required_text(src, "api_key", src.api_key.as_deref(), errors);
+        }
+        SourceKind::Immich => {
+            validate_required_url(src, "url", src.url.as_deref(), errors);
+            validate_required_text(src, "api_key", src.api_key.as_deref(), errors);
+        }
+        SourceKind::Spotlight => {
+            if src
+                .path
+                .as_deref()
+                .or(src.url.as_deref())
+                .is_none_or(|path| path.trim().is_empty())
+            {
+                errors.push(format!(
+                    "source {:?}: spotlight source requires path or url",
+                    src.label
+                ));
+            }
+        }
+        SourceKind::Weighting => {
+            validate_required_text(src, "query", src.query.as_deref(), errors);
+        }
+        SourceKind::Unknown => {
+            errors.push(format!(
+                "source {:?}: unsupported source type {:?}",
+                src.label, src.source_type
+            ));
+        }
+        SourceKind::Folder | SourceKind::Image | SourceKind::Favorites | SourceKind::Fetched => {
+            unreachable!("local source kinds are validated before provider schemas")
+        }
     }
+}
+
+fn validate_reddit_source(src: &SourceEntry, errors: &mut Vec<String>) {
+    validate_required_text(src, "query", src.query.as_deref(), errors);
+    if let Some(sort) = src.sort.as_deref() {
+        validate_choice(
+            &source_field(src, "sort"),
+            sort,
+            crate::config::REDDIT_SORT_CHOICES,
+            errors,
+        );
+    }
+    if let Some(time) = src.time.as_deref() {
+        validate_choice(
+            &source_field(src, "time"),
+            time,
+            crate::config::REDDIT_TIME_CHOICES,
+            errors,
+        );
+    }
+}
+
+fn validate_required_text(
+    src: &SourceEntry,
+    field: &'static str,
+    value: Option<&str>,
+    errors: &mut Vec<String>,
+) {
+    if value.is_none_or(|value| value.trim().is_empty()) {
+        errors.push(format!(
+            "source {:?}: {} is required for type {}",
+            src.label, field, src.source_type
+        ));
+    }
+}
+
+fn validate_required_url(
+    src: &SourceEntry,
+    field: &'static str,
+    value: Option<&str>,
+    errors: &mut Vec<String>,
+) {
+    let Some(value) = value.filter(|value| !value.trim().is_empty()) else {
+        errors.push(format!(
+            "source {:?}: {} is required for type {}",
+            src.label, field, src.source_type
+        ));
+        return;
+    };
+    validate_http_url(&source_field(src, field), value, errors);
+}
+
+fn validate_http_url(field: &str, value: &str, errors: &mut Vec<String>) {
+    match reqwest::Url::parse(value) {
+        Ok(url) if matches!(url.scheme(), "http" | "https") => {}
+        Ok(url) => errors.push(format!(
+            "{field} must use http or https, got {}",
+            url.scheme()
+        )),
+        Err(error) => errors.push(format!("{field} must be a valid URL: {error}")),
+    }
+}
+
+fn source_field(src: &SourceEntry, field: &str) -> String {
+    format!("source {:?}.{field}", src.label)
 }
 
 fn validate_wallhaven_provider(config: &Config, secrets: &Secrets, errors: &mut Vec<String>) {
