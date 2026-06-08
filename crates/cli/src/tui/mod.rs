@@ -779,29 +779,41 @@ fn string_list_item(line: &str, theme: style::Theme) -> ListItem<'static> {
     ListItem::new(line.to_string()).style(line_style(line, theme))
 }
 
+struct ConfigBlock<'a> {
+    index: usize,
+    cursor: usize,
+    title: &'a str,
+    enabled: bool,
+    summary: String,
+    details: Vec<ListItem<'static>>,
+    theme: style::Theme,
+}
+
 fn config_list_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
     let mut items = Vec::new();
     push_config_block_items(
         &mut items,
-        0,
-        app.config_cursor,
-        "Rotation",
-        app.ctx.config.change.enabled,
-        format!(
-            "every {}s, {}, {:.0}% online",
-            app.ctx.config.change.interval_secs,
-            if app.ctx.config.change.internet_enabled {
-                "online"
-            } else {
-                "local only"
-            },
-            app.ctx.config.change.download_preference_ratio * 100.0
-        ),
-        rotation_details(app)
-            .into_iter()
-            .map(|line| string_list_item(&line, theme))
-            .collect(),
-        theme,
+        ConfigBlock {
+            index: 0,
+            cursor: app.config_cursor,
+            title: "Rotation",
+            enabled: app.ctx.config.change.enabled,
+            summary: format!(
+                "every {}s, {}, {:.0}% online",
+                app.ctx.config.change.interval_secs,
+                if app.ctx.config.change.internet_enabled {
+                    "online"
+                } else {
+                    "local only"
+                },
+                app.ctx.config.change.download_preference_ratio * 100.0
+            ),
+            details: rotation_details(app)
+                .into_iter()
+                .map(|line| string_list_item(&line, theme))
+                .collect(),
+            theme,
+        },
     );
 
     let sources = &app.ctx.config.sources;
@@ -814,71 +826,72 @@ fn config_list_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
     };
     push_config_block_items(
         &mut items,
-        1,
-        app.config_cursor,
-        "Sources",
-        sources_enabled,
-        sources_view::sources_block_summary(app),
-        sources_details,
-        theme,
+        ConfigBlock {
+            index: 1,
+            cursor: app.config_cursor,
+            title: "Sources",
+            enabled: sources_enabled,
+            summary: sources_view::sources_block_summary(app),
+            details: sources_details,
+            theme,
+        },
     );
 
     push_config_block_items(
         &mut items,
-        2,
-        app.config_cursor,
-        "Library",
-        app.ctx.config.quota.enabled,
-        format!(
-            "{} queued, {} history, quota {}",
-            app.ctx.state.cache_queue.len(),
-            app.ctx.state.history.len(),
-            quota_summary(app)
-        ),
-        library_details(app)
-            .into_iter()
-            .map(|line| string_list_item(&line, theme))
-            .collect(),
-        theme,
+        ConfigBlock {
+            index: 2,
+            cursor: app.config_cursor,
+            title: "Library",
+            enabled: app.ctx.config.quota.enabled,
+            summary: format!(
+                "{} queued, {} history, quota {}",
+                app.ctx.state.cache_queue.len(),
+                app.ctx.state.history.len(),
+                quota_summary(app)
+            ),
+            details: library_details(app)
+                .into_iter()
+                .map(|line| string_list_item(&line, theme))
+                .collect(),
+            theme,
+        },
     );
 
     push_config_block_items(
         &mut items,
-        3,
-        app.config_cursor,
-        "Apply/display",
-        true,
-        format!(
-            "{} backend, {} mode, {}",
-            apply_block_backend_summary(app),
-            app.ctx.config.display.mode,
-            display_target_summary(app)
-        ),
-        apply_display_details(app)
-            .into_iter()
-            .map(|line| string_list_item(&line, theme))
-            .collect(),
-        theme,
+        ConfigBlock {
+            index: 3,
+            cursor: app.config_cursor,
+            title: "Apply/display",
+            enabled: true,
+            summary: format!(
+                "{} backend, {} mode, {}",
+                apply_block_backend_summary(app),
+                app.ctx.config.display.mode,
+                display_target_summary(app)
+            ),
+            details: apply_display_details(app)
+                .into_iter()
+                .map(|line| string_list_item(&line, theme))
+                .collect(),
+            theme,
+        },
     );
     items
 }
 
-fn push_config_block_items(
-    items: &mut Vec<ListItem<'static>>,
-    index: usize,
-    cursor: usize,
-    title: &str,
-    enabled: bool,
-    summary: String,
-    details: Vec<ListItem<'static>>,
-    theme: style::Theme,
-) {
-    let marker = if cursor == index { ">" } else { " " };
-    let state = if enabled { "on" } else { "off" };
-    let header = format!("{marker} [{state}] {title} - {summary}");
-    items.push(string_list_item(&header, theme));
-    if cursor == index {
-        items.extend(details);
+fn push_config_block_items(items: &mut Vec<ListItem<'static>>, block: ConfigBlock<'_>) {
+    let marker = if block.cursor == block.index {
+        ">"
+    } else {
+        " "
+    };
+    let state = if block.enabled { "on" } else { "off" };
+    let header = format!("{marker} [{state}] {} - {}", block.title, block.summary);
+    items.push(string_list_item(&header, block.theme));
+    if block.cursor == block.index {
+        items.extend(block.details);
     }
 }
 

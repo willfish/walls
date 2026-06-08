@@ -140,7 +140,7 @@ pub struct Secrets {
     pub wallhaven_api_key: String,
     #[serde(default)]
     pub unsplash_access_key: String,
-    /// Reddit API app client id (https://www.reddit.com/prefs/apps — script or installed app).
+    /// Reddit API app client id (<https://www.reddit.com/prefs/apps> — script or installed app).
     #[serde(default)]
     pub reddit_client_id: String,
     /// Reddit API app secret (empty for installed-app type).

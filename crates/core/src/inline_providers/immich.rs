@@ -73,7 +73,7 @@ pub async fn try_immich(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
             description: asset
                 .get("originalFileName")
                 .and_then(|v| v.as_str())
-                .or_else(|| src.label.as_deref())
+                .or(src.label.as_deref())
                 .map(str::to_string),
         },
     )

@@ -97,7 +97,7 @@ fn patch_wallpaper_source(contents: &str, new_path: &Path) -> String {
     }
 
     // Last resort minimal (may lose other settings).
-    format!(r#"backgrounds: ( {source_line} color: [0.0, 0.0, 0.0, 1.0], )"#)
+    format!(r"backgrounds: ( {source_line} color: [0.0, 0.0, 0.0, 1.0], )")
 }
 
 /// Patch the COSMIC background entry: wallpaper path plus managed slideshow fields.

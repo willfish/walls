@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 mod common;
 
 use walls_core::validate::{secrets_file_permission_warnings, validate_config};

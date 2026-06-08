@@ -78,11 +78,13 @@ pub(crate) fn reddit_user_agent() -> &'static str {
 
 pub(crate) fn is_probably_image_url(url: &str) -> bool {
     let lower = url.to_ascii_lowercase();
-    lower.ends_with(".jpg")
-        || lower.ends_with(".jpeg")
-        || lower.ends_with(".png")
-        || lower.ends_with(".webp")
-        || lower.contains("i.redd.it")
+    let ext = std::path::Path::new(&lower).extension();
+    ext.is_some_and(|ext| {
+        ext.eq_ignore_ascii_case("jpg")
+            || ext.eq_ignore_ascii_case("jpeg")
+            || ext.eq_ignore_ascii_case("png")
+            || ext.eq_ignore_ascii_case("webp")
+    }) || lower.contains("i.redd.it")
         || lower.contains("preview.redd.it")
 }
 
@@ -97,7 +99,7 @@ pub(crate) fn fix_imgur_url(url: &str) -> String {
     url.to_string()
 }
 
-pub(crate) fn pick_random<'a, T>(items: &'a [T]) -> Option<&'a T> {
+pub(crate) fn pick_random<T>(items: &[T]) -> Option<&T> {
     if items.is_empty() {
         return None;
     }

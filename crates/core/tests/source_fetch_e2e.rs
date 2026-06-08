@@ -3,6 +3,7 @@
 //! Hermetic tests use wiremock or local fixtures so CI stays offline-safe.
 //! Live network smoke tests remain in `advance_next.rs` (`#[ignore]`).
 
+#[allow(dead_code)]
 mod common;
 
 use std::fs;

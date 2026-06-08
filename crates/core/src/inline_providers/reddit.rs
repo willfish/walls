@@ -92,18 +92,17 @@ async fn try_reddit_inner(
                 continue;
             };
             if ctx.config.change.safe_mode
-                && data.get("over_18").and_then(|v| v.as_bool()) == Some(true)
+                && data.get("over_18").and_then(serde_json::Value::as_bool) == Some(true)
             {
                 continue;
             }
             let Some(image_url) = reddit_post_image_url(data) else {
                 continue;
             };
-            let origin_url = data
-                .get("permalink")
-                .and_then(|v| v.as_str())
-                .map(|p| format!("https://www.reddit.com{p}"))
-                .unwrap_or_else(|| image_url.clone());
+            let origin_url = data.get("permalink").and_then(|v| v.as_str()).map_or_else(
+                || image_url.clone(),
+                |p| format!("https://www.reddit.com{p}"),
+            );
             candidates.push(RedditCandidate {
                 origin_url,
                 image_url,
