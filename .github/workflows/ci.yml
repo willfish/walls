@@ -1,7 +1,7 @@
 # Testing pyramid for walls:
 #   1. Static — rustfmt, clippy
 #   2. Unit/integration — cargo test (core fixtures, wiremock, CLI/TUI smoke)
-#   3. Coverage visibility — cargo llvm-cov summary (non-threshold)
+#   3. Coverage gate — cargo llvm-cov summary with line coverage floor
 #   4. Packaging — release build + Nix derivations per OS/CPU
 #   5. Security — cargo audit, cargo deny, secret scan
 #
@@ -24,6 +24,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  COVERAGE_LINE_FLOOR: 77
 
 jobs:
   fmt:
@@ -63,12 +64,13 @@ jobs:
       - name: Run cargo llvm-cov
         run: |
           mkdir -p target/llvm-cov
-          nix develop -c cargo llvm-cov --workspace --summary-only --json --output-path target/llvm-cov/summary.json
+          nix develop -c cargo llvm-cov --workspace --summary-only --json --output-path target/llvm-cov/summary.json --fail-under-lines "$COVERAGE_LINE_FLOOR"
       - name: Print line coverage summary
+        if: always()
         run: |
           summary=$(nix develop -c jq -r '
             .data[0].totals.lines
-            | "Line coverage: \(.percent | tonumber | . * 100 | round / 100)% (\(.covered)/\(.count) lines)"
+            | "Line coverage: \(.percent | tonumber | . * 100 | round / 100)% (\(.covered)/\(.count) lines; floor: " + env.COVERAGE_LINE_FLOOR + "%)"
           ' target/llvm-cov/summary.json)
           echo "$summary"
           {
