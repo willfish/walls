@@ -27,6 +27,7 @@ pub mod library;
 pub mod lock;
 pub mod paths;
 pub mod pipeline;
+pub(crate) mod provider_http;
 pub mod providers;
 pub mod quota;
 pub mod rotation;
