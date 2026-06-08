@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn poll_detects_cosmic_theme_file_change() {
-        let _lock = cosmic_theme::lock_xdg_config_home_for_tests();
+        let _lock = cosmic_theme::lock_env_for_tests();
         std::env::set_var("XDG_CURRENT_DESKTOP", "COSMIC");
         let root = tempfile::tempdir().unwrap();
         let xdg = root.path().join("xdg");

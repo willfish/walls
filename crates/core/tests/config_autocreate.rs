@@ -28,8 +28,14 @@ impl Drop for HomeGuard {
 }
 
 fn with_isolated_home<F: FnOnce(&Path)>(f: F) {
+    let _lock = walls_core::cosmic_theme::lock_env_for_tests();
     let root = tempfile::tempdir().unwrap();
     let _guard = HomeGuard::set(root.path());
+    // SAFETY: test-only; guarded by `lock_env_for_tests`.
+    unsafe {
+        std::env::remove_var("XDG_CONFIG_HOME");
+        std::env::remove_var("XDG_STATE_HOME");
+    }
     f(root.path());
 }
 

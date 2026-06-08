@@ -9,13 +9,18 @@ use regex::Regex;
 
 use crate::tray_icon::TrayAccentPalette;
 
-static XDG_CONFIG_HOME_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+static ENV_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
-/// Serialize tests that mutate `XDG_CONFIG_HOME`.
-pub fn lock_xdg_config_home_for_tests() -> MutexGuard<'static, ()> {
-    XDG_CONFIG_HOME_TEST_LOCK
+/// Serialize tests that mutate process environment variables.
+pub fn lock_env_for_tests() -> MutexGuard<'static, ()> {
+    ENV_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Back-compat alias for older call sites.
+pub fn lock_xdg_config_home_for_tests() -> MutexGuard<'static, ()> {
+    lock_env_for_tests()
 }
 
 const COSMIC_THEME_MODE: &str = "com.system76.CosmicTheme.Mode/v1/is_dark";

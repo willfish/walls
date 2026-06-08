@@ -81,7 +81,10 @@ pub fn expand_home(path: impl AsRef<Path>) -> PathBuf {
         return path.to_path_buf();
     };
     if let Some(rest) = s.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .or_else(dirs::home_dir);
+        if let Some(home) = home {
             return home.join(rest);
         }
     }

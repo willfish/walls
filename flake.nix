@@ -120,6 +120,12 @@
             "--skip"
             "tui_with_pty_exits_cleanly_on_quit"
           ];
+          # Default config paths expand `~/.local/share/walls/*`; point HOME at TMPDIR
+          # so integration tests can create data dirs in the Nix build sandbox.
+          preCheck = ''
+            export HOME="$TMPDIR/walls-test-home"
+            mkdir -p "$HOME"
+          '';
           doCheck = true;
 
           postInstall = lib.optionalString pkgs.stdenv.isLinux ''
