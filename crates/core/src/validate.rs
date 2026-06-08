@@ -1,5 +1,5 @@
 use crate::config::UnsplashSourceConfig;
-use crate::config::{ApplyBackendSetting, Config, Secrets};
+use crate::config::{ApplyBackendSetting, Config, Secrets, SourceEntry};
 use crate::paths::{expand_home, WallsPaths};
 
 /// Log non-fatal config problems at load time (see also `walls config validate`).
@@ -12,34 +12,8 @@ pub fn warn_validation_issues(config: &Config, secrets: &Secrets, paths: &WallsP
     }
 }
 
-/// Limit source validation to one entry (e.g. when saving a single source edit in the TUI).
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ValidateScope {
-    pub source_index: Option<usize>,
-}
-
-impl ValidateScope {
-    pub fn all_sources() -> Self {
-        Self::default()
-    }
-
-    pub fn single_source(index: usize) -> Self {
-        Self {
-            source_index: Some(index),
-        }
-    }
-}
-
+/// Full config check for `walls config validate` and non-blocking TUI warnings.
 pub fn validate_config(config: &Config, secrets: &Secrets, paths: &WallsPaths) -> Vec<String> {
-    validate_config_with_scope(config, secrets, paths, ValidateScope::all_sources())
-}
-
-pub fn validate_config_with_scope(
-    config: &Config,
-    secrets: &Secrets,
-    paths: &WallsPaths,
-    scope: ValidateScope,
-) -> Vec<String> {
     let mut errors = Vec::new();
 
     if !paths.config_file.is_file() {
@@ -50,68 +24,109 @@ pub fn validate_config_with_scope(
     }
 
     for (index, src) in config.sources.iter().enumerate() {
-        if !src.enabled {
-            continue;
-        }
-        if scope.source_index.is_some_and(|only| only != index) {
-            continue;
-        }
-        match src.source_type.as_str() {
-            "folder" | "image" | "favorites" | "fetched" => {
-                let expanded = match src.source_type.as_str() {
-                    "favorites" => paths.favorites_dir.clone(),
-                    "fetched" => paths.fetched_dir.clone(),
-                    _ => {
-                        let Some(path) = src.path.as_ref() else {
-                            errors.push(format!(
-                                "source {:?}: missing path for type {}",
-                                src.label, src.source_type
-                            ));
-                            continue;
-                        };
-                        expand_home(path)
-                    }
-                };
-                if !expanded.exists() {
-                    errors.push(format!(
-                        "source {:?}: path does not exist: {}",
-                        src.label,
-                        expanded.display()
-                    ));
-                }
-            }
-            "wallhaven"
-                if config.change.internet_enabled && secrets.wallhaven_api_key.is_empty() =>
-            {
-                errors
-                    .push("wallhaven source enabled but secrets.wallhaven_api_key is empty".into());
-            }
-            "unsplash" => {
-                if config.change.internet_enabled && secrets.unsplash_access_key.is_empty() {
-                    errors.push(
-                        "unsplash source enabled but secrets.unsplash_access_key is empty".into(),
-                    );
-                }
-                if let Err(error) = UnsplashSourceConfig::from_source(src) {
-                    errors.push(format!("source {:?}: {error}", src.label));
-                }
-            }
-            _ => {}
-        }
+        validate_source_entry(index, src, config, secrets, paths, &mut errors);
     }
 
+    validate_wallhaven_provider(config, secrets, &mut errors);
+    validate_apply_config(config, &mut errors);
+    validate_quota_config(config, &mut errors);
+    validate_tray_autostart(config, &mut errors);
+
+    errors
+}
+
+/// Validate one source entry while editing it in the TUI (no global config checks).
+pub fn validate_source_edit(
+    index: usize,
+    config: &Config,
+    secrets: &Secrets,
+    paths: &WallsPaths,
+) -> Vec<String> {
+    let mut errors = Vec::new();
+    let Some(src) = config.sources.get(index) else {
+        errors.push(format!("source #{index} does not exist"));
+        return errors;
+    };
+    validate_source_entry(index, src, config, secrets, paths, &mut errors);
+    errors
+}
+
+/// Validate the Wallhaven provider block while editing it in the TUI.
+pub fn validate_wallhaven_edit(config: &Config, secrets: &Secrets) -> Vec<String> {
+    let mut errors = Vec::new();
+    validate_wallhaven_provider(config, secrets, &mut errors);
+    errors
+}
+
+fn validate_source_entry(
+    index: usize,
+    src: &SourceEntry,
+    config: &Config,
+    secrets: &Secrets,
+    paths: &WallsPaths,
+    errors: &mut Vec<String>,
+) {
+    let _ = index;
+    if src.source_type.trim().is_empty() {
+        errors.push(format!(
+            "source {:?}: type is required",
+            src.label.as_deref().unwrap_or("(unnamed)")
+        ));
+        return;
+    }
+
+    if !src.enabled {
+        return;
+    }
+
+    match src.source_type.as_str() {
+        "folder" | "image" | "favorites" | "fetched" => {
+            let expanded = match src.source_type.as_str() {
+                "favorites" => paths.favorites_dir.clone(),
+                "fetched" => paths.fetched_dir.clone(),
+                _ => {
+                    let Some(path) = src.path.as_ref() else {
+                        errors.push(format!(
+                            "source {:?}: missing path for type {}",
+                            src.label, src.source_type
+                        ));
+                        return;
+                    };
+                    expand_home(path)
+                }
+            };
+            if !expanded.exists() {
+                errors.push(format!(
+                    "source {:?}: path does not exist: {}",
+                    src.label,
+                    expanded.display()
+                ));
+            }
+        }
+        "wallhaven" if config.change.internet_enabled && secrets.wallhaven_api_key.is_empty() => {
+            errors.push("wallhaven source enabled but secrets.wallhaven_api_key is empty".into());
+        }
+        "unsplash" => {
+            if config.change.internet_enabled && secrets.unsplash_access_key.is_empty() {
+                errors.push(
+                    "unsplash source enabled but secrets.unsplash_access_key is empty".into(),
+                );
+            }
+            if let Err(error) = UnsplashSourceConfig::from_source(src) {
+                errors.push(format!("source {:?}: {error}", src.label));
+            }
+        }
+        _ => {}
+    }
+}
+
+fn validate_wallhaven_provider(config: &Config, secrets: &Secrets, errors: &mut Vec<String>) {
     if config.wallhaven.enabled
         && config.change.internet_enabled
         && secrets.wallhaven_api_key.is_empty()
     {
         errors.push("wallhaven provider enabled but secrets.wallhaven_api_key is empty".into());
     }
-
-    validate_apply_config(config, &mut errors);
-    validate_quota_config(config, &mut errors);
-    validate_tray_autostart(config, &mut errors);
-
-    errors
 }
 
 fn validate_tray_autostart(config: &Config, errors: &mut Vec<String>) {

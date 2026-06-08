@@ -57,7 +57,7 @@ Use `WALLS_TUI_PREVIEW=0`, `false`, `no`, `off`, `never`, or `metadata` for meta
 Before closing TUI work, run the checks in [`tui-verification.md`](tui-verification.md). Layout, colour, key handling, and preview changes require both automated tests and PTY visual/behavioural verification.
 
 ## Config editing (drill-down, non-modal)
-`e` on a Config block or (after `Enter` to subnav on the Sources list) on a provider item enters focused edit: main content replaced by the form for the item (stable layout, no overlay/popup). `j/k` fields, type to edit (live `val|buffer`), `Enter` commit field, `s` save (strict validate_config; errors flash red + block save), `Esc` back to list.
+`e` on a Config block or (after `Enter` to subnav on the Sources list) on a provider item enters focused edit: main content replaced by the form for the item (stable layout, no overlay/popup). `j/k` fields, type to edit (live `val|buffer`), `Enter` commit field, `s` save (validates only the item being edited; errors flash red + block save), `Esc` back to list. Run `walls config validate` for a full config check.
 
 Wide (tui-preview): split list-context | form (like Now preview split). Narrow: full form.
 
