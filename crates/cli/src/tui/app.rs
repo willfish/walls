@@ -994,9 +994,6 @@ impl App {
     }
 
     pub async fn run_search(&mut self) -> anyhow::Result<()> {
-        if self.ctx.secrets.wallhaven_api_key.is_empty() {
-            anyhow::bail!("wallhaven API key missing in secrets.json");
-        }
         let client = walls_core::wallhaven::WallhavenClient::new(
             walls_core::wallhaven::client::api_base(),
             &self.ctx.secrets.wallhaven_api_key,
@@ -2013,7 +2010,7 @@ fn summarize_wallhaven_provider(ctx: &WallsCtx) -> WallhavenProviderSummary {
         warnings.push("warning: online sources disabled".into());
     }
     if !api_key_present {
-        warnings.push("warning: API key missing; search and downloads are unavailable".into());
+        warnings.push("warning: API key missing; NSFW purity unavailable".into());
     }
     if search.purity.chars().nth(2) == Some('1') {
         warnings.push("warning: NSFW purity requires Wallhaven account access".into());

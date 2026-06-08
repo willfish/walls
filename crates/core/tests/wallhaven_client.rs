@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use walls_core::config::WallhavenSearch;
+use walls_core::wallhaven::client::purity_for_request;
 use walls_core::wallhaven::WallhavenClient;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
@@ -111,4 +112,34 @@ async fn wallhaven_fetch_wallpaper_uses_request_timeout() {
 
     let reqwest_error = err.downcast_ref::<reqwest::Error>().unwrap();
     assert!(reqwest_error.is_timeout());
+}
+
+#[test]
+fn purity_for_request_strips_nsfw_without_api_key() {
+    assert_eq!(purity_for_request("111", ""), "110");
+    assert_eq!(purity_for_request("101", ""), "100");
+    assert_eq!(purity_for_request("111", "key"), "111");
+}
+
+#[tokio::test]
+async fn wallhaven_search_works_without_api_key() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/search"))
+        .and(header("X-API-Key", ""))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            include_str!("fixtures/wallhaven-search.json"),
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let client = WallhavenClient::new(server.uri(), "").unwrap();
+    let params = WallhavenSearch {
+        purity: "111".into(),
+        ..Default::default()
+    };
+    let resp = client.search(&params, 1).await.unwrap();
+
+    assert_eq!(resp.data[0].id, "94x38z");
 }

@@ -1959,7 +1959,7 @@ mod tests {
         );
         assert!(text.contains("Abstract: alice/42"), "{text}");
         assert!(
-            text.contains("warning: API key missing; search and downloads are unavailable"),
+            text.contains("warning: API key missing; NSFW purity unavailable"),
             "{text}"
         );
     }
