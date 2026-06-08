@@ -1,14 +1,12 @@
 use std::path::PathBuf;
 
-use anyhow::Context;
-use reqwest::Client;
-
 use crate::ctx::WallsCtx;
 use crate::inline_providers::common::{
     api_base, download_bytes, first_enabled_source, pick_random, provider_for,
     write_cache_and_apply,
 };
 use crate::state::CurrentWallMetadata;
+use anyhow::Context;
 
 pub async fn try_pixabay(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
     let Some(src) = first_enabled_source(
@@ -32,15 +30,14 @@ pub async fn try_pixabay(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> 
         "{base}/api/?key={api_key}&q={query}&image_type=photo&orientation=horizontal&per_page=20&safesearch=true"
     );
 
-    let client = Client::new();
-    let payload: serde_json::Value = client
-        .get(&url)
-        .send()
-        .await
-        .with_context(|| provider.failure_scope("pixabay search fetch").to_string())?
-        .json()
-        .await
-        .with_context(|| provider.failure_scope("pixabay search parse").to_string())?;
+    let client = crate::inline_providers::common::http_client()?;
+    let payload: serde_json::Value =
+        crate::inline_providers::common::send_with_retries(|| client.get(&url))
+            .await
+            .with_context(|| provider.failure_scope("pixabay search fetch").to_string())?
+            .json()
+            .await
+            .with_context(|| provider.failure_scope("pixabay search parse").to_string())?;
 
     let hits = payload
         .get("hits")

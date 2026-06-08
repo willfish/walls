@@ -1,13 +1,11 @@
 use std::path::PathBuf;
 
-use anyhow::Context;
-use reqwest::Client;
-
 use crate::ctx::WallsCtx;
 use crate::inline_providers::common::{
     api_base, download_bytes, first_enabled_source, provider_for, write_cache_and_apply,
 };
 use crate::state::CurrentWallMetadata;
+use anyhow::Context;
 
 pub async fn try_apod(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
     let Some(src) = first_enabled_source(
@@ -28,15 +26,14 @@ pub async fn try_apod(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
     let base = api_base("NASA_API_BASE", "https://api.nasa.gov");
     let url = format!("{base}/planetary/apod?api_key={api_key}");
 
-    let client = Client::new();
-    let payload: serde_json::Value = client
-        .get(&url)
-        .send()
-        .await
-        .with_context(|| provider.failure_scope("apod metadata fetch").to_string())?
-        .json()
-        .await
-        .with_context(|| provider.failure_scope("apod metadata parse").to_string())?;
+    let client = crate::inline_providers::common::http_client()?;
+    let payload: serde_json::Value =
+        crate::inline_providers::common::send_with_retries(|| client.get(&url))
+            .await
+            .with_context(|| provider.failure_scope("apod metadata fetch").to_string())?
+            .json()
+            .await
+            .with_context(|| provider.failure_scope("apod metadata parse").to_string())?;
 
     if payload.get("media_type").and_then(|v| v.as_str()) == Some("video") {
         tracing::info!("apod: today's entry is a video, skipping");

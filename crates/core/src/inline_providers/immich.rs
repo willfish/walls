@@ -2,11 +2,10 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use reqwest::Client;
 
 use crate::ctx::WallsCtx;
 use crate::inline_providers::common::{
-    download_bytes, first_enabled_source, provider_for, write_cache_and_apply,
+    download_bytes, first_enabled_source, provider_for, send_with_retries, write_cache_and_apply,
 };
 use crate::state::CurrentWallMetadata;
 
@@ -39,11 +38,9 @@ pub async fn try_immich(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
         HeaderValue::from_str(api_key).context("invalid immich api key header")?,
     );
 
-    let client = Client::builder().default_headers(headers).build()?;
+    let client = crate::inline_providers::common::http_client_with_headers(headers)?;
     let random_url = format!("{base}/api/search/random?type=IMAGE");
-    let payload: serde_json::Value = client
-        .get(&random_url)
-        .send()
+    let payload: serde_json::Value = send_with_retries(|| client.get(&random_url))
         .await
         .with_context(|| provider.failure_scope("immich random fetch").to_string())?
         .json()

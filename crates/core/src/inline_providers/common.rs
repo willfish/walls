@@ -8,6 +8,7 @@ use crate::apply::ApplyTrigger;
 use crate::config::SourceEntry;
 use crate::ctx::WallsCtx;
 use crate::downloads::write_file_atomic;
+use crate::provider_http;
 use crate::providers::{provider_for_source, ProviderDescriptor};
 use crate::state::CurrentWallMetadata;
 
@@ -35,9 +36,7 @@ pub(crate) async fn download_bytes(
     provider: &ProviderDescriptor,
     operation: &'static str,
 ) -> anyhow::Result<Vec<u8>> {
-    client
-        .get(url)
-        .send()
+    provider_http::send_with_retries(|| client.get(url))
         .await
         .with_context(|| provider.failure_scope(operation).to_string())?
         .bytes()
@@ -70,6 +69,22 @@ pub(crate) fn api_base(env_key: &str, default: &str) -> String {
         .unwrap_or_else(|_| default.to_string())
         .trim_end_matches('/')
         .to_string()
+}
+
+pub(crate) fn http_client() -> anyhow::Result<Client> {
+    provider_http::client()
+}
+
+pub(crate) fn http_client_with_headers(
+    headers: reqwest::header::HeaderMap,
+) -> anyhow::Result<Client> {
+    provider_http::client_with_headers(headers)
+}
+
+pub(crate) async fn send_with_retries(
+    build_request: impl FnMut() -> reqwest::RequestBuilder,
+) -> anyhow::Result<reqwest::Response> {
+    provider_http::send_with_retries(build_request).await
 }
 
 pub(crate) fn reddit_user_agent() -> &'static str {

@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT};
-use reqwest::Client;
 
 use crate::config::{reddit_json_url, reddit_oauth_listing_url};
 use crate::ctx::WallsCtx;
@@ -73,14 +72,10 @@ async fn try_reddit_inner(
         );
     }
 
-    let client = Client::builder().default_headers(headers).build()?;
-    let listing: serde_json::Value = client
-        .get(&listing_url)
-        .send()
+    let client = common::http_client_with_headers(headers)?;
+    let listing: serde_json::Value = common::send_with_retries(|| client.get(&listing_url))
         .await
         .with_context(|| provider.failure_scope("reddit listing fetch").to_string())?
-        .error_for_status()
-        .with_context(|| provider.failure_scope("reddit listing status").to_string())?
         .json()
         .await
         .with_context(|| provider.failure_scope("reddit listing parse").to_string())?;
@@ -157,24 +152,23 @@ async fn fetch_reddit_access_token(
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_static(reddit_user_agent()));
 
-    let client = Client::builder().default_headers(headers).build()?;
+    let client = common::http_client_with_headers(headers)?;
     let secret = if client_secret.is_empty() {
         None
     } else {
         Some(client_secret)
     };
-    let response: serde_json::Value = client
-        .post(format!("{base}/api/v1/access_token"))
-        .basic_auth(client_id, secret)
-        .form(&[("grant_type", "client_credentials")])
-        .send()
-        .await
-        .with_context(|| provider.failure_scope("reddit token fetch").to_string())?
-        .error_for_status()
-        .with_context(|| provider.failure_scope("reddit token status").to_string())?
-        .json()
-        .await
-        .with_context(|| provider.failure_scope("reddit token parse").to_string())?;
+    let response: serde_json::Value = common::send_with_retries(|| {
+        client
+            .post(format!("{base}/api/v1/access_token"))
+            .basic_auth(client_id, secret)
+            .form(&[("grant_type", "client_credentials")])
+    })
+    .await
+    .with_context(|| provider.failure_scope("reddit token fetch").to_string())?
+    .json()
+    .await
+    .with_context(|| provider.failure_scope("reddit token parse").to_string())?;
 
     response
         .get("access_token")

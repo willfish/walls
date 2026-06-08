@@ -23,7 +23,7 @@ pub async fn try_attribution(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBu
         .filter(|u| !u.trim().is_empty())
         .ok_or_else(|| anyhow::anyhow!("attribution source missing url"))?;
 
-    let client = reqwest::Client::new();
+    let client = crate::inline_providers::common::http_client()?;
     let bytes = download_bytes(&client, image_url, &provider, "attribution image download").await?;
 
     let dest = ctx.paths.cache_dir.join("attribution-fetch.jpg");

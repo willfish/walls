@@ -368,15 +368,15 @@ impl<'ctx> AdvanceNext<'ctx> {
         let provider = provider_for_source(bing_sources[0]);
 
         let base = bing_api_base();
-        let client = ::reqwest::Client::new();
-        let j: serde_json::Value = client
-            .get(format!("{base}/HPImageArchive.aspx?format=js&idx=0&n=1"))
-            .send()
-            .await
-            .with_context(|| provider.failure_scope("bing json fetch").to_string())?
-            .json()
-            .await
-            .with_context(|| provider.failure_scope("bing json parse").to_string())?;
+        let client = crate::provider_http::client()?;
+        let archive_url = format!("{base}/HPImageArchive.aspx?format=js&idx=0&n=1");
+        let j: serde_json::Value =
+            crate::provider_http::send_with_retries(|| client.get(&archive_url))
+                .await
+                .with_context(|| provider.failure_scope("bing json fetch").to_string())?
+                .json()
+                .await
+                .with_context(|| provider.failure_scope("bing json parse").to_string())?;
 
         let img = &j["images"][0];
         let rel = img["url"].as_str().unwrap_or("");
@@ -389,9 +389,7 @@ impl<'ctx> AdvanceNext<'ctx> {
             format!("{base}{rel}")
         };
 
-        let bytes = client
-            .get(&url)
-            .send()
+        let bytes = crate::provider_http::send_with_retries(|| client.get(&url))
             .await
             .with_context(|| provider.failure_scope("bing image download").to_string())?
             .bytes()
@@ -430,10 +428,8 @@ impl<'ctx> AdvanceNext<'ctx> {
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("json source missing url"))?;
 
-        let client = ::reqwest::Client::new();
-        let j: serde_json::Value = client
-            .get(feed_url)
-            .send()
+        let client = crate::provider_http::client()?;
+        let j: serde_json::Value = crate::provider_http::send_with_retries(|| client.get(feed_url))
             .await
             .with_context(|| provider.failure_scope("json feed fetch").to_string())?
             .json()
@@ -454,9 +450,7 @@ impl<'ctx> AdvanceNext<'ctx> {
                 })
                 .ok_or_else(|| anyhow::anyhow!("no image url found in json feed"))?;
 
-        let bytes = client
-            .get(&image_url)
-            .send()
+        let bytes = crate::provider_http::send_with_retries(|| client.get(&image_url))
             .await
             .with_context(|| provider.failure_scope("json image download").to_string())?
             .bytes()
@@ -495,10 +489,8 @@ impl<'ctx> AdvanceNext<'ctx> {
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("mediarss missing url"))?;
 
-        let client = ::reqwest::Client::new();
-        let xml = client
-            .get(rss_url)
-            .send()
+        let client = crate::provider_http::client()?;
+        let xml = crate::provider_http::send_with_retries(|| client.get(rss_url))
             .await
             .with_context(|| provider.failure_scope("mediarss fetch").to_string())?
             .text()
@@ -508,9 +500,7 @@ impl<'ctx> AdvanceNext<'ctx> {
         let image_url = crate::feeds::extract_first_media_from_rss(&xml)
             .ok_or_else(|| anyhow::anyhow!("no image enclosure found in mediarss"))?;
 
-        let bytes = client
-            .get(&image_url)
-            .send()
+        let bytes = crate::provider_http::send_with_retries(|| client.get(&image_url))
             .await
             .with_context(|| {
                 provider

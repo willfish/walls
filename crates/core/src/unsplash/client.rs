@@ -2,20 +2,17 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{ensure, Context};
-use reqwest::{Client, Response, StatusCode};
+use reqwest::{Client, Response};
 
 use crate::config::UnsplashSourceConfig;
 use crate::downloads::{copy_file_atomic, write_file_atomic};
+use crate::provider_http;
 use crate::quota::enforce_download_quota;
 
 use super::types::Photo;
 
 pub const DEFAULT_API_BASE: &str = "https://api.unsplash.com";
-const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_MAX_DOWNLOAD_BYTES: u64 = 50 * 1024 * 1024;
-const MAX_ATTEMPTS: u32 = 3;
-const RETRY_BACKOFF_BASE_MS: u64 = 100;
 
 pub fn api_base() -> String {
     std::env::var("UNSPLASH_API_BASE").unwrap_or_else(|_| DEFAULT_API_BASE.to_string())
@@ -33,8 +30,8 @@ impl UnsplashClient {
         Self::new_with_timeouts(
             base_url,
             access_key,
-            DEFAULT_REQUEST_TIMEOUT,
-            DEFAULT_CONNECT_TIMEOUT,
+            provider_http::DEFAULT_REQUEST_TIMEOUT,
+            provider_http::DEFAULT_CONNECT_TIMEOUT,
         )
     }
 
@@ -61,10 +58,7 @@ impl UnsplashClient {
         max_download_bytes: u64,
     ) -> anyhow::Result<Self> {
         Ok(Self {
-            http: Client::builder()
-                .connect_timeout(connect_timeout)
-                .timeout(request_timeout)
-                .build()?,
+            http: provider_http::client_with_timeouts(request_timeout, connect_timeout)?,
             base_url: base_url.into().trim_end_matches('/').to_string(),
             access_key: access_key.into(),
             max_download_bytes,
@@ -90,9 +84,8 @@ impl UnsplashClient {
             query.push(("orientation", value));
         }
 
-        let resp = self
-            .send_with_retries(|| self.authorized_get(&url).query(&query))
-            .await?;
+        let resp =
+            provider_http::send_with_retries(|| self.authorized_get(&url).query(&query)).await?;
         let mut photos: Vec<Photo> = resp.json().await?;
         photos
             .pop()
@@ -101,7 +94,7 @@ impl UnsplashClient {
 
     pub async fn fetch_photo(&self, id: &str) -> anyhow::Result<Photo> {
         let url = format!("{}/photos/{id}", self.base_url);
-        let resp = self.send_with_retries(|| self.authorized_get(&url)).await?;
+        let resp = provider_http::send_with_retries(|| self.authorized_get(&url)).await?;
         Ok(resp.json().await?)
     }
 
@@ -132,16 +125,15 @@ impl UnsplashClient {
         }
 
         self.track_download(photo).await?;
-        let response = self
-            .send_with_retries(|| self.http.get(photo.urls.wallpaper_url()))
-            .await?;
+        let response =
+            provider_http::send_with_retries(|| self.http.get(photo.urls.wallpaper_url())).await?;
         let bytes = pipe_limited_body(response, self.max_download_bytes).await?;
         write_file_atomic(&dest, &bytes).await?;
         Ok(dest)
     }
 
     async fn track_download(&self, photo: &Photo) -> anyhow::Result<()> {
-        self.send_with_retries(|| self.authorized_get(&photo.links.download_location))
+        provider_http::send_with_retries(|| self.authorized_get(&photo.links.download_location))
             .await?;
         Ok(())
     }
@@ -150,23 +142,6 @@ impl UnsplashClient {
         self.http
             .get(url)
             .header("Authorization", format!("Client-ID {}", self.access_key))
-    }
-
-    async fn send_with_retries(
-        &self,
-        mut build_request: impl FnMut() -> reqwest::RequestBuilder,
-    ) -> anyhow::Result<Response> {
-        let mut attempt = 1;
-        loop {
-            let resp = build_request().send().await?;
-            let status = resp.status();
-            if !is_transient_status(status) || attempt == MAX_ATTEMPTS {
-                return Ok(resp.error_for_status()?);
-            }
-
-            tokio::time::sleep(backoff_delay(attempt)).await;
-            attempt += 1;
-        }
     }
 }
 
@@ -201,12 +176,4 @@ fn photo_extension(url: &str) -> Option<String> {
         .next()
         .filter(|extension| !extension.is_empty())
         .map(str::to_string)
-}
-
-fn is_transient_status(status: StatusCode) -> bool {
-    status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
-}
-
-fn backoff_delay(attempt: u32) -> Duration {
-    Duration::from_millis(RETRY_BACKOFF_BASE_MS * u64::from(attempt))
 }
