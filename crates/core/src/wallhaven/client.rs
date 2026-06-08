@@ -78,6 +78,7 @@ impl WallhavenClient {
     ) -> anyhow::Result<SearchResponse> {
         let url = format!("{}/api/v1/search", self.base_url);
         let page = page.to_string();
+        let purity = purity_for_request(&params.purity, &self.api_key);
         let resp = self
             .send_with_retries(|| {
                 self.http
@@ -86,7 +87,7 @@ impl WallhavenClient {
                     .query(&[
                         ("q", params.q.as_str()),
                         ("categories", params.categories.as_str()),
-                        ("purity", params.purity.as_str()),
+                        ("purity", purity.as_str()),
                         ("sorting", params.sorting.as_str()),
                         ("order", params.order.as_str()),
                         ("atleast", params.atleast.as_str()),
@@ -215,4 +216,17 @@ fn is_transient_status(status: StatusCode) -> bool {
 
 fn backoff_delay(attempt: u32) -> Duration {
     Duration::from_millis(RETRY_BACKOFF_BASE_MS * u64::from(attempt))
+}
+
+/// Anonymous Wallhaven access ignores NSFW purity; strip that bit when no API key is set.
+pub fn purity_for_request(purity: &str, api_key: &str) -> String {
+    if !api_key.trim().is_empty() {
+        return purity.to_string();
+    }
+    let mut chars: Vec<char> = purity.chars().collect();
+    if chars.len() < 3 {
+        chars.resize(3, '0');
+    }
+    chars[2] = '0';
+    chars.into_iter().collect()
 }

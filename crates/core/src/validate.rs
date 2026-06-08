@@ -103,9 +103,6 @@ fn validate_source_entry(
                 ));
             }
         }
-        "wallhaven" if config.change.internet_enabled && secrets.wallhaven_api_key.is_empty() => {
-            errors.push("wallhaven source enabled but secrets.wallhaven_api_key is empty".into());
-        }
         "unsplash" => {
             if config.change.internet_enabled && secrets.unsplash_access_key.is_empty() {
                 errors.push(
@@ -120,14 +117,7 @@ fn validate_source_entry(
     }
 }
 
-fn validate_wallhaven_provider(config: &Config, secrets: &Secrets, errors: &mut Vec<String>) {
-    if config.wallhaven.enabled
-        && config.change.internet_enabled
-        && secrets.wallhaven_api_key.is_empty()
-    {
-        errors.push("wallhaven provider enabled but secrets.wallhaven_api_key is empty".into());
-    }
-}
+fn validate_wallhaven_provider(_config: &Config, _secrets: &Secrets, _errors: &mut Vec<String>) {}
 
 fn validate_tray_autostart(config: &Config, errors: &mut Vec<String>) {
     let Ok(config_home) = autostart_config_home() else {

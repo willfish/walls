@@ -165,7 +165,7 @@ fn wallhaven_descriptor_preserves_existing_enablement_rules() {
     assert!(!wallhaven_provider(&test_config(false), &secrets).enabled);
 
     secrets.wallhaven_api_key.clear();
-    assert!(!wallhaven_provider(&test_config(true), &secrets).enabled);
+    assert!(wallhaven_provider(&test_config(true), &secrets).enabled);
 
     secrets.wallhaven_api_key = "key".into();
     let mut config = test_config(true);

@@ -96,13 +96,11 @@ pub fn enabled_local_sources(sources: &[SourceEntry]) -> impl Iterator<Item = &S
         .filter(|source| source.enabled && source_kind(&source.source_type).is_local())
 }
 
-pub fn wallhaven_provider(config: &Config, secrets: &Secrets) -> ProviderDescriptor {
+pub fn wallhaven_provider(config: &Config, _secrets: &Secrets) -> ProviderDescriptor {
     ProviderDescriptor {
         id: "wallhaven".into(),
         kind: ProviderKind::Wallhaven,
-        enabled: config.wallhaven.enabled
-            && config.change.internet_enabled
-            && !secrets.wallhaven_api_key.is_empty(),
+        enabled: config.wallhaven.enabled && config.change.internet_enabled,
         capabilities: capabilities_for_kind(ProviderKind::Wallhaven),
     }
 }
