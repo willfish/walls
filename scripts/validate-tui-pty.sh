@@ -27,7 +27,7 @@ chmod +x "$NOOP"
 
 cat >"$CONFIG_HOME/walls/config.json" <<EOF
 {
-  "change": { "enabled": true, "internet_enabled": false },
+  "change": { "enabled": false, "interval_secs": 0, "internet_enabled": false },
   "paths": {
     "cache_dir": "$TMP/cache",
     "download_dir": "$TMP/downloaded",

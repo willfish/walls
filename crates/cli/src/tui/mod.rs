@@ -127,9 +127,11 @@ pub fn run(startup_message: Option<String>, tray_owns_rotation: bool) -> anyhow:
             draw(f, &app);
         })?;
         if let Some(rotator) = &mut auto_rotator {
-            let outcome = rt.block_on(async {
-                let mut ctx = walls_core::WallsCtx::load()?;
-                Ok::<_, anyhow::Error>(rotator.tick(&mut ctx).await)
+            let outcome = tokio::task::block_in_place(|| {
+                rt.block_on(async {
+                    let mut ctx = walls_core::WallsCtx::load()?;
+                    Ok::<_, anyhow::Error>(rotator.tick(&mut ctx).await)
+                })
             });
             if matches!(outcome, Ok(walls_core::rotation::TickOutcome::Rotated)) {
                 app.reload_ctx()?;

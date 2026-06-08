@@ -41,7 +41,10 @@ fn setup_xdg_home(tmp: &std::path::Path) -> (std::path::PathBuf, std::path::Path
     }
 
     let config = serde_json::json!({
-        "change": { "enabled": true, "internet_enabled": false },
+        // This PTY smoke test verifies TUI launch, key input, and manual wallpaper
+        // switching. Disable automatic rotation so the scheduler cannot tick before
+        // the scripted input reaches the terminal.
+        "change": { "enabled": false, "interval_secs": 0, "internet_enabled": false },
         "paths": {
             "cache_dir": tmp.join("cache").display().to_string(),
             "download_dir": tmp.join("downloaded").display().to_string(),
