@@ -2002,6 +2002,40 @@ mod tests {
     }
 
     #[test]
+    fn source_subnav_t_key_toggles_enabled_without_validating_other_sources() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let image_dir = tmp.path().join("images");
+        fs::create_dir_all(&image_dir).expect("images dir");
+        let missing = tmp.path().join("missing");
+
+        let mut app = test_app_with_sources(
+            tmp,
+            serde_json::json!([
+                { "enabled": true, "type": "favorites", "label": "Favorites" },
+                {
+                    "enabled": true,
+                    "type": "folder",
+                    "label": "Missing",
+                    "path": missing.display().to_string()
+                }
+            ]),
+        );
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = 0;
+
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+        update(&mut app, UiAction::ToggleConfigValue, rt.handle())
+            .expect("toggle favorites enabled");
+        app.reload_ctx().expect("reload");
+
+        assert!(!app.ctx.config.sources[0].enabled);
+        let text = render_text(&app, 120, 30);
+        assert!(text.contains("Favorites"), "{text}");
+        assert!(text.contains(" off · "), "{text}");
+    }
+
+    #[test]
     fn wallhaven_subnav_t_key_toggles_enabled() {
         let mut app = test_app_with_wallhaven(
             true,

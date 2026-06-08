@@ -8,7 +8,7 @@ use walls_core::config::{
 };
 use walls_core::expand_home;
 use walls_core::sources::list_images_with_paths;
-use walls_core::validate::validate_config;
+use walls_core::validate::{validate_config, validate_config_with_scope, ValidateScope};
 use walls_core::WallsCtx;
 
 use super::style::ColorMode;
@@ -1112,6 +1112,18 @@ impl App {
                     config.wallhaven.enabled
                 )));
             }
+            if idx < config.sources.len() {
+                let label = config.sources[idx]
+                    .label
+                    .clone()
+                    .unwrap_or_else(|| config.sources[idx].source_type.clone());
+                config.sources[idx].enabled = !config.sources[idx].enabled;
+                persist_config(&self.ctx.paths.config_file, &config)?;
+                return Ok(Some(format!(
+                    "config saved: {label} enabled={}",
+                    config.sources[idx].enabled
+                )));
+            }
         }
         let message = match self.config_cursor {
             0 => {
@@ -1692,8 +1704,17 @@ impl App {
                 }
                 _ => {}
             }
-            let issues =
-                walls_core::validate::validate_config(&temp, &self.ctx.secrets, &self.ctx.paths);
+            let issues = match &sess.target {
+                EditTarget::Source(i) => walls_core::validate::validate_config_with_scope(
+                    &temp,
+                    &self.ctx.secrets,
+                    &self.ctx.paths,
+                    ValidateScope::single_source(*i),
+                ),
+                _ => {
+                    walls_core::validate::validate_config(&temp, &self.ctx.secrets, &self.ctx.paths)
+                }
+            };
             // keep only issues mentioning the target roughly
             sess.validation_errors = issues
                 .into_iter()
@@ -1800,9 +1821,16 @@ impl App {
             }
             _ => {}
         }
-        // strict validate
-        let issues =
-            walls_core::validate::validate_config(&config, &self.ctx.secrets, &self.ctx.paths);
+        // strict validate (source edits only check the item being saved)
+        let issues = match &sess.target {
+            EditTarget::Source(i) => validate_config_with_scope(
+                &config,
+                &self.ctx.secrets,
+                &self.ctx.paths,
+                ValidateScope::single_source(*i),
+            ),
+            _ => validate_config(&config, &self.ctx.secrets, &self.ctx.paths),
+        };
         if !issues.is_empty() {
             if let Some(s) = &mut self.editing {
                 s.validation_errors = issues.clone();
