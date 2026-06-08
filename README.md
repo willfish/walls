@@ -111,6 +111,8 @@ nix build .#checks.x86_64-linux.default   # Nix package + tests (PTY test skippe
 
 CI (GitHub Actions) runs rustfmt, clippy, `cargo test`, `cargo llvm-cov` with a documented [coverage floor](docs/coverage.md), release build, `cargo audit` / `cargo deny`, secret scan, and Nix builds on `x86_64-linux`, `aarch64-linux`, `x86_64-darwin`, and `aarch64-darwin`.
 
+Rust conventions for module boundaries, errors, validation, provider I/O, and tests are documented in [`docs/rust-style.md`](docs/rust-style.md).
+
 **Local hooks** (Nix-managed, like [forte#194](https://github.com/willfish/forte/pull/194)): on `nix develop` / direnv, **commit** runs hygiene + `nixfmt` + `rustfmt` + `actionlint` + shell checks; **push** runs `clippy` and `cargo test --workspace`. Run everything with `nix fmt` or `pre-commit run -a`.
 
 ## Demo
