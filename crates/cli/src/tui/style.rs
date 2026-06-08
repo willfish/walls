@@ -148,6 +148,10 @@ impl Theme {
     }
 }
 
+/// Last-resort classifier for text-only preview statuses that do not carry a semantic role yet.
+///
+/// Normal TUI footer messages use `App::message_kind` instead of this heuristic.
+#[cfg(feature = "tui-preview")]
 pub fn status_kind(message: &str) -> StatusKind {
     let lower = message.to_ascii_lowercase();
     if lower.contains("error")
