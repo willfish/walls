@@ -108,7 +108,7 @@ pub fn run(startup_message: Option<String>, tray_owns_rotation: bool) -> anyhow:
 
     let mut app = App::new(WallsCtx::load().context("failed to load walls config")?)?;
     if let Some(message) = startup_message {
-        app.message = message;
+        app.set_message(style::StatusKind::Neutral, message);
     }
     IN_TUI.store(true, Ordering::Relaxed);
     #[cfg(feature = "tui-preview")]
@@ -353,7 +353,7 @@ fn update(
         UiAction::SubmitCommand => {
             match app.run_command(rt)? {
                 None => return Ok(UpdateEffect::Quit),
-                Some(msg) => app.message = msg,
+                Some((msg, kind)) => app.set_message(kind, msg),
             }
             app.input_mode = InputMode::Normal;
             app.cmd_line.clear();
@@ -365,9 +365,12 @@ fn update(
         UiAction::CommandChar(c) => app.cmd_line.push(c),
         UiAction::SubmitSearch => {
             app.input_mode = InputMode::Normal;
-            app.message = match tokio::task::block_in_place(|| rt.block_on(app.run_search())) {
-                Ok(()) => format!("search: {} results", app.search_results.len()),
-                Err(e) => format!("search error: {e}"),
+            match tokio::task::block_in_place(|| rt.block_on(app.run_search())) {
+                Ok(()) => app.set_message(
+                    style::StatusKind::Success,
+                    format!("search: {} results", app.search_results.len()),
+                ),
+                Err(e) => app.set_message(style::StatusKind::Error, format!("search error: {e}")),
             };
         }
         UiAction::SearchBackspace => {
@@ -375,77 +378,89 @@ fn update(
         }
         UiAction::SearchChar(c) => app.search_query.push(c),
         UiAction::Next => {
-            app.message =
-                match tokio::task::block_in_place(|| rt.block_on(app.ctx.advance_next_manual())) {
-                    Ok(Some(p)) => format!("next: {}", p.display()),
-                    Ok(None) => "next: no change".into(),
-                    Err(e) => format!("next error: {e}"),
-                };
+            match tokio::task::block_in_place(|| rt.block_on(app.ctx.advance_next_manual())) {
+                Ok(Some(p)) => {
+                    app.set_message(style::StatusKind::Success, format!("next: {}", p.display()))
+                }
+                Ok(None) => app.set_message(style::StatusKind::Neutral, "next: no change"),
+                Err(e) => app.set_message(style::StatusKind::Error, format!("next error: {e}")),
+            }
             return Ok(UpdateEffect::Reload);
         }
         UiAction::Prev => {
-            app.message = match app.ctx.advance_prev() {
-                Ok(Some(p)) => format!("prev: {}", p.display()),
-                Ok(None) => "prev: none".into(),
-                Err(e) => format!("prev error: {e}"),
-            };
+            match app.ctx.advance_prev() {
+                Ok(Some(p)) => {
+                    app.set_message(style::StatusKind::Success, format!("prev: {}", p.display()))
+                }
+                Ok(None) => app.set_message(style::StatusKind::Neutral, "prev: none"),
+                Err(e) => app.set_message(style::StatusKind::Error, format!("prev error: {e}")),
+            }
             return Ok(UpdateEffect::Reload);
         }
         UiAction::Favorite => match app.favorite_current() {
             Ok(msg) => {
-                app.message = msg;
+                app.set_message(style::StatusKind::Success, msg);
                 return Ok(UpdateEffect::Reload);
             }
-            Err(e) => app.message = format!("favorite error: {e}"),
+            Err(e) => app.set_message(style::StatusKind::Error, format!("favorite error: {e}")),
         },
         UiAction::Trash => match app.trash_current() {
             Ok(msg) => {
-                app.message = msg;
+                app.set_message(style::StatusKind::Success, msg);
                 return Ok(UpdateEffect::Reload);
             }
-            Err(e) => app.message = format!("trash error: {e}"),
+            Err(e) => app.set_message(style::StatusKind::Error, format!("trash error: {e}")),
         },
         UiAction::NukeDownloadsRequest => {
             let prompt = app.nuke_downloads_prompt();
             if prompt.contains("Shift+X confirm") {
                 app.pending_nuke_confirm = true;
             }
-            app.message = prompt;
+            app.set_message(style::StatusKind::Warning, prompt);
         }
         UiAction::NukeDownloadsConfirm => match app.nuke_downloads() {
             Ok(msg) => {
                 app.pending_nuke_confirm = false;
-                app.message = msg;
+                app.set_message(style::StatusKind::Success, msg);
                 return Ok(UpdateEffect::Reload);
             }
             Err(e) => {
                 app.pending_nuke_confirm = false;
-                app.message = format!("nuke error: {e}");
+                app.set_message(style::StatusKind::Error, format!("nuke error: {e}"));
             }
         },
         UiAction::CancelNuke => {
             app.pending_nuke_confirm = false;
-            app.message = "nuke cancelled".into();
+            app.set_message(style::StatusKind::Neutral, "nuke cancelled");
         }
         UiAction::TogglePause => match app.ctx.toggle_pause() {
-            Ok(()) => app.message = format!("paused: {}", app.ctx.state.paused),
-            Err(e) => app.message = format!("pause error: {e}"),
+            Ok(()) => app.set_message(
+                style::StatusKind::Success,
+                format!("paused: {}", app.ctx.state.paused),
+            ),
+            Err(e) => app.set_message(style::StatusKind::Error, format!("pause error: {e}")),
         },
         UiAction::ToggleConfigValue => match app.toggle_focused_config_value() {
             Ok(Some(msg)) => {
-                app.message = msg;
+                app.set_message(style::StatusKind::Success, msg);
                 return Ok(UpdateEffect::Reload);
             }
-            Ok(None) => app.message = "config: no toggle for focused block".into(),
-            Err(e) => app.message = format!("config save error: {e}"),
+            Ok(None) => app.set_message(
+                style::StatusKind::Warning,
+                "config: no toggle for focused block",
+            ),
+            Err(e) => app.set_message(style::StatusKind::Error, format!("config save error: {e}")),
         },
         UiAction::CycleConfigValue => match app.cycle_focused_config_value() {
             Ok(Some(msg)) => {
-                app.message = msg;
+                app.set_message(style::StatusKind::Success, msg);
                 return Ok(UpdateEffect::Reload);
             }
-            Ok(None) => app.message = "config: no cycle for focused block".into(),
-            Err(e) => app.message = format!("config save error: {e}"),
+            Ok(None) => app.set_message(
+                style::StatusKind::Warning,
+                "config: no cycle for focused block",
+            ),
+            Err(e) => app.set_message(style::StatusKind::Error, format!("config save error: {e}")),
         },
         UiAction::EditConfigItem => {
             app.start_edit_for_current();
@@ -563,7 +578,10 @@ fn handle_enter(app: &mut App, rt: &tokio::runtime::Handle) -> anyhow::Result<Up
     match app.tab {
         Tab::History => {
             if let Some(path) = app.apply_history_selection() {
-                app.message = format!("applied: {}", path.display());
+                app.set_message(
+                    style::StatusKind::Success,
+                    format!("applied: {}", path.display()),
+                );
                 return Ok(UpdateEffect::Reload);
             }
         }
@@ -571,7 +589,7 @@ fn handle_enter(app: &mut App, rt: &tokio::runtime::Handle) -> anyhow::Result<Up
             if let Some(msg) =
                 tokio::task::block_in_place(|| rt.block_on(app.apply_browse_selection()))?
             {
-                app.message = msg;
+                app.set_message(style::StatusKind::Success, msg);
                 return Ok(UpdateEffect::Reload);
             }
         }
@@ -581,7 +599,7 @@ fn handle_enter(app: &mut App, rt: &tokio::runtime::Handle) -> anyhow::Result<Up
             } else if let Some(msg) =
                 tokio::task::block_in_place(|| rt.block_on(app.apply_search_selection()))?
             {
-                app.message = msg;
+                app.set_message(style::StatusKind::Success, msg);
                 return Ok(UpdateEffect::Reload);
             }
         }
@@ -914,7 +932,11 @@ fn footer_paragraph(app: &App, width: u16, theme: style::Theme) -> Paragraph<'_>
         app.ctx.state.cache_queue.len(),
         app.ctx.state.history.len()
     );
-    let status_kind = style::status_kind(&status);
+    let status_kind = if app.message.is_empty() {
+        style::StatusKind::Neutral
+    } else {
+        app.message_kind
+    };
 
     Paragraph::new(vec![
         Line::from(vec![
@@ -977,13 +999,7 @@ fn line_style(line: &str, theme: style::Theme) -> Style {
         // Validation errors ... red/bold inline.
         return theme.status(style::StatusKind::Error);
     }
-    // Default to normal (main fg) for content lines so the edit form "pops" with readable text.
-    // Combined with selected row highlight, accent headers, alignment, and Unicode, it feels more modern.
-    let kind = style::status_kind(line);
-    if kind == style::StatusKind::Neutral {
-        return theme.normal();
-    }
-    theme.status(kind)
+    theme.normal()
 }
 
 fn config_lines(app: &App) -> Vec<String> {
@@ -1546,12 +1562,13 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
     use ratatui::layout::Rect;
+    use ratatui::prelude::Style;
     use ratatui::Terminal;
     use walls_core::WallsCtx;
 
     use super::{
-        action_for_key, app::App, apply_effect, draw_inner, handle_key, style, update, InputMode,
-        Tab, TerminalSize, UiAction, UpdateEffect,
+        action_for_key, app::App, apply_effect, draw_inner, footer_paragraph, handle_key,
+        line_style, style, update, InputMode, Tab, TerminalSize, UiAction, UpdateEffect,
     };
 
     fn test_app() -> App {
@@ -1687,6 +1704,31 @@ mod tests {
             text.push('\n');
         }
         text
+    }
+
+    fn rendered_footer_status_style(app: &App) -> Style {
+        let theme = style::Theme::new(app.color_mode);
+        let backend = TestBackend::new(80, 4);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| {
+                let footer = footer_paragraph(app, 80, theme);
+                frame.render_widget(footer, frame.area());
+            })
+            .expect("draw footer");
+
+        let mode_len = match app.input_mode {
+            InputMode::Normal => "normal ".len(),
+            InputMode::Command => "command ".len(),
+            InputMode::SearchInput => "search ".len(),
+        };
+        terminal.backend().buffer()[(1 + mode_len as u16, 1)].style()
+    }
+
+    fn assert_same_status_role(actual: Style, expected: Style) {
+        assert_eq!(actual.fg, expected.fg);
+        assert_eq!(actual.add_modifier, expected.add_modifier);
+        assert_eq!(actual.sub_modifier, expected.sub_modifier);
     }
 
     #[test]
@@ -2249,7 +2291,7 @@ mod tests {
         let mut app = test_app();
         app.input_mode = InputMode::Command;
         app.cmd_line = "next".into();
-        app.message = "applied: /tmp/wall.jpg".into();
+        app.set_message(style::StatusKind::Success, "applied: /tmp/wall.jpg");
 
         let text = render_text(&app, 80, 12);
 
@@ -2319,20 +2361,50 @@ mod tests {
     }
 
     #[test]
-    fn status_kind_maps_messages_to_redundant_state_roles() {
+    fn footer_status_uses_explicit_role_not_message_text() {
+        let mut app = test_app();
+        let theme = style::Theme::new(app.color_mode);
+
+        app.set_message(
+            style::StatusKind::Neutral,
+            "search: disabled missing unsupported",
+        );
+        assert_same_status_role(
+            rendered_footer_status_style(&app),
+            theme.status(style::StatusKind::Neutral),
+        );
+
+        app.set_message(style::StatusKind::Success, "completed without magic words");
+        assert_same_status_role(
+            rendered_footer_status_style(&app),
+            theme.status(style::StatusKind::Success),
+        );
+
+        app.set_message(style::StatusKind::Warning, "confirm before continuing");
+        assert_same_status_role(
+            rendered_footer_status_style(&app),
+            theme.status(style::StatusKind::Warning),
+        );
+
+        app.set_message(style::StatusKind::Error, "operation did not complete");
+        assert_same_status_role(
+            rendered_footer_status_style(&app),
+            theme.status(style::StatusKind::Error),
+        );
+    }
+
+    #[test]
+    fn content_lines_do_not_get_status_style_from_data_words() {
+        let theme = style::Theme::new(style::ColorMode::Auto);
+
         assert_eq!(
-            style::status_kind("applied: /tmp/a.jpg"),
-            style::StatusKind::Success
+            line_style("source disabled missing search: unsupported", theme),
+            theme.normal()
         );
         assert_eq!(
-            style::status_kind("preview unsupported; showing metadata"),
-            style::StatusKind::Error
+            line_style("!! source disabled missing search: unsupported", theme),
+            theme.status(style::StatusKind::Error)
         );
-        assert_eq!(
-            style::status_kind("preview disabled; showing metadata"),
-            style::StatusKind::Warning
-        );
-        assert_eq!(style::status_kind("ready"), style::StatusKind::Neutral);
     }
 
     #[test]
