@@ -1,6 +1,8 @@
 use std::path::Path;
 use std::process::Command;
 
+use anyhow::Context;
+
 pub fn spawn_tui(walls: &Path) -> anyhow::Result<()> {
     let override_cmd = std::env::var("WALLS_TUI_CMD").ok();
     let terminal = std::env::var("TERMINAL").ok();
@@ -11,7 +13,10 @@ pub fn spawn_tui(walls: &Path) -> anyhow::Result<()> {
         terminal.as_deref(),
         xdg_terminal_exec.as_deref(),
     )?;
-    Command::new(&command.program).args(&command.args).spawn()?;
+    Command::new(&command.program)
+        .args(&command.args)
+        .spawn()
+        .with_context(|| command.recovery_context())?;
     Ok(())
 }
 
@@ -19,6 +24,24 @@ pub fn spawn_tui(walls: &Path) -> anyhow::Result<()> {
 pub(crate) struct TuiCommand {
     program: String,
     args: Vec<String>,
+    source: &'static str,
+}
+
+impl TuiCommand {
+    fn recovery_context(&self) -> String {
+        format!(
+            "failed to launch TUI via {}: {}",
+            self.source,
+            self.display_command()
+        )
+    }
+
+    fn display_command(&self) -> String {
+        std::iter::once(self.program.as_str())
+            .chain(self.args.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
 }
 
 pub(crate) fn tui_command(
@@ -34,6 +57,7 @@ pub(crate) fn tui_command(
                 "-c".into(),
                 cmd.replace("{walls}", &walls.display().to_string()),
             ],
+            source: "WALLS_TUI_CMD",
         });
     }
 
@@ -45,6 +69,7 @@ pub(crate) fn tui_command(
         return Ok(TuiCommand {
             program: xdg_terminal_exec.into(),
             args: vec!["--app-id=walls".into(), walls_str.into(), "tui".into()],
+            source: "xdg-terminal-exec",
         });
     }
 
@@ -58,17 +83,20 @@ pub(crate) fn tui_command(
                     walls_str.into(),
                     "tui".into(),
                 ],
+                source: "TERMINAL",
             });
         }
         return Ok(TuiCommand {
             program: terminal.into(),
             args: vec!["-e".into(), walls_str.into(), "tui".into()],
+            source: "TERMINAL",
         });
     }
 
     Ok(TuiCommand {
         program: "alacritty".into(),
         args: vec!["-e".into(), walls_str.into(), "tui".into()],
+        source: "alacritty fallback",
     })
 }
 
@@ -107,6 +135,7 @@ mod tests {
             command.args,
             vec!["-c", "kitty -- /opt/walls/bin/walls tui"]
         );
+        assert_eq!(command.source, "WALLS_TUI_CMD");
     }
 
     #[test]
@@ -124,6 +153,7 @@ mod tests {
             command.args,
             vec!["--app-id=walls", "/opt/walls/bin/walls", "tui"]
         );
+        assert_eq!(command.source, "xdg-terminal-exec");
     }
 
     #[test]
@@ -133,6 +163,7 @@ mod tests {
 
         assert_eq!(command.program, "foot");
         assert_eq!(command.args, vec!["-e", "/opt/walls/bin/walls", "tui"]);
+        assert_eq!(command.source, "TERMINAL");
     }
 
     #[test]
@@ -150,6 +181,7 @@ mod tests {
             command.args,
             vec!["--class=walls", "-e", "/opt/walls/bin/walls", "tui"]
         );
+        assert_eq!(command.source, "TERMINAL");
     }
 
     #[test]
@@ -167,6 +199,7 @@ mod tests {
             command.args,
             vec!["--app-id=walls", "/opt/walls/bin/walls", "tui"]
         );
+        assert_eq!(command.source, "xdg-terminal-exec");
     }
 
     #[test]
@@ -175,5 +208,25 @@ mod tests {
 
         assert_eq!(command.program, "alacritty");
         assert_eq!(command.args, vec!["-e", "/opt/walls/bin/walls", "tui"]);
+        assert_eq!(command.source, "alacritty fallback");
+    }
+
+    #[test]
+    fn tui_command_recovery_context_names_source_and_command() {
+        let command = tui_command(
+            Path::new("/opt/walls/bin/walls"),
+            None,
+            Some("/usr/bin/ghostty"),
+            None,
+        )
+        .unwrap();
+
+        let context = command.recovery_context();
+
+        assert!(context.contains("via TERMINAL"), "{context}");
+        assert!(
+            context.contains("/usr/bin/ghostty --class=walls -e /opt/walls/bin/walls tui"),
+            "{context}"
+        );
     }
 }
