@@ -15,6 +15,7 @@ use walls_core::validate::{
 use walls_core::WallsCtx;
 
 use super::command::{self, ParsedCommand};
+use super::history_browse_view;
 use super::style::{self, ColorMode, StateKind, StatusKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1064,45 +1065,15 @@ impl App {
     }
 
     pub fn history_lines(&self) -> Vec<String> {
-        let lines: Vec<String> = self
-            .ctx
-            .state
-            .history
-            .iter()
-            .enumerate()
-            .map(|(i, h)| {
-                let mark = if i == self.cursor { ">" } else { " " };
-                format!("{mark} {h}")
-            })
-            .collect();
-        if lines.is_empty() {
-            vec![style::state_text(
-                StateKind::Empty,
-                "no wallpaper history captured yet",
-            )]
-        } else {
-            lines
-        }
+        history_browse_view::history_lines(&self.ctx.state.history, self.cursor)
     }
 
     pub fn selected_history_preview_path(&self) -> Option<PathBuf> {
-        self.ctx
-            .state
-            .history
-            .get(self.cursor)
-            .map(PathBuf::from)
-            .filter(|path| path.is_file())
+        history_browse_view::selected_history_preview_path(&self.ctx.state.history, self.cursor)
     }
 
     pub fn browse_lines(&self) -> Vec<String> {
-        self.browse_items()
-            .into_iter()
-            .enumerate()
-            .map(|(i, line)| {
-                let mark = if i == self.cursor { ">" } else { " " };
-                format!("{mark} {line}")
-            })
-            .collect()
+        history_browse_view::browse_lines(self.browse_items(), self.cursor)
     }
 
     pub fn search_lines(&self) -> Vec<String> {
@@ -1148,60 +1119,19 @@ impl App {
     }
 
     pub fn browse_items(&self) -> Vec<String> {
-        let mut items = Vec::new();
-        items.push("-- cache queue --".into());
-        if self.ctx.state.cache_queue.is_empty() {
-            items.push(style::state_text(StateKind::Empty, "queue is empty"));
-        } else {
-            for id in &self.ctx.state.cache_queue {
-                items.push(format!("queue: {id}"));
-            }
-        }
-        items.push("-- local folders --".into());
-        if self.local_candidates.is_empty() {
-            items.push(style::state_text(
-                StateKind::Empty,
-                "no local candidates found",
-            ));
-        } else {
-            for path in &self.local_candidates {
-                items.push(format!("local: {}", path.display()));
-            }
-        }
-        items.push("-- history --".into());
-        if self.ctx.state.history.is_empty() {
-            items.push(style::state_text(
-                StateKind::Empty,
-                "no wallpaper history captured yet",
-            ));
-        } else {
-            for h in &self.ctx.state.history {
-                items.push(format!("history: {h}"));
-            }
-        }
-        items
+        history_browse_view::browse_items(
+            &self.ctx.state.cache_queue,
+            &self.local_candidates,
+            &self.ctx.state.history,
+        )
     }
 
     pub fn selected_browse_preview_path(&self) -> Option<PathBuf> {
-        let items = self.browse_items();
-        let line = items.get(self.cursor)?;
-        Self::browse_preview_path_for_line(line, &self.ctx.paths.cache_dir)
-    }
-
-    fn browse_preview_path_for_line(line: &str, cache_dir: &std::path::Path) -> Option<PathBuf> {
-        if let Some(path) = line
-            .strip_prefix("local: ")
-            .or_else(|| line.strip_prefix("history: "))
-        {
-            let path = PathBuf::from(path);
-            return path.is_file().then_some(path);
-        }
-
-        let id = line.strip_prefix("queue: ")?;
-        if let Some(photo_id) = walls_core::unsplash::queue_photo_id(id) {
-            return walls_core::unsplash::cached_photo_path(cache_dir, photo_id);
-        }
-        walls_core::wallhaven::cached_wallpaper_path(cache_dir, id)
+        history_browse_view::selected_browse_preview_path(
+            self.browse_items(),
+            self.cursor,
+            &self.ctx.paths.cache_dir,
+        )
     }
 
     pub fn apply_history_selection(&mut self) -> Option<PathBuf> {
