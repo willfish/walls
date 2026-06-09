@@ -4,6 +4,7 @@ mod bin;
 pub mod icon;
 pub mod lock;
 pub mod platform;
+mod preview_prewarm;
 mod rotation;
 pub mod sni;
 mod state_watch;

@@ -7,6 +7,7 @@ use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 
 use crate::actions::{dispatch, menu_actions, tooltip_with_feedback, ActionFeedback, MenuAction};
 use crate::icon;
+use crate::preview_prewarm::PreviewPrewarmer;
 use crate::resolve_walls_bin;
 use crate::rotation::RotationLoop;
 use crate::state_watch::StateWatcher;
@@ -35,6 +36,7 @@ fn run_loop() -> anyhow::Result<()> {
 
     let menu_channel = MenuEvent::receiver();
     let mut watcher = StateWatcher::new().ok();
+    let mut preview_prewarm = PreviewPrewarmer::new().ok();
     let mut rotation = RotationLoop::new();
     let mut last_poll = std::time::Instant::now();
     const POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -43,6 +45,9 @@ fn run_loop() -> anyhow::Result<()> {
         if last_poll.elapsed() >= POLL_INTERVAL {
             last_poll = std::time::Instant::now();
             rotation.poll();
+            if let Some(prewarm) = preview_prewarm.as_mut() {
+                prewarm.poll();
+            }
             if watcher.as_mut().is_some_and(|watcher| watcher.poll()) {
                 refresh_tray(&tray, None, &mut action_items);
             }
