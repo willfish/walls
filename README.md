@@ -167,6 +167,7 @@ After [install](#install):
 
 ```bash
 walls apply ~/Pictures/wallpaper.jpg
+walls doctor       # first-run readiness check
 walls next
 walls status
 walls tui          # or: walls (no args, on a TTY)
@@ -179,6 +180,7 @@ walls-tray         # tray menu → walls prev/next/toggle-pause
 |---------|--------|
 | `walls apply <path>` | Works |
 | `walls status [--json]` | Works |
+| `walls doctor [--json]` | Check first-run readiness across config, desktop/apply, tray, providers, storage/cache, and TUI preview; exits non-zero when required checks fail |
 | `walls current [--json] [--meta]` | Works (`--meta` is the legacy metadata-only JSON shape; prefer `--json` for scripts) |
 | `walls favorite` | Works |
 | `walls fetch <paths...> [--move]` | Works |
@@ -224,6 +226,16 @@ Configure rotation in `config.json`:
 Optional legacy `systemd/` units remain for headless setups without a tray host; prefer the tray scheduler when a graphical session is available.
 
 See `docs/home-manager.example.nix` for a home-manager sketch.
+
+## First-run checks
+
+Run `walls doctor` after installing or editing `config.json`. It groups readiness
+checks by user journey and prints concrete fixes for failed or degraded checks,
+such as `walls config sync`, missing provider credentials in `secrets.json`,
+missing wallpaper backend commands, cache quota pressure, tray/autostart gaps, or
+`WALLS_TUI_PREVIEW=0` when image preview is not wanted. Use
+`walls doctor --json` for stable check IDs, sections, severities, statuses,
+messages, and remediation text in scripts.
 
 ## CLI output contract
 
