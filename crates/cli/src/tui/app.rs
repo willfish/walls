@@ -4,8 +4,8 @@ use walls_core::apply::ApplyTrigger;
 use walls_core::config::{
     normalize_source_entry, persist_config, reddit_sort_needs_time, reddit_sort_value,
     reddit_time_value, source_editable_fields as core_source_editable_fields, Config,
-    SelectionStrategy, SourceEntry, TuiKeyProfile, WallhavenPrefer, REDDIT_SORT_CHOICES,
-    REDDIT_TIME_CHOICES,
+    SelectionStrategy, SourceEntry, TuiKeyProfile, WallhavenPrefer, WallhavenSearch,
+    REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
 };
 use walls_core::expand_home;
 use walls_core::sources::list_images_with_paths;
@@ -78,6 +78,7 @@ pub enum EditTarget {
     Block(usize),
     Source(usize),
     Wallhaven,
+    SearchFilters,
 }
 
 /// Internal block index for shared Wallhaven field metadata helpers.
@@ -124,6 +125,18 @@ pub(crate) const ROTATION_BLOCK_FIELDS: &[&str] = &[
 pub(crate) const WALLHAVEN_BLOCK_FIELDS: &[&str] = &[
     "enabled",
     "prefer",
+    "search_q",
+    "category_general",
+    "category_anime",
+    "category_people",
+    "purity_sfw",
+    "purity_sketchy",
+    "purity_nsfw",
+    "sorting",
+    "order",
+    "atleast",
+];
+pub(crate) const SEARCH_FILTER_FIELDS: &[&str] = &[
     "search_q",
     "category_general",
     "category_anime",
@@ -232,6 +245,15 @@ fn wallhaven_block_draft(
         "prefer".into(),
         wallhaven_prefer_label(config.wallhaven.prefer),
     );
+    vals.extend(wallhaven_search_draft(search, api_key_present));
+    vals
+}
+
+fn wallhaven_search_draft(
+    search: &WallhavenSearch,
+    api_key_present: bool,
+) -> std::collections::HashMap<String, String> {
+    let mut vals = std::collections::HashMap::new();
     vals.insert("search_q".into(), search.q.clone());
     vals.insert(
         "category_general".into(),
@@ -553,6 +575,32 @@ fn block_field_value_at(
     }
 }
 
+fn search_filter_field_value_at(
+    search: &WallhavenSearch,
+    draft: &std::collections::HashMap<String, String>,
+    idx: usize,
+) -> String {
+    let Some(key) = SEARCH_FILTER_FIELDS.get(idx) else {
+        return String::new();
+    };
+    if let Some(v) = draft.get(*key) {
+        return v.clone();
+    }
+    match *key {
+        "search_q" => search.q.clone(),
+        "category_general" => wallhaven_bit_at(&search.categories, 0, true).to_string(),
+        "category_anime" => wallhaven_bit_at(&search.categories, 1, false).to_string(),
+        "category_people" => wallhaven_bit_at(&search.categories, 2, false).to_string(),
+        "purity_sfw" => wallhaven_bit_at(&search.purity, 0, true).to_string(),
+        "purity_sketchy" => wallhaven_bit_at(&search.purity, 1, false).to_string(),
+        "purity_nsfw" => wallhaven_bit_at(&search.purity, 2, false).to_string(),
+        "sorting" => search.sorting.clone(),
+        "order" => search.order.clone(),
+        "atleast" => search.atleast.clone(),
+        _ => String::new(),
+    }
+}
+
 fn commit_block_field_buffer(
     block: usize,
     field_idx: usize,
@@ -687,61 +735,56 @@ fn apply_wallhaven_block_draft(
             config.wallhaven.prefer = prefer;
         }
     }
+    apply_wallhaven_search_draft(&mut config.wallhaven.search, draft, api_key_present);
+}
+
+fn apply_wallhaven_search_draft(
+    search: &mut WallhavenSearch,
+    draft: &std::collections::HashMap<String, String>,
+    api_key_present: bool,
+) {
     if let Some(v) = draft.get("search_q") {
-        config.wallhaven.search.q = v.clone();
+        search.q = v.clone();
     }
     let category_general = draft
         .get("category_general")
         .and_then(|v| App::parse_bool_like(v))
-        .unwrap_or(wallhaven_bit_at(
-            &config.wallhaven.search.categories,
-            0,
-            true,
-        ));
+        .unwrap_or(wallhaven_bit_at(&search.categories, 0, true));
     let category_anime = draft
         .get("category_anime")
         .and_then(|v| App::parse_bool_like(v))
-        .unwrap_or(wallhaven_bit_at(
-            &config.wallhaven.search.categories,
-            1,
-            false,
-        ));
+        .unwrap_or(wallhaven_bit_at(&search.categories, 1, false));
     let category_people = draft
         .get("category_people")
         .and_then(|v| App::parse_bool_like(v))
-        .unwrap_or(wallhaven_bit_at(
-            &config.wallhaven.search.categories,
-            2,
-            false,
-        ));
-    config.wallhaven.search.categories =
+        .unwrap_or(wallhaven_bit_at(&search.categories, 2, false));
+    search.categories =
         wallhaven_bits_from_bools(category_general, category_anime, category_people);
 
     let purity_sfw = draft
         .get("purity_sfw")
         .and_then(|v| App::parse_bool_like(v))
-        .unwrap_or(wallhaven_bit_at(&config.wallhaven.search.purity, 0, true));
+        .unwrap_or(wallhaven_bit_at(&search.purity, 0, true));
     let purity_sketchy = draft
         .get("purity_sketchy")
         .and_then(|v| App::parse_bool_like(v))
-        .unwrap_or(wallhaven_bit_at(&config.wallhaven.search.purity, 1, false));
+        .unwrap_or(wallhaven_bit_at(&search.purity, 1, false));
     let mut purity_nsfw = draft
         .get("purity_nsfw")
         .and_then(|v| App::parse_bool_like(v))
-        .unwrap_or(wallhaven_bit_at(&config.wallhaven.search.purity, 2, false));
+        .unwrap_or(wallhaven_bit_at(&search.purity, 2, false));
     if !api_key_present {
         purity_nsfw = false;
     }
-    config.wallhaven.search.purity =
-        wallhaven_bits_from_bools(purity_sfw, purity_sketchy, purity_nsfw);
+    search.purity = wallhaven_bits_from_bools(purity_sfw, purity_sketchy, purity_nsfw);
     if let Some(v) = draft.get("sorting") {
-        config.wallhaven.search.sorting = v.clone();
+        search.sorting = v.clone();
     }
     if let Some(v) = draft.get("order") {
-        config.wallhaven.search.order = v.clone();
+        search.order = v.clone();
     }
     if let Some(v) = draft.get("atleast") {
-        config.wallhaven.search.atleast = v.clone();
+        search.atleast = v.clone();
     }
 }
 
@@ -801,6 +844,7 @@ pub struct App {
     pub editing: Option<EditSession>,
     pub cmd_line: String,
     pub search_query: String,
+    pub search_filters: WallhavenSearch,
     pub search_results: Vec<SearchHit>,
     pub(crate) local_candidates: Vec<PathBuf>,
     pub(crate) local_source_summaries: Vec<LocalSourceSummary>,
@@ -818,6 +862,7 @@ impl App {
 
     pub fn new(ctx: WallsCtx) -> anyhow::Result<Self> {
         let search_query = ctx.config.wallhaven.search.q.clone();
+        let search_filters = ctx.config.wallhaven.search.clone();
         let wallhaven_summary = summarize_wallhaven_provider(&ctx);
         let config_warnings = summarize_config_warnings(&ctx);
         let mut app = Self {
@@ -835,6 +880,7 @@ impl App {
             editing: None,
             cmd_line: String::new(),
             search_query,
+            search_filters,
             search_results: Vec::new(),
             local_candidates: Vec::new(),
             local_source_summaries: Vec::new(),
@@ -1084,12 +1130,13 @@ impl App {
             format!("provider: Wallhaven | query: {}", self.search_query),
             format!(
                 "filters: purity {} | categories {} | sorting {} {} | minimum {}",
-                self.wallhaven_summary.purity,
-                self.wallhaven_summary.categories,
-                self.wallhaven_summary.sorting,
-                self.wallhaven_summary.order,
-                self.wallhaven_summary.atleast
+                self.search_filters.purity,
+                self.search_filters.categories,
+                self.search_filters.sorting,
+                self.search_filters.order,
+                self.search_filters.atleast
             ),
+            "edit: / or i query | e filters".into(),
         ];
         if self.search_results.is_empty() {
             lines.push(style::state_text(
@@ -1175,7 +1222,7 @@ impl App {
             walls_core::wallhaven::api_base(),
             &self.ctx.secrets.wallhaven_api_key,
         )?;
-        let mut params = self.ctx.config.wallhaven.search.clone();
+        let mut params = self.search_filters.clone();
         params.q = self.search_query.clone();
         let resp = client.search(&params, 1).await?;
         self.search_results = resp
@@ -1419,6 +1466,18 @@ impl App {
         self.clear_message();
     }
 
+    pub fn start_search_filter_edit(&mut self) {
+        self.tab = Tab::Search;
+        self.input_mode = InputMode::Normal;
+        self.config_in_subnav = false;
+        self.editing = self.edit_session_for_target(EditTarget::SearchFilters);
+        let new_buf = self.current_edit_field_value();
+        if let Some(s) = &mut self.editing {
+            s.field_buffer = new_buf;
+        }
+        self.clear_message();
+    }
+
     fn selected_sources_subnav_edit_target(&self) -> Option<EditTarget> {
         let idx = self.config_sub_cursor;
         if self.is_wallhaven_subnav_index(idx) {
@@ -1496,6 +1555,17 @@ impl App {
                 field_buffer: String::new(),
                 validation_errors: vec![],
             }),
+            EditTarget::SearchFilters => Some(EditSession {
+                target: target.clone(),
+                draft_source: None,
+                draft_block_values: wallhaven_search_draft(
+                    &self.search_filters,
+                    wallhaven_api_key_present(&self.ctx.secrets),
+                ),
+                field_cursor: 0,
+                field_buffer: String::new(),
+                validation_errors: vec![],
+            }),
             _ => None,
         }
     }
@@ -1528,6 +1598,7 @@ impl App {
             EditTarget::Block(4) => TUI_BLOCK_FIELDS.len(),
             EditTarget::Block(_) => 0,
             EditTarget::Wallhaven => WALLHAVEN_BLOCK_FIELDS.len(),
+            EditTarget::SearchFilters => SEARCH_FILTER_FIELDS.len(),
             _ => 0,
         }
     }
@@ -1569,6 +1640,13 @@ impl App {
                     EditFieldKind::Text
                 }
             }
+            EditTarget::SearchFilters => {
+                if let Some(key) = SEARCH_FILTER_FIELDS.get(sess.field_cursor) {
+                    block_field_kind(WALLHAVEN_FIELDS_BLOCK, key)
+                } else {
+                    EditFieldKind::Text
+                }
+            }
             _ => EditFieldKind::Text,
         }
     }
@@ -1581,8 +1659,13 @@ impl App {
         let Some(sess) = &self.editing else {
             return false;
         };
-        if let EditTarget::Wallhaven = &sess.target {
+        if matches!(&sess.target, EditTarget::Wallhaven) {
             if let Some(key) = WALLHAVEN_BLOCK_FIELDS.get(sess.field_cursor) {
+                return self.wallhaven_block_field_locked(key);
+            }
+        }
+        if matches!(&sess.target, EditTarget::SearchFilters) {
+            if let Some(key) = SEARCH_FILTER_FIELDS.get(sess.field_cursor) {
                 return self.wallhaven_block_field_locked(key);
             }
         }
@@ -1800,6 +1883,14 @@ impl App {
                     .unwrap_or_default();
                 block_field_value_at(&self.ctx.config, WALLHAVEN_FIELDS_BLOCK, &draft, idx)
             }
+            EditTarget::SearchFilters => {
+                let draft = self
+                    .editing
+                    .as_ref()
+                    .map(|sess| sess.draft_block_values.clone())
+                    .unwrap_or_default();
+                search_filter_field_value_at(&self.search_filters, &draft, idx)
+            }
             _ => String::new(),
         }
     }
@@ -1834,6 +1925,11 @@ impl App {
                     &sess.draft_block_values,
                     idx,
                 ),
+                EditTarget::SearchFilters => search_filter_field_value_at(
+                    &self.search_filters,
+                    &sess.draft_block_values,
+                    idx,
+                ),
                 _ => String::new(),
             }
         } else {
@@ -1853,7 +1949,9 @@ impl App {
     ) -> Vec<String> {
         match target {
             EditTarget::Source(i) => validate_source_edit(*i, config, secrets, paths),
-            EditTarget::Wallhaven => validate_wallhaven_edit(config, secrets),
+            EditTarget::Wallhaven | EditTarget::SearchFilters => {
+                validate_wallhaven_edit(config, secrets)
+            }
             EditTarget::Block(2) => validate_config_diagnostics(config, secrets, paths)
                 .into_iter()
                 .filter(|diagnostic| diagnostic.path.starts_with("quota."))
@@ -1909,6 +2007,13 @@ impl App {
                 EditTarget::Wallhaven => {
                     apply_wallhaven_block_draft(
                         &mut temp,
+                        &sess.draft_block_values,
+                        wallhaven_api_key_present(&self.ctx.secrets),
+                    );
+                }
+                EditTarget::SearchFilters => {
+                    apply_wallhaven_search_draft(
+                        &mut temp.wallhaven.search,
                         &sess.draft_block_values,
                         wallhaven_api_key_present(&self.ctx.secrets),
                     );
@@ -1978,6 +2083,12 @@ impl App {
                         &mut sess.draft_block_values,
                     );
                 }
+                EditTarget::SearchFilters => {
+                    if let Some(key) = SEARCH_FILTER_FIELDS.get(field_idx) {
+                        sess.draft_block_values
+                            .insert((*key).into(), buf.trim().to_string());
+                    }
+                }
                 _ => {}
             }
             self.refresh_edit_validation();
@@ -2037,6 +2148,39 @@ impl App {
                     wallhaven_api_key_present(&self.ctx.secrets),
                 );
                 success_msg = "config saved: wallhaven".into();
+            }
+            EditTarget::SearchFilters => {
+                let mut search = self.search_filters.clone();
+                apply_wallhaven_search_draft(
+                    &mut search,
+                    &sess.draft_block_values,
+                    wallhaven_api_key_present(&self.ctx.secrets),
+                );
+                let mut temp = config.clone();
+                temp.wallhaven.search = search.clone();
+                let issues = Self::validation_issues_for_edit(
+                    &sess.target,
+                    &temp,
+                    &self.ctx.secrets,
+                    &self.ctx.paths,
+                );
+                if !issues.is_empty() {
+                    if let Some(s) = &mut self.editing {
+                        s.validation_errors = issues.clone();
+                    }
+                    self.set_message(
+                        StatusKind::Error,
+                        format!("search filters invalid: {}", issues.join("; ")),
+                    );
+                    return Ok(());
+                }
+                self.search_query = search.q.clone();
+                self.search_filters = search;
+                self.set_message(StatusKind::Success, "search filters updated");
+                if exit_on_success {
+                    self.editing = None;
+                }
+                return Ok(());
             }
             _ => {}
         }
@@ -2169,7 +2313,7 @@ impl App {
                         "Enter apply"
                     };
                     format!(
-                        "{} | / or i edit query | {enter_hint} | j/k Pg Home/End | : cmd | ? help",
+                        "{} | / or i query | e filters | {enter_hint} | j/k Pg Home/End | : cmd | ? help",
                         Self::NORMAL_TAB_NAV_HINT
                     )
                 }
@@ -2233,7 +2377,7 @@ impl App {
                         } else {
                             "Enter apply"
                         };
-                        format!("{nav} /i {enter_hint} j/k :?q")
+                        format!("{nav} /i e {enter_hint} j/k :?q")
                     }
                     Tab::Config
                         if self.config_in_subnav
