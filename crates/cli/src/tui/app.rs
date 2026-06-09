@@ -16,6 +16,7 @@ use walls_core::WallsCtx;
 
 use super::command::{self, ParsedCommand};
 use super::history_browse_view;
+use super::logs_view;
 use super::style::{self, ColorMode, StateKind, StatusKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1106,28 +1107,7 @@ impl App {
 
     pub fn logs_lines(&self, width: u16, height: u16) -> Vec<String> {
         let logs = super::LOG_BUFFER.lock().unwrap();
-        if logs.is_empty() {
-            return vec![style::state_text(StateKind::Empty, "no logs captured yet")];
-        }
-        let wrap_width = usize::from(width).saturating_sub(4);
-        let mut lines = Vec::new();
-        let mut selected_row = 0;
-        for (i, line) in logs.iter().rev().enumerate() {
-            let selected = i == self.logs_cursor;
-            let mark = if selected { ">" } else { " " };
-            let wrapped = wrap_log_text(line, wrap_width);
-            for (j, segment) in wrapped.into_iter().enumerate() {
-                if j == 0 {
-                    if selected {
-                        selected_row = lines.len();
-                    }
-                    lines.push(format!("{mark} {segment}"));
-                } else {
-                    lines.push(format!("  {segment}"));
-                }
-            }
-        }
-        crop_lines_around_selection(lines, selected_row, height)
+        logs_view::lines(&logs, self.logs_cursor, width, height)
     }
 
     pub fn browse_items(&self) -> Vec<String> {
@@ -2379,57 +2359,6 @@ fn summarize_config_warnings(ctx: &WallsCtx) -> Vec<String> {
             warning
         })
         .collect()
-}
-
-fn wrap_log_text(text: &str, width: usize) -> Vec<String> {
-    if width == 0 {
-        return vec![text.to_string()];
-    }
-    if text.len() <= width {
-        return vec![text.to_string()];
-    }
-
-    let mut lines = Vec::new();
-    let mut current = String::new();
-    for word in text.split_whitespace() {
-        let extra = if current.is_empty() {
-            word.len()
-        } else {
-            current.len() + 1 + word.len()
-        };
-        if current.is_empty() {
-            current = word.to_string();
-        } else if extra <= width {
-            current.push(' ');
-            current.push_str(word);
-        } else {
-            lines.push(current);
-            current = word.to_string();
-        }
-    }
-    if !current.is_empty() {
-        lines.push(current);
-    }
-    if lines.is_empty() {
-        lines.push(text.to_string());
-    }
-    lines
-}
-
-fn crop_lines_around_selection(
-    lines: Vec<String>,
-    selected_row: usize,
-    viewport_height: u16,
-) -> Vec<String> {
-    let visible_rows = usize::from(viewport_height).saturating_sub(2).max(1);
-    if lines.len() <= visible_rows {
-        return lines;
-    }
-    let start = selected_row
-        .saturating_add(1)
-        .saturating_sub(visible_rows)
-        .min(lines.len().saturating_sub(visible_rows));
-    lines.into_iter().skip(start).take(visible_rows).collect()
 }
 
 #[cfg(test)]
