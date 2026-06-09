@@ -10,7 +10,7 @@ use ksni::blocking::TrayMethods;
 use ksni::menu::StandardItem;
 use ksni::{MenuItem, Tray};
 
-use crate::actions::{dispatch, MenuAction};
+use crate::actions::{dispatch, menu_actions, MenuAction};
 use crate::icon;
 use crate::resolve_walls_bin;
 use crate::rotation::RotationLoop;
@@ -72,26 +72,14 @@ impl Tray for WallsSniTray {
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
         let tx = self.action_tx.clone();
-        vec![
-            Self::item("Next wallpaper", MenuAction::Next, tx.clone()),
-            Self::item("Previous wallpaper", MenuAction::Prev, tx.clone()),
-            Self::item("Toggle pause", MenuAction::TogglePause, tx.clone()),
-            Self::item("Open TUI", MenuAction::OpenTui, tx.clone()),
-            MenuItem::Separator,
-            StandardItem {
-                label: "Quit tray".into(),
-                activate: Box::new({
-                    let tx = tx.clone();
-                    move |_| {
-                        if tx.send(MenuAction::Quit).is_err() {
-                            tracing::warn!("tray action channel closed");
-                        }
-                    }
-                }),
-                ..Default::default()
+        let mut items = Vec::new();
+        for spec in menu_actions() {
+            if spec.separator_before {
+                items.push(MenuItem::Separator);
             }
-            .into(),
-        ]
+            items.push(Self::item(spec.label, spec.action, tx.clone()));
+        }
+        items
     }
 }
 
@@ -113,12 +101,14 @@ pub fn run() -> anyhow::Result<()> {
     let worker_handle = handle.clone();
     thread::spawn(move || {
         while let Ok(action) = action_rx.recv() {
-            if action == MenuAction::Quit {
+            let outcome = dispatch(action);
+            if outcome.quit {
                 worker_quit.store(true, Ordering::Relaxed);
                 break;
             }
-            dispatch(action);
-            let _ = worker_handle.update(|tray: &mut WallsSniTray| tray.refresh_state());
+            if outcome.refresh {
+                let _ = worker_handle.update(|tray: &mut WallsSniTray| tray.refresh_state());
+            }
         }
     });
 
