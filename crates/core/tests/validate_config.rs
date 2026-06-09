@@ -636,7 +636,7 @@ fn validate_config_reports_invalid_wallhaven_provider_settings() {
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("wallhaven.search.atleast: must use WIDTHxHEIGHT format")),
+            .any(|error| error.contains("wallhaven.search.atleast: must be one of")),
         "{errors:?}"
     );
     assert!(
@@ -725,6 +725,42 @@ fn validate_config_allows_keyless_wallhaven_with_safe_purity() {
 
     let errors = validate_root(root.path());
     assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn validate_config_rejects_custom_wallhaven_resolution_with_actionable_hint() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    std::fs::create_dir_all(&images).unwrap();
+    let noop = common::write_noop_script(root.path());
+    common::write_minimal_config(root.path(), &images, &noop);
+
+    let mut config = load_config_json(root.path());
+    config["wallhaven"] = serde_json::json!({
+        "enabled": true,
+        "search": {
+            "q": "forest",
+            "categories": "111",
+            "purity": "100",
+            "sorting": "random",
+            "order": "desc",
+            "atleast": "2561x1440"
+        }
+    });
+    common::write_config(root.path(), config);
+
+    let errors = validate_root(root.path());
+    assert!(
+        errors.iter().any(|error| error
+            .contains("wallhaven.search.atleast: must be one of: 1024x768, 1280x720, 1366x768")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("choose Minimum resolution in the TUI")),
+        "{errors:?}"
+    );
 }
 
 #[test]
