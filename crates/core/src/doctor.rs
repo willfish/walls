@@ -300,7 +300,7 @@ fn check_apply_backend_commands(
 ) {
     match backend {
         ApplyBackendSetting::Auto => {
-            check_any_command(
+            check_any_command_warn(
                 checks,
                 DoctorSection::DesktopApply,
                 "desktop.apply_command",
@@ -845,6 +845,29 @@ fn check_any_command(
             id,
             format!(
                 "none of the required commands were found on PATH: {}",
+                commands.join(", ")
+            ),
+            remediation,
+        ));
+    }
+}
+
+fn check_any_command_warn(
+    checks: &mut Vec<DoctorCheck>,
+    section: DoctorSection,
+    id: &'static str,
+    commands: &[&'static str],
+    message: &'static str,
+    remediation: &'static str,
+) {
+    if commands.iter().any(|command| command_exists(command)) {
+        checks.push(DoctorCheck::pass(section, id, message));
+    } else {
+        checks.push(DoctorCheck::warn(
+            section,
+            id,
+            format!(
+                "none of the fallback commands were found on PATH: {}",
                 commands.join(", ")
             ),
             remediation,
