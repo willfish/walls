@@ -97,21 +97,48 @@ impl WallsCtx {
         metadata: CurrentWallMetadata,
         update_history: bool,
     ) -> anyhow::Result<()> {
-        let composed = pipeline::compose(&self.paths, &self.config.display, original)?;
-        crate::apply::apply_wallpaper(
+        let provider = metadata.provider.clone();
+        let composed = match pipeline::compose(&self.paths, &self.config.display, original) {
+            Ok(composed) => composed,
+            Err(error) => {
+                append_event_best_effort(
+                    &self.paths.event_journal_file,
+                    &EventRecord::apply_failed(
+                        trigger,
+                        original,
+                        None,
+                        provider,
+                        error.to_string(),
+                    ),
+                );
+                return Err(error);
+            }
+        };
+        if let Err(error) = crate::apply::apply_wallpaper(
             &self.config.apply,
             &composed,
             original,
             self.fill_mode(),
             trigger,
-        )?;
+        ) {
+            append_event_best_effort(
+                &self.paths.event_journal_file,
+                &EventRecord::apply_failed(
+                    trigger,
+                    original,
+                    Some(&composed),
+                    provider,
+                    error.to_string(),
+                ),
+            );
+            return Err(error);
+        }
         let history_id = original.display().to_string();
         let source_id = original
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("local")
             .to_string();
-        let provider = metadata.provider.clone();
         self.state.current = Some(crate::state::CurrentWall {
             source_id,
             wallhaven_id,

@@ -5,6 +5,7 @@ mod common {
 use std::fs;
 
 use walls_core::apply::ApplyTrigger;
+use walls_core::events::{read_events, EventKind};
 use walls_core::state::{CurrentWall, State};
 use walls_core::{RefreshLevel, WallsCtx, WallsError};
 
@@ -59,6 +60,47 @@ fn apply_file_reports_compose_failures_as_typed_error() {
         }
         other => panic!("expected ApplyFile, got {other:?}"),
     }
+}
+
+#[test]
+fn apply_file_records_backend_failures_in_event_journal() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    fs::create_dir_all(&images).unwrap();
+    let wall = images.join("wall.jpg");
+    fs::write(&wall, b"x").unwrap();
+    let failing = root.path().join("failing.sh");
+    fs::write(
+        &failing,
+        "#!/bin/sh\nSECRET_MARKER=backend-token-secret\nexit 42\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&failing, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    common::write_minimal_config(root.path(), &images, &failing);
+
+    let mut ctx = WallsCtx::load_from(root.path()).unwrap();
+    let err = ctx
+        .apply_file(&wall, ApplyTrigger::Manual)
+        .expect_err("backend failure should fail apply");
+    assert!(matches!(err, WallsError::ApplyFile { .. }));
+
+    let events = read_events(&ctx.paths.event_journal_file).unwrap();
+    assert!(matches!(
+        events.as_slice(),
+        [walls_core::events::EventRecord {
+            kind: EventKind::ApplyFailed {
+                trigger: ApplyTrigger::Manual,
+                ..
+            },
+            ..
+        }]
+    ));
+    let raw = fs::read_to_string(&ctx.paths.event_journal_file).unwrap();
+    assert!(!raw.contains("backend-token-secret"), "{raw}");
 }
 
 #[test]
