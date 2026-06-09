@@ -19,6 +19,7 @@ use walls_core::{RefreshLevel, WallsCtx};
 mod tui;
 
 mod bin_utils;
+mod recovery;
 
 #[derive(Parser)]
 #[command(name = "walls", version, about = "Wallpaper manager")]
@@ -884,7 +885,7 @@ async fn cmd_next(
                 Some("missing_current"),
                 &ctx.provider_status_report,
             ))?,
-            None => println!("no current wallpaper"),
+            None => println!("{}", recovery::missing_current_wallpaper()),
         }
         return Ok(());
     }
@@ -913,7 +914,7 @@ async fn cmd_next(
             &ctx.provider_status_report,
         ))?,
         None => {
-            println!("no change");
+            println!("{}", recovery::next_no_change());
             print_provider_attempts_human(verbose, &ctx.provider_status_report);
         }
     }
@@ -1100,7 +1101,7 @@ fn cmd_restore_previous(command: &str, status: &str, json: bool) -> anyhow::Resu
             None,
             Some("no_previous"),
         ))?,
-        None => println!("no previous"),
+        None => println!("{}", recovery::no_previous_wallpaper()),
     }
     Ok(())
 }
@@ -1274,7 +1275,7 @@ fn cmd_current(meta: bool, json: bool) -> anyhow::Result<()> {
     match ctx.current_path() {
         Some(p) => println!("{}", p.display()),
         None => {
-            println!("(none)");
+            println!("{}", recovery::missing_current_wallpaper());
             std::process::exit(1);
         }
     }
