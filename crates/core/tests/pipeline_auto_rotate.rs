@@ -72,6 +72,7 @@ fn test_paths(temp: &TempDir) -> WallsPaths {
         config_file: root.join("config/config.json"),
         secrets_file: root.join("config/secrets.json"),
         state_file: root.join("state/state.json"),
+        event_journal_file: root.join("state/events.jsonl"),
         cache_dir: root.join("cache"),
         download_dir: root.join("downloaded"),
         favorites_dir: root.join("favorites"),

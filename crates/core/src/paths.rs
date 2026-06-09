@@ -7,6 +7,7 @@ pub struct WallsPaths {
     pub config_file: PathBuf,
     pub secrets_file: PathBuf,
     pub state_file: PathBuf,
+    pub event_journal_file: PathBuf,
     pub cache_dir: PathBuf,
     pub download_dir: PathBuf,
     pub favorites_dir: PathBuf,
@@ -36,11 +37,13 @@ impl WallsPaths {
     pub fn discover() -> anyhow::Result<Self> {
         let config_dir = config_dir()?;
         let state_file = state_file()?;
+        let event_journal_file = state_file.with_file_name("events.jsonl");
         Ok(Self {
             config_file: config_dir.join("config.json"),
             secrets_file: config_dir.join("secrets.json"),
             config_dir,
             state_file,
+            event_journal_file,
             cache_dir: PathBuf::new(),
             download_dir: PathBuf::new(),
             favorites_dir: PathBuf::new(),

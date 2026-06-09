@@ -1,5 +1,7 @@
 use std::fs;
 
+use walls_core::apply::ApplyTrigger;
+use walls_core::events::{read_events, EventKind};
 use walls_core::providers::{
     ProviderAttemptOutcome, ProviderKind, ProviderNoCandidateReason, ProviderStatus,
 };
@@ -62,6 +64,17 @@ async fn advance_next_writes_state() {
     assert!(ctx.state.current.is_some());
     assert_eq!(ctx.state.history.len(), 1);
     assert_eq!(ctx.state.history[0], applied.display().to_string());
+    let events = read_events(&ctx.paths.event_journal_file).unwrap();
+    assert!(events.iter().any(|event| matches!(
+        event.kind,
+        EventKind::Apply {
+            trigger: ApplyTrigger::Auto,
+            ..
+        }
+    )));
+    assert!(events
+        .iter()
+        .any(|event| matches!(event.kind, EventKind::ProviderAttempt { .. })));
 }
 
 #[tokio::test]
