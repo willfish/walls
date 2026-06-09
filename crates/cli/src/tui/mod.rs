@@ -783,20 +783,24 @@ fn render_tab_body(
     theme: style::Theme,
 ) {
     f.render_widget(Clear, area);
-    if app.tab == Tab::Now && terminal_size(area) == TerminalSize::Wide {
+    if !app.show_key_help
+        && matches!(app.tab, Tab::Now | Tab::History | Tab::Browse)
+        && terminal_size(area) == TerminalSize::Wide
+    {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
             .split(area);
-        render_lines(f, chunks[0], app.tab.title(), now_lines(app), theme);
-        let path = app
-            .ctx
-            .state
-            .current
-            .as_ref()
-            .map(|current| current.composed_path.as_str());
+        render_tab_content(f, chunks[0], app, theme, chunks[0].width);
+        let path = selected_preview_path(app);
         if let Some(preview) = preview {
-            preview.render(f, chunks[1], path, theme);
+            preview.render(
+                f,
+                chunks[1],
+                path.as_deref(),
+                &app.ctx.paths.cache_dir,
+                theme,
+            );
         } else {
             render_lines(
                 f,
@@ -828,6 +832,25 @@ fn render_tab_body(
                 render_tab_content(f, area, app, theme, area.width);
             }
         }
+    }
+}
+
+#[cfg(feature = "tui-preview")]
+fn selected_preview_path(app: &App) -> Option<String> {
+    match app.tab {
+        Tab::Now => app
+            .ctx
+            .state
+            .current
+            .as_ref()
+            .map(|current| current.composed_path.clone()),
+        Tab::History => app
+            .selected_history_preview_path()
+            .map(|path| path.display().to_string()),
+        Tab::Browse => app
+            .selected_browse_preview_path()
+            .map(|path| path.display().to_string()),
+        _ => None,
     }
 }
 
@@ -3439,6 +3462,50 @@ mod tests {
         assert!(text.contains("Now"), "{text}");
         assert!(text.contains("preview"), "{text}");
         assert!(text.contains("[empty] no current wallpaper"), "{text}");
+    }
+
+    #[cfg(feature = "tui-preview")]
+    #[test]
+    fn preview_target_follows_history_and_browse_selection() {
+        let mut app = test_app();
+        let root = app.ctx.paths.cache_dir.parent().unwrap().to_path_buf();
+        let history = root.join("history.jpg");
+        let local = root.join("local.jpg");
+        let queued = app.ctx.paths.cache_dir.join("wallhaven-wh1.jpg");
+        fs::create_dir_all(&app.ctx.paths.cache_dir).expect("cache dir");
+        fs::write(&history, b"history").expect("history image");
+        fs::write(&local, b"local").expect("local image");
+        fs::write(&queued, b"queued").expect("queued image");
+
+        app.ctx.state.history = vec![history.display().to_string()];
+        app.local_candidates = vec![local.clone()];
+        app.ctx.state.cache_queue = vec!["wh1".into()];
+
+        app.tab = Tab::History;
+        app.cursor = 0;
+        assert_eq!(
+            super::selected_preview_path(&app).as_deref(),
+            history.to_str()
+        );
+
+        app.tab = Tab::Browse;
+        app.cursor = 1;
+        assert_eq!(
+            super::selected_preview_path(&app).as_deref(),
+            queued.to_str()
+        );
+
+        app.cursor = 3;
+        assert_eq!(
+            super::selected_preview_path(&app).as_deref(),
+            local.to_str()
+        );
+
+        app.cursor = 5;
+        assert_eq!(
+            super::selected_preview_path(&app).as_deref(),
+            history.to_str()
+        );
     }
 
     #[test]

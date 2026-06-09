@@ -6,6 +6,7 @@ use ratatui::widgets::Paragraph;
 use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::Protocol;
 use ratatui_image::{Image, Resize};
+use walls_core::preview_cache::{ensure_preview_thumbnail, PreviewSize};
 
 use super::style;
 
@@ -102,12 +103,19 @@ impl ImagePreview {
         }
     }
 
-    pub fn render(&mut self, f: &mut Frame, area: Rect, path: Option<&str>, theme: style::Theme) {
+    pub fn render(
+        &mut self,
+        f: &mut Frame,
+        area: Rect,
+        source_path: Option<&str>,
+        cache_dir: &Path,
+        theme: style::Theme,
+    ) {
         let block = theme.content_block("preview");
         let inner = block.inner(area);
         f.render_widget(block, area);
 
-        let Some(path) = path else {
+        let Some(source_path) = source_path else {
             self.render_fallback(
                 f,
                 inner,
@@ -134,8 +142,8 @@ impl ImagePreview {
         }
 
         let size = Size::new(inner.width, inner.height);
-        if !self.cache_matches(path, size) {
-            if let Err(err) = self.load(path, size) {
+        if !self.cache_matches(source_path, size) {
+            if let Err(err) = self.load(source_path, cache_dir, size) {
                 self.cached = None;
                 self.status = PreviewFallback::new(
                     style::StateKind::ValidationError,
@@ -166,15 +174,21 @@ impl ImagePreview {
             .is_some_and(|cached| cached.path == path && cached.size == size)
     }
 
-    fn load(&mut self, path: &str, size: Size) -> anyhow::Result<()> {
-        let image = ImageReader::open(Path::new(path))?.decode()?;
+    fn load(&mut self, source_path: &str, cache_dir: &Path, size: Size) -> anyhow::Result<()> {
+        let source = Path::new(source_path);
+        let thumbnail = ensure_preview_thumbnail(
+            source,
+            cache_dir,
+            PreviewSize::new(u32::from(size.width) * 8, u32::from(size.height) * 16),
+        )?;
+        let image = ImageReader::open(&thumbnail)?.decode()?;
         let protocol = self
             .picker
             .as_ref()
             .expect("checked by caller")
             .new_protocol(image, size, Resize::Fit(None))?;
         self.cached = Some(CachedPreview {
-            path: path.to_string(),
+            path: source_path.to_string(),
             size,
             protocol,
         });
