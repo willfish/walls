@@ -22,6 +22,7 @@ pub mod ctx;
 pub mod doctor;
 pub mod downloads;
 pub mod error;
+pub mod events;
 pub(crate) mod feeds;
 pub(crate) mod inline_providers;
 pub(crate) mod library;

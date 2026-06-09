@@ -8,6 +8,7 @@ use walls_core::apply::ApplyTrigger;
 use walls_core::apply::{backend_setting_label, desktop_display_name, summarize_apply_environment};
 use walls_core::doctor::{DoctorOptions, DoctorReport, DoctorSection, DoctorStatus};
 use walls_core::downloads::{NukeDownloadsMode, NukeDownloadsPlan};
+use walls_core::events::{read_events, EventKind, EventRecord};
 use walls_core::providers::{
     ProviderAttempt, ProviderAttemptOutcome, ProviderFailureKind, ProviderKind,
     ProviderNoCandidateReason, ProviderOperation, ProviderRetryReason, ProviderStatus,
@@ -61,6 +62,24 @@ enum Command {
     },
     /// Print status
     Status {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect recent wallpaper, provider, and apply activity
+    Logs {
+        /// Number of recent matching events to show
+        #[arg(long, default_value_t = 20)]
+        tail: usize,
+        /// Restrict to a provider id or kind, such as local, wallhaven, or unsplash
+        #[arg(long)]
+        provider: Option<String>,
+        /// Restrict to derived event severity
+        #[arg(long, value_enum)]
+        level: Option<CliLogLevel>,
+        /// Restrict to events at or after this Unix timestamp
+        #[arg(long)]
+        since: Option<u64>,
+        /// Emit a stable JSON command result
         #[arg(long)]
         json: bool,
     },
@@ -199,6 +218,23 @@ enum CliRefreshLevel {
     ClockOnly,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum CliLogLevel {
+    Info,
+    Warn,
+    Error,
+}
+
+impl CliLogLevel {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+        }
+    }
+}
+
 impl From<CliRefreshLevel> for RefreshLevel {
     fn from(value: CliRefreshLevel) -> Self {
         match value {
@@ -240,6 +276,13 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Prev { json }) => cmd_prev(json)?,
         Some(Command::Undo { json }) => cmd_undo(json)?,
         Some(Command::Status { json }) => cmd_status(json)?,
+        Some(Command::Logs {
+            tail,
+            provider,
+            level,
+            since,
+            json,
+        }) => cmd_logs(tail, provider, level, since, json)?,
         Some(Command::Doctor { json }) => cmd_doctor(json)?,
         Some(Command::Cache { sub }) => match sub {
             CacheSub::Status { json } => cmd_cache_status(json)?,
@@ -321,6 +364,182 @@ fn cmd_status(json: bool) -> anyhow::Result<()> {
         println!("cache queue: {} entries", ctx.state.cache_queue.len());
     }
     Ok(())
+}
+
+fn cmd_logs(
+    tail: usize,
+    provider: Option<String>,
+    level: Option<CliLogLevel>,
+    since: Option<u64>,
+    json: bool,
+) -> anyhow::Result<()> {
+    let ctx = WallsCtx::load()?;
+    let mut events = read_events(&ctx.paths.event_journal_file)
+        .with_context(|| format!("read {}", ctx.paths.event_journal_file.display()))?;
+    events.retain(|event| log_event_matches(event, provider.as_deref(), level, since));
+    events.reverse();
+    events.truncate(tail);
+
+    if json {
+        return print_json(logs_json(
+            &ctx,
+            &events,
+            tail,
+            provider.as_deref(),
+            level,
+            since,
+        )?);
+    }
+    if events.is_empty() {
+        println!(
+            "no log events. Run `walls next --manual` or `walls apply <path>` to create activity."
+        );
+        return Ok(());
+    }
+    for event in &events {
+        println!("{}", log_event_line(event));
+    }
+    Ok(())
+}
+
+fn log_event_matches(
+    event: &EventRecord,
+    provider: Option<&str>,
+    level: Option<CliLogLevel>,
+    since: Option<u64>,
+) -> bool {
+    if since.is_some_and(|since| event.timestamp_unix < since) {
+        return false;
+    }
+    if level.is_some_and(|level| log_event_level(event) != level) {
+        return false;
+    }
+    if let Some(provider) = provider {
+        let provider = provider.to_ascii_lowercase();
+        return log_event_provider_labels(event)
+            .into_iter()
+            .any(|label| label == provider);
+    }
+    true
+}
+
+fn log_event_provider_labels(event: &EventRecord) -> Vec<String> {
+    match &event.kind {
+        EventKind::Apply {
+            provider: Some(provider),
+            ..
+        } => vec![provider.to_ascii_lowercase()],
+        EventKind::Apply { provider: None, .. } => vec!["local".into()],
+        EventKind::ProviderAttempt { attempt } => vec![
+            attempt.provider_id.to_ascii_lowercase(),
+            provider_kind_label(attempt.provider_kind).to_string(),
+        ],
+    }
+}
+
+fn log_event_level(event: &EventRecord) -> CliLogLevel {
+    match &event.kind {
+        EventKind::Apply { .. } => CliLogLevel::Info,
+        EventKind::ProviderAttempt { attempt } => match &attempt.outcome {
+            ProviderAttemptOutcome::Failed { .. } => CliLogLevel::Error,
+            ProviderAttemptOutcome::Skipped { .. }
+            | ProviderAttemptOutcome::NoCandidates { .. } => CliLogLevel::Warn,
+            ProviderAttemptOutcome::NotRun | ProviderAttemptOutcome::Applied { .. } => {
+                CliLogLevel::Info
+            }
+        },
+    }
+}
+
+fn log_event_line(event: &EventRecord) -> String {
+    match &event.kind {
+        EventKind::Apply {
+            trigger,
+            original_path,
+            composed_path,
+            provider,
+        } => format!(
+            "{}\t{}\tapply\ttrigger={}\tprovider={}\toriginal={}\tcomposed={}",
+            event.timestamp_unix,
+            log_event_level(event).label(),
+            apply_trigger_label(*trigger),
+            provider.as_deref().unwrap_or("local"),
+            original_path,
+            composed_path
+        ),
+        EventKind::ProviderAttempt { attempt } => format!(
+            "{}\t{}\tprovider\t{}",
+            event.timestamp_unix,
+            log_event_level(event).label(),
+            provider_attempt_line(attempt)
+        ),
+    }
+}
+
+fn logs_json(
+    ctx: &WallsCtx,
+    events: &[EventRecord],
+    tail: usize,
+    provider: Option<&str>,
+    level: Option<CliLogLevel>,
+    since: Option<u64>,
+) -> anyhow::Result<serde_json::Value> {
+    let events = events
+        .iter()
+        .map(log_event_json)
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    Ok(serde_json::json!({
+        "command": "logs",
+        "changed": false,
+        "status": if events.is_empty() { "empty" } else { "ok" },
+        "journal": ctx.paths.event_journal_file.display().to_string(),
+        "filters": {
+            "tail": tail,
+            "provider": provider,
+            "level": level.map(CliLogLevel::label),
+            "since": since,
+        },
+        "events": events,
+        "exit_code_reason": null,
+    }))
+}
+
+fn log_event_json(event: &EventRecord) -> anyhow::Result<serde_json::Value> {
+    let mut value = serde_json::to_value(event)?;
+    if let serde_json::Value::Object(fields) = &mut value {
+        fields.insert(
+            "level".into(),
+            serde_json::Value::String(log_event_level(event).label().into()),
+        );
+        fields.insert(
+            "message".into(),
+            serde_json::Value::String(log_event_message(event)),
+        );
+    }
+    Ok(value)
+}
+
+fn log_event_message(event: &EventRecord) -> String {
+    match &event.kind {
+        EventKind::Apply {
+            trigger,
+            original_path,
+            ..
+        } => format!(
+            "applied {} wallpaper from {}",
+            apply_trigger_label(*trigger),
+            original_path
+        ),
+        EventKind::ProviderAttempt { attempt } => provider_attempt_line(attempt),
+    }
+}
+
+fn apply_trigger_label(trigger: ApplyTrigger) -> &'static str {
+    match trigger {
+        ApplyTrigger::Manual => "manual",
+        ApplyTrigger::Auto => "auto",
+        ApplyTrigger::Refresh => "refresh",
+    }
 }
 
 fn cmd_cache_status(json: bool) -> anyhow::Result<()> {

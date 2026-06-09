@@ -1,6 +1,7 @@
 use super::{RefreshLevel, WallsCtx};
 use crate::apply::{ApplyTrigger, FillMode};
 use crate::error::{Result, WallsError};
+use crate::events::{append_event_best_effort, EventRecord};
 use crate::pipeline;
 use crate::state::CurrentWallMetadata;
 use std::path::{Path, PathBuf};
@@ -110,6 +111,7 @@ impl WallsCtx {
             .and_then(|s| s.to_str())
             .unwrap_or("local")
             .to_string();
+        let provider = metadata.provider.clone();
         self.state.current = Some(crate::state::CurrentWall {
             source_id,
             wallhaven_id,
@@ -132,6 +134,11 @@ impl WallsCtx {
         self.state.last_change_unix = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
-        self.save_state()
+        self.save_state()?;
+        append_event_best_effort(
+            &self.paths.event_journal_file,
+            &EventRecord::apply(trigger, original, &composed, provider),
+        );
+        Ok(())
     }
 }

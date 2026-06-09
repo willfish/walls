@@ -477,6 +477,10 @@ impl<'ctx> AdvanceNext<'ctx> {
     }
 
     fn record(&mut self, attempt: ProviderAttempt) {
+        crate::events::append_event_best_effort(
+            &self.ctx.paths.event_journal_file,
+            &crate::events::EventRecord::provider_attempt(attempt.clone()),
+        );
         self.ctx.provider_status_report.push(attempt);
     }
 
