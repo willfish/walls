@@ -27,6 +27,7 @@ fn test_config() -> Config {
         sources: vec![],
         wallhaven: WallhavenConfig::default(),
         tray: Default::default(),
+        tui: Default::default(),
     }
 }
 

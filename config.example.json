@@ -65,6 +65,9 @@
       }
     }
   },
+  "tui": {
+    "key_profile": "default"
+  },
   "sources": [
     { "enabled": true, "type": "favorites", "label": "The Favorites folder" },
     { "enabled": true, "type": "fetched", "label": "The Fetched folder" },

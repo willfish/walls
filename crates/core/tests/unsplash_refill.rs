@@ -74,6 +74,7 @@ fn config_defaults_keep_existing_manual_construction_shape() {
         sources: vec![],
         wallhaven: Default::default(),
         tray: Default::default(),
+        tui: Default::default(),
     };
 
     assert!(config.sources.is_empty());
