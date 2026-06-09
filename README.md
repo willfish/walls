@@ -235,12 +235,12 @@ you already have a symptom.
 
 **Terminal for tray “Open TUI”** (precedence order):
 
-1. `WALLS_TUI_CMD` — full override; `{walls}` is substituted (e.g. `ghostty -e {walls} tui`)
+1. `WALLS_TUI_CMD` — full override; `{walls}` is substituted (e.g. `ghostty --class=walls -e {walls} tui`)
 2. `$TERMINAL` — if set in the tray process environment (e.g. systemd `Environment=TERMINAL=ghostty`)
 3. `xdg-terminal-exec` — system default terminal when on `PATH` (typical on modern Linux desktops)
 4. `alacritty` — last-resort fallback
 
-The **desktop launcher** (`walls.desktop`, installed on Linux via Nix) runs `xdg-terminal-exec --app-id=walls … tui`, so your configured default terminal opens the TUI with a stable app id — same mechanism as tray “Open TUI” when `xdg-terminal-exec` is on `PATH`.
+The **desktop launcher** (`walls.desktop`, installed on Linux via Nix) runs `xdg-terminal-exec --app-id=walls … tui` and declares `StartupWMClass=walls`, so supported desktops can group the running terminal window with the `walls` launcher icon. Tray “Open TUI” passes the same `--app-id=walls` flag when using `xdg-terminal-exec`. If `$TERMINAL` is `ghostty`, walls adds `--class=walls`, which Ghostty documents as the X11 `WM_CLASS` and Wayland application ID override. Other terminals still use the normal `-e walls tui` form unless you provide `WALLS_TUI_CMD`.
 
 Tray/desktop icon SVGs live under `assets/icons/` (`walls-tray.svg` for launchers and the active tray icon, `walls-tray-paused.svg` when rotation is inactive). Rebuild `walls-tray` after editing. Set `WALLS_TRAY_WALLPAPER_THUMBNAIL=1` to restore the old live-wallpaper thumbnail icon (paused still uses the paused brand icon).
 

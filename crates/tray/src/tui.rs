@@ -42,6 +42,17 @@ pub(crate) fn tui_command(
         .ok_or_else(|| anyhow::anyhow!("walls path is not valid UTF-8"))?;
 
     if let Some(terminal) = terminal {
+        if terminal_basename(terminal) == "ghostty" {
+            return Ok(TuiCommand {
+                program: terminal.into(),
+                args: vec![
+                    "--class=walls".into(),
+                    "-e".into(),
+                    walls_str.into(),
+                    "tui".into(),
+                ],
+            });
+        }
         return Ok(TuiCommand {
             program: terminal.into(),
             args: vec!["-e".into(), walls_str.into(), "tui".into()],
@@ -51,7 +62,7 @@ pub(crate) fn tui_command(
     if let Some(xdg_terminal_exec) = xdg_terminal_exec {
         return Ok(TuiCommand {
             program: xdg_terminal_exec.into(),
-            args: vec![walls_str.into(), "tui".into()],
+            args: vec!["--app-id=walls".into(), walls_str.into(), "tui".into()],
         });
     }
 
@@ -59,6 +70,13 @@ pub(crate) fn tui_command(
         program: "alacritty".into(),
         args: vec!["-e".into(), walls_str.into(), "tui".into()],
     })
+}
+
+fn terminal_basename(terminal: &str) -> &str {
+    Path::new(terminal)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(terminal)
 }
 
 fn xdg_terminal_exec_on_path() -> Option<String> {
@@ -101,6 +119,23 @@ mod tests {
     }
 
     #[test]
+    fn tui_command_preserves_app_id_for_ghostty_terminal() {
+        let command = tui_command(
+            Path::new("/opt/walls/bin/walls"),
+            None,
+            Some("/usr/bin/ghostty"),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(command.program, "/usr/bin/ghostty");
+        assert_eq!(
+            command.args,
+            vec!["--class=walls", "-e", "/opt/walls/bin/walls", "tui"]
+        );
+    }
+
+    #[test]
     fn tui_command_uses_xdg_terminal_exec_before_alacritty_fallback() {
         let command = tui_command(
             Path::new("/opt/walls/bin/walls"),
@@ -111,7 +146,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(command.program, "/usr/bin/xdg-terminal-exec");
-        assert_eq!(command.args, vec!["/opt/walls/bin/walls", "tui"]);
+        assert_eq!(
+            command.args,
+            vec!["--app-id=walls", "/opt/walls/bin/walls", "tui"]
+        );
     }
 
     #[test]

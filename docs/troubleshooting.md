@@ -141,7 +141,9 @@ Recovery:
 - Desktop has no tray host: use `walls tui` or CLI commands directly, or install
   a status notifier host for the desktop.
 - Open TUI terminal mismatch: set `WALLS_TUI_CMD`, for example
-  `ghostty -e {walls} tui`.
+  `ghostty --class=walls -e {walls} tui`. Ghostty documents `--class` as the
+  X11 `WM_CLASS` and Wayland application ID override; tray Open TUI passes
+  `xdg-terminal-exec --app-id=walls` automatically when that launcher is used.
 
 ## TUI Recovery
 

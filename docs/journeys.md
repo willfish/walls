@@ -221,7 +221,10 @@ Recovery:
 - Autostart drift: edit `tray.autostart.desktops`, then run
   `walls config sync`.
 - Open TUI launches the wrong terminal: set `WALLS_TUI_CMD`, for example
-  `WALLS_TUI_CMD='ghostty -e {walls} tui' walls-tray`.
+  `WALLS_TUI_CMD='ghostty --class=walls -e {walls} tui' walls-tray`.
+  Ghostty documents `--class` as the X11 `WM_CLASS` and Wayland application ID
+  override. When tray Open TUI uses `xdg-terminal-exec`, walls passes
+  `--app-id=walls` automatically.
 
 ## Choosing And Fixing Apply Backends
 
