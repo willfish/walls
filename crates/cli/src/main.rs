@@ -32,7 +32,15 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Set a local image as the wallpaper
-    Apply { path: PathBuf },
+    Apply {
+        path: PathBuf,
+        /// Show what would be applied without composing, running the backend, or mutating state
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit a stable JSON command result
+        #[arg(long)]
+        json: bool,
+    },
     /// Show next wallpaper from configured sources
     Next {
         /// User-initiated next (ignores pause and rotation disabled)
@@ -266,7 +274,11 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
     match cli.command {
-        Some(Command::Apply { path }) => cmd_apply(path)?,
+        Some(Command::Apply {
+            path,
+            dry_run,
+            json,
+        }) => cmd_apply(path, dry_run, json)?,
         Some(Command::Next {
             manual,
             refresh,
@@ -332,12 +344,87 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cmd_apply(path: PathBuf) -> anyhow::Result<()> {
+fn cmd_apply(path: PathBuf, dry_run: bool, json: bool) -> anyhow::Result<()> {
     let path = walls_core::expand_home(&path);
+    if dry_run {
+        let ctx = WallsCtx::load_without_autostart_sync()?;
+        let missing_original = !path.exists();
+        let plan = apply_dry_run_json(&ctx, &path);
+        print_json_or_human(json, plan, || {
+            if missing_original {
+                println!(
+                    "would fail: wallpaper file does not exist: {}",
+                    path.display()
+                );
+            } else {
+                println!("would apply original: {}", path.display());
+                println!(
+                    "would run backend: {}",
+                    backend_setting_label(walls_core::apply::resolved_apply_backend(
+                        &ctx.config.apply
+                    ))
+                );
+                println!("would update current wallpaper state");
+                println!("would move this wallpaper to the front of history");
+                println!("would record an apply event");
+            }
+            println!("no wallpaper files, state, history, or event journal were changed");
+            Ok(())
+        })?;
+        if missing_original {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
     let mut ctx = WallsCtx::load()?;
     ctx.apply_file(&path, ApplyTrigger::Manual)?;
-    println!("{}", path.display());
+    if json {
+        print_json(serde_json::json!({
+            "command": "apply",
+            "changed": true,
+            "status": "applied",
+            "dry_run": false,
+            "apply": {
+                "original_path": path,
+            },
+            "exit_code_reason": null,
+        }))?;
+    } else {
+        println!("{}", path.display());
+    }
     Ok(())
+}
+
+fn apply_dry_run_json(ctx: &WallsCtx, path: &std::path::Path) -> serde_json::Value {
+    let summary = summarize_apply_environment(&ctx.config.apply);
+    let original_exists = path.exists();
+    serde_json::json!({
+        "command": "apply",
+        "changed": false,
+        "status": if original_exists { "would_apply" } else { "missing_original" },
+        "dry_run": true,
+        "apply": {
+            "original_path": path,
+            "original_exists": original_exists,
+            "configured_backend": backend_setting_label(summary.configured_backend),
+            "resolved_backend": backend_setting_label(summary.resolved_backend),
+            "display_mode": ctx.config.display.mode,
+            "compose_dir": ctx.paths.compose_dir,
+            "would_compose": ctx.config.display.auto_rotate
+                || ctx.config.display.filters.enabled
+                || (ctx.config.display.target_width.is_some()
+                    && ctx.config.display.target_height.is_some()),
+            "would_run_backend": original_exists,
+            "would_update_current": original_exists,
+            "would_update_history": original_exists,
+            "would_record_event": original_exists,
+        },
+        "exit_code_reason": if original_exists {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::String("missing_original".into())
+        },
+    })
 }
 
 fn cmd_status(json: bool) -> anyhow::Result<()> {
