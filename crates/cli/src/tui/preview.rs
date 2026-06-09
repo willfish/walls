@@ -6,7 +6,7 @@ use ratatui::widgets::Paragraph;
 use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::Protocol;
 use ratatui_image::{Image, Resize};
-use walls_core::preview_cache::{ensure_preview_thumbnail, PreviewSize};
+use walls_core::preview_cache::{ensure_preview_thumbnail, DEFAULT_PREVIEW_SIZE};
 
 use super::style;
 
@@ -176,11 +176,7 @@ impl ImagePreview {
 
     fn load(&mut self, source_path: &str, cache_dir: &Path, size: Size) -> anyhow::Result<()> {
         let source = Path::new(source_path);
-        let thumbnail = ensure_preview_thumbnail(
-            source,
-            cache_dir,
-            PreviewSize::new(u32::from(size.width) * 8, u32::from(size.height) * 16),
-        )?;
+        let thumbnail = ensure_preview_thumbnail(source, cache_dir, DEFAULT_PREVIEW_SIZE)?;
         let image = ImageReader::open(&thumbnail)?.decode()?;
         let protocol = self
             .picker
