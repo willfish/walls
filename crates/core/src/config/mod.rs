@@ -23,10 +23,10 @@ pub use reddit::{
 };
 pub use source_kind::SourceKind;
 pub use source_schema::{
-    normalize_config_sources, normalize_source_entry, secrets_credential_label,
-    secrets_credential_present, secrets_credential_warning, source_config_fields,
-    source_editable_fields, source_secrets_detail_lines, source_secrets_key, SourceSecretsKey,
-    SECRETS_EDIT_HINT,
+    normalize_config_sources, normalize_source_entry, secrets_credential_field,
+    secrets_credential_label, secrets_credential_present, secrets_credential_warning,
+    source_config_fields, source_editable_fields, source_secrets_detail_lines, source_secrets_key,
+    SourceSecretsKey, SECRETS_EDIT_HINT,
 };
 pub use unsplash::UnsplashSourceConfig;
 pub use wallhaven::{
