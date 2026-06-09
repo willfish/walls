@@ -45,6 +45,12 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Restore the previous wallpaper from history
+    Undo {
+        /// Emit a stable JSON command result
+        #[arg(long)]
+        json: bool,
+    },
     /// Print status
     Status {
         #[arg(long)]
@@ -85,7 +91,17 @@ enum Command {
         r#move: bool,
     },
     /// Delete the current wallpaper from disk and state
-    Trash,
+    Trash {
+        /// Show what would be removed without mutating state or files
+        #[arg(long)]
+        dry_run: bool,
+        /// Required to remove files and mutate state
+        #[arg(long)]
+        force: bool,
+        /// Emit a stable JSON command result
+        #[arg(long)]
+        json: bool,
+    },
     /// Interactive terminal UI
     #[cfg(feature = "tui")]
     Tui,
@@ -209,6 +225,7 @@ async fn main() -> anyhow::Result<()> {
             json,
         }) => cmd_next(manual, refresh, json).await?,
         Some(Command::Prev { json }) => cmd_prev(json)?,
+        Some(Command::Undo { json }) => cmd_undo(json)?,
         Some(Command::Status { json }) => cmd_status(json)?,
         Some(Command::Doctor { json }) => cmd_doctor(json)?,
         Some(Command::Cache { sub }) => match sub {
@@ -236,7 +253,11 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Current { meta, json }) => cmd_current(meta, json)?,
         Some(Command::Favorite) => cmd_favorite()?,
         Some(Command::Fetch { paths, r#move }) => cmd_fetch(paths, r#move)?,
-        Some(Command::Trash) => cmd_trash()?,
+        Some(Command::Trash {
+            dry_run,
+            force,
+            json,
+        }) => cmd_trash(dry_run, force, json)?,
         Some(Command::Config { sub }) => match sub {
             ConfigSub::Validate { json } => cmd_config_validate(json)?,
             ConfigSub::Sync => cmd_config_sync()?,
@@ -882,18 +903,20 @@ async fn cmd_next(
 }
 
 fn cmd_prev(json: bool) -> anyhow::Result<()> {
+    cmd_restore_previous("prev", "applied_previous", json)
+}
+
+fn cmd_undo(json: bool) -> anyhow::Result<()> {
+    cmd_restore_previous("undo", "restored_previous", json)
+}
+
+fn cmd_restore_previous(command: &str, status: &str, json: bool) -> anyhow::Result<()> {
     let mut ctx = WallsCtx::load()?;
     match ctx.advance_prev()? {
-        Some(p) if json => print_json(command_result(
-            "prev",
-            true,
-            "applied_previous",
-            Some(p),
-            None,
-        ))?,
+        Some(p) if json => print_json(command_result(command, true, status, Some(p), None))?,
         Some(p) => println!("{}", p.display()),
         None if json => print_json(command_result(
-            "prev",
+            command,
             false,
             "no_previous",
             None,
@@ -955,11 +978,64 @@ fn cmd_config_sync() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cmd_trash() -> anyhow::Result<()> {
+fn cmd_trash(dry_run: bool, force: bool, json: bool) -> anyhow::Result<()> {
     let mut ctx = WallsCtx::load()?;
+    let plan = ctx.plan_trash_current()?;
+    if dry_run {
+        return print_json_or_human(json, trash_plan_json(&plan, true), || {
+            println!("would trash original: {}", plan.original_path);
+            if let Some(composed) = &plan.composed_path {
+                println!("would trash composed: {composed}");
+            }
+            println!(
+                "would remove history entries: {}",
+                plan.history_entries_removed
+            );
+            if let Some(id) = &plan.cache_queue_id {
+                println!("would remove cache queue id: {id}");
+            }
+            Ok(())
+        });
+    }
+    require_force(force, json, "trash")?;
     ctx.trash_current()?;
-    println!("trashed");
-    Ok(())
+    print_json_or_human(
+        json,
+        serde_json::json!({
+            "command": "trash",
+            "changed": true,
+            "status": "trashed",
+            "dry_run": false,
+            "trash": trash_plan_details_json(&plan),
+            "exit_code_reason": null,
+        }),
+        || {
+            println!("trashed");
+            Ok(())
+        },
+    )
+}
+
+fn trash_plan_json(plan: &walls_core::ctx::TrashPlan, dry_run: bool) -> serde_json::Value {
+    serde_json::json!({
+        "command": "trash",
+        "changed": false,
+        "status": if dry_run { "would_trash" } else { "trash_plan" },
+        "dry_run": dry_run,
+        "trash": trash_plan_details_json(plan),
+        "exit_code_reason": null,
+    })
+}
+
+fn trash_plan_details_json(plan: &walls_core::ctx::TrashPlan) -> serde_json::Value {
+    serde_json::json!({
+        "original_path": plan.original_path,
+        "composed_path": plan.composed_path,
+        "original_exists": plan.original_exists,
+        "composed_exists": plan.composed_exists,
+        "cache_queue_id": plan.cache_queue_id,
+        "history_entries_removed": plan.history_entries_removed,
+    })
 }
 
 fn cmd_fetch(paths: Vec<PathBuf>, move_files: bool) -> anyhow::Result<()> {

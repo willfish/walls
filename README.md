@@ -181,7 +181,8 @@ walls-tray         # tray menu → walls prev/next/toggle-pause
 | `walls current [--json] [--meta]` | Works (`--meta` is the legacy metadata-only JSON shape; prefer `--json` for scripts) |
 | `walls favorite` | Works |
 | `walls fetch <paths...> [--move]` | Works |
-| `walls trash` | Works |
+| `walls undo [--json]` | Restore the previous wallpaper from history |
+| `walls trash [--dry-run] [--force] [--json]` | Delete the current wallpaper from disk/state; `--force` is required unless using `--dry-run` |
 | `walls cache status [--json]` | Inspect queue length, provider cache/download counts, sizes, and quota usage |
 | `walls cache inspect [--provider <name>] [--json]` | List provider cache/download files |
 | `walls cache prune [--dry-run] [--force] [--json]` | Clear queued provider downloads first, or purge provider files when the queue is empty |
@@ -254,3 +255,9 @@ Cache commands use the same envelope and add cache-specific fields such as
 `queue`, `cache`, `downloads`, `quota`, `plan`, and remove counts. Mutating cache
 commands refuse to change state/files without `--force`; use `--dry-run` to see
 the planned queue clear or provider-file purge.
+
+`walls undo --json` uses `status: "restored_previous"` when it restores from
+history. `walls trash --json` uses `status: "force_required"` and exits with code
+2 when called without `--force`; `walls trash --dry-run --json` reports
+`status: "would_trash"` plus the affected original/composed paths without
+removing files or changing state.

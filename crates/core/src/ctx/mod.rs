@@ -9,6 +9,8 @@ mod apply;
 mod load;
 mod state_ops;
 
+pub use state_ops::TrashPlan;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefreshLevel {
     All,
