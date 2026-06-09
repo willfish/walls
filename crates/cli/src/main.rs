@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use tracing_subscriber::{prelude::*, EnvFilter, Layer};
 use walls_core::apply::ApplyTrigger;
 use walls_core::apply::{backend_setting_label, desktop_display_name, summarize_apply_environment};
+use walls_core::providers::ProviderStatusReport;
 use walls_core::{RefreshLevel, WallsCtx};
 
 #[cfg(feature = "tui")]
@@ -311,6 +312,23 @@ fn command_result(
     })
 }
 
+fn next_result(
+    changed: bool,
+    status: &str,
+    path: Option<PathBuf>,
+    exit_code_reason: Option<&str>,
+    provider_report: &ProviderStatusReport,
+) -> serde_json::Value {
+    serde_json::json!({
+        "command": "next",
+        "changed": changed,
+        "status": status,
+        "path": path.map(|path| path.display().to_string()),
+        "exit_code_reason": exit_code_reason,
+        "provider_attempts": &provider_report.attempts,
+    })
+}
+
 async fn cmd_next(
     manual: bool,
     refresh: Option<CliRefreshLevel>,
@@ -319,16 +337,20 @@ async fn cmd_next(
     let mut ctx = WallsCtx::load()?;
     if let Some(level) = refresh {
         match ctx.refresh_current(level.into())? {
-            Some(p) if json => {
-                print_json(command_result("next", true, "refreshed", Some(p), None))?
-            }
+            Some(p) if json => print_json(next_result(
+                true,
+                "refreshed",
+                Some(p),
+                None,
+                &ctx.provider_status_report,
+            ))?,
             Some(p) => println!("{}", p.display()),
-            None if json => print_json(command_result(
-                "next",
+            None if json => print_json(next_result(
                 false,
                 "missing_current",
                 None,
                 Some("missing_current"),
+                &ctx.provider_status_report,
             ))?,
             None => println!("no current wallpaper"),
         }
@@ -340,14 +362,20 @@ async fn cmd_next(
         ctx.advance_next().await?
     };
     match applied {
-        Some(p) if json => print_json(command_result("next", true, "applied", Some(p), None))?,
+        Some(p) if json => print_json(next_result(
+            true,
+            "applied",
+            Some(p),
+            None,
+            &ctx.provider_status_report,
+        ))?,
         Some(p) => println!("{}", p.display()),
-        None if json => print_json(command_result(
-            "next",
+        None if json => print_json(next_result(
             false,
             "no_change",
             None,
             Some("no_change"),
+            &ctx.provider_status_report,
         ))?,
         None => println!("no change"),
     }

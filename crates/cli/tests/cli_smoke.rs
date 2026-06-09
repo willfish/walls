@@ -175,6 +175,46 @@ fn cli_manual_next_works_when_paused() {
     assert_eq!(value["changed"], false);
     assert_eq!(value["status"], "no_change");
     assert_eq!(value["exit_code_reason"], "no_change");
+    let attempts = value["provider_attempts"]
+        .as_array()
+        .expect("provider_attempts array");
+    assert!(attempts.iter().any(|attempt| {
+        attempt["provider_kind"] == "local"
+            && attempt["operation"] == "advance_next"
+            && attempt["outcome"]["result"] == "skipped"
+            && attempt["outcome"]["reason"] == "disabled"
+    }));
+}
+
+#[test]
+fn cli_next_json_includes_provider_attempts_for_applied_wallpaper() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home) = setup_xdg_home(tmp.path());
+
+    let assert = walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["next", "--json"])
+        .assert()
+        .success();
+    let value: serde_json::Value =
+        serde_json::from_slice(&assert.get_output().stdout).expect("next json");
+    assert_eq!(value["command"], "next");
+    assert_eq!(value["changed"], true);
+    assert_eq!(value["status"], "applied");
+    assert!(value["path"]
+        .as_str()
+        .expect("applied path")
+        .ends_with("images/a.jpg"));
+    let attempts = value["provider_attempts"]
+        .as_array()
+        .expect("provider_attempts array");
+    assert!(attempts.iter().any(|attempt| {
+        attempt["provider_kind"] == "local"
+            && attempt["operation"] == "local_source_listing"
+            && attempt["outcome"]["result"] == "applied"
+            && attempt["outcome"]["candidate_count"] == 1
+    }));
 }
 
 #[test]
