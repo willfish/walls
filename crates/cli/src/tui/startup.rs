@@ -11,7 +11,10 @@ pub(crate) struct StartupIntro {
 }
 
 impl StartupIntro {
-    const TOTAL_TICKS: u8 = 3;
+    const TOTAL_TICKS: u8 = 10;
+    const ACTIVE_POLL_MS: u64 = 200;
+    const PROGRESS_WIDTH: usize = 18;
+    const PHASE_WIDTH: usize = 16;
     const SPINNER: [&'static str; 4] = ["|", "/", "-", "\\"];
 
     pub(crate) fn from_env() -> Self {
@@ -56,7 +59,7 @@ impl StartupIntro {
 
     pub(crate) fn poll_interval(self) -> std::time::Duration {
         if self.is_active() {
-            std::time::Duration::from_millis(80)
+            std::time::Duration::from_millis(Self::ACTIVE_POLL_MS)
         } else {
             std::time::Duration::from_millis(200)
         }
@@ -64,6 +67,27 @@ impl StartupIntro {
 
     pub(crate) fn spinner(self) -> &'static str {
         Self::SPINNER[self.frame % Self::SPINNER.len()]
+    }
+
+    fn progress(self) -> String {
+        let completed = usize::from(Self::TOTAL_TICKS.saturating_sub(self.remaining_ticks));
+        let filled = (completed * Self::PROGRESS_WIDTH / usize::from(Self::TOTAL_TICKS))
+            .min(Self::PROGRESS_WIDTH);
+        format!(
+            "[{}{}]",
+            "=".repeat(filled),
+            " ".repeat(Self::PROGRESS_WIDTH - filled)
+        )
+    }
+
+    fn phase(self) -> String {
+        let phase = match self.frame % 4 {
+            0 => "thinking warmly",
+            1 => "checking vibes",
+            2 => "polishing pixels",
+            _ => "one sec pls",
+        };
+        format!("{phase:<width$}", width = Self::PHASE_WIDTH)
     }
 }
 
@@ -89,7 +113,7 @@ pub(crate) fn draw_startup_intro(f: &mut Frame, app: &App, intro: &StartupIntro)
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let intro_area = centered_rect(inner, 36, 5);
+    let intro_area = centered_rect(inner, 42, 7);
     let paragraph = Paragraph::new(vec![
         Line::from(vec![
             Span::styled("walls", theme.accent()),
@@ -100,6 +124,12 @@ pub(crate) fn draw_startup_intro(f: &mut Frame, app: &App, intro: &StartupIntro)
             "preparing your wallpaper console",
             theme.muted(),
         )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(intro.progress(), theme.key_hint()),
+            Span::raw(" "),
+            Span::styled(intro.phase(), theme.muted()),
+        ]),
     ])
     .alignment(Alignment::Center);
     f.render_widget(paragraph, intro_area);

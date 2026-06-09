@@ -9,6 +9,7 @@ mod startup;
 mod style;
 
 use std::io::{stdout, IsTerminal};
+use std::thread;
 
 use crate::tui::app::EditTarget;
 use anyhow::Context;
@@ -116,6 +117,7 @@ pub fn run(startup_message: Option<String>, tray_owns_rotation: bool) -> anyhow:
         app.set_message(style::StatusKind::Neutral, message);
     }
     let mut startup_intro = StartupIntro::from_env();
+    let _intro_prewarm = start_intro_preview_prewarm(&app, startup_intro.is_active());
     IN_TUI.store(true, Ordering::Relaxed);
     #[cfg(feature = "tui-preview")]
     let mut preview = preview::ImagePreview::detect();
@@ -163,6 +165,39 @@ pub fn run(startup_message: Option<String>, tray_owns_rotation: bool) -> anyhow:
     }
 
     Ok(())
+}
+
+fn start_intro_preview_prewarm(app: &App, enabled: bool) -> Option<thread::JoinHandle<()>> {
+    const INTRO_PREWARM_LIMIT: usize = 32;
+
+    if !enabled {
+        return None;
+    }
+
+    let state = app.ctx.state.clone();
+    let cache_dir = app.ctx.paths.cache_dir.clone();
+    thread::Builder::new()
+        .name("walls-tui-intro-preview-prewarm".into())
+        .spawn(move || {
+            let sources =
+                walls_core::preview_cache::previewable_paths_from_state(&state, &cache_dir)
+                    .into_iter()
+                    .take(INTRO_PREWARM_LIMIT);
+            let stats = walls_core::preview_cache::prewarm_preview_thumbnails(
+                sources,
+                &cache_dir,
+                walls_core::preview_cache::DEFAULT_PREVIEW_SIZE,
+            );
+            if stats.attempted > 0 {
+                tracing::debug!(
+                    "startup preview prewarm: attempted={} warmed={} failed={}",
+                    stats.attempted,
+                    stats.warmed,
+                    stats.failed
+                );
+            }
+        })
+        .ok()
 }
 
 fn require_tty() -> anyhow::Result<()> {
@@ -3591,6 +3626,8 @@ mod tests {
 
         assert!(text.contains("walls"), "{text}");
         assert!(text.contains("preparing your wallpaper console"), "{text}");
+        assert!(text.contains("[                  ]"), "{text}");
+        assert!(text.contains("thinking warmly"), "{text}");
         assert!(text.contains("|"), "{text}");
         assert!(!text.contains("Config Now History"), "{text}");
     }
@@ -3600,6 +3637,7 @@ mod tests {
         let mut intro = StartupIntro::enabled();
 
         assert!(intro.is_active());
+        assert_eq!(intro.poll_interval(), std::time::Duration::from_millis(200));
         assert_eq!(intro.spinner(), "|");
 
         intro.tick();
@@ -3610,7 +3648,9 @@ mod tests {
         assert!(intro.is_active());
         assert_eq!(intro.spinner(), "-");
 
-        intro.tick();
+        for _ in 0..8 {
+            intro.tick();
+        }
         assert!(!intro.is_active());
         assert_eq!(intro.poll_interval(), std::time::Duration::from_millis(200));
     }
