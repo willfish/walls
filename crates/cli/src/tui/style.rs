@@ -1,4 +1,5 @@
 use ratatui::prelude::*;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,6 +14,17 @@ pub enum StatusKind {
     Success,
     Warning,
     Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateKind {
+    Empty,
+    Disabled,
+    Unavailable,
+    MissingConfig,
+    ValidationWarning,
+    ValidationError,
+    Loading,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -175,42 +187,69 @@ impl Theme {
             }
         }
     }
+
+    pub fn state(self, kind: StateKind) -> Style {
+        self.status(kind.status_kind())
+    }
 }
 
-/// Last-resort classifier for text-only preview statuses that do not carry a semantic role yet.
-///
-/// Normal TUI footer messages use `App::message_kind` instead of this heuristic.
-#[cfg(feature = "tui-preview")]
-pub fn status_kind(message: &str) -> StatusKind {
-    let lower = message.to_ascii_lowercase();
-    if lower.contains("error")
-        || lower.contains("failed")
-        || lower.contains("unavailable")
-        || lower.contains("unsupported")
-    {
-        StatusKind::Error
-    } else if lower.contains("missing")
-        || lower.contains("disabled")
-        || lower.contains("needs more space")
-    {
-        StatusKind::Warning
-    } else if lower.contains("applied")
-        || lower.contains("favorited")
-        || lower.contains("next:")
-        || lower.contains("prev:")
-        || lower.contains("search:")
-    {
-        StatusKind::Success
-    } else {
-        StatusKind::Neutral
+impl StateKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Empty => "empty",
+            Self::Disabled => "disabled",
+            Self::Unavailable => "unavailable",
+            Self::MissingConfig => "missing",
+            Self::ValidationWarning => "warning",
+            Self::ValidationError => "error",
+            Self::Loading => "loading",
+        }
     }
+
+    fn status_kind(self) -> StatusKind {
+        match self {
+            Self::Empty | Self::Loading => StatusKind::Neutral,
+            Self::Disabled | Self::Unavailable | Self::MissingConfig | Self::ValidationWarning => {
+                StatusKind::Warning
+            }
+            Self::ValidationError => StatusKind::Error,
+        }
+    }
+}
+
+pub fn state_text(kind: StateKind, message: impl AsRef<str>) -> String {
+    format!("[{}] {}", kind.label(), message.as_ref())
+}
+
+pub fn state_parts(text: &str) -> Option<(StateKind, &str)> {
+    let trimmed = text.trim_start();
+    let (label, rest) = trimmed.strip_prefix('[')?.split_once("] ")?;
+    let kind = match label {
+        "empty" => StateKind::Empty,
+        "disabled" => StateKind::Disabled,
+        "unavailable" => StateKind::Unavailable,
+        "missing" => StateKind::MissingConfig,
+        "warning" => StateKind::ValidationWarning,
+        "error" => StateKind::ValidationError,
+        "loading" => StateKind::Loading,
+        _ => return None,
+    };
+    Some((kind, rest))
+}
+
+pub fn state_line(kind: StateKind, message: impl Into<String>, theme: Theme) -> Line<'static> {
+    let message = message.into();
+    Line::from(vec![
+        Span::styled(format!("[{}] ", kind.label()), theme.state(kind)),
+        Span::styled(message, theme.state(kind)),
+    ])
 }
 
 #[cfg(test)]
 mod tests {
     use ratatui::prelude::{Color, Modifier, Style};
 
-    use super::{ColorMode, StatusKind, Theme};
+    use super::{state_text, ColorMode, StateKind, StatusKind, Theme};
 
     #[test]
     fn color_mode_parses_no_colour_aliases() {
@@ -265,5 +304,18 @@ mod tests {
             .status(StatusKind::Error)
             .add_modifier
             .contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn state_text_uses_no_colour_labels() {
+        assert_eq!(state_text(StateKind::Empty, "no logs"), "[empty] no logs");
+        assert_eq!(
+            state_text(StateKind::MissingConfig, "path not set"),
+            "[missing] path not set"
+        );
+        assert_eq!(
+            state_text(StateKind::ValidationWarning, "API key missing"),
+            "[warning] API key missing"
+        );
     }
 }
