@@ -192,6 +192,7 @@ pub(crate) const DISPLAY_MODE_CHOICES: &[&str] = &[
 pub(crate) const LIBRARY_BLOCK_FIELDS: &[&str] = &[
     "quota_enabled",
     "quota_size_mb",
+    "use_landscape_enabled",
     "avoid_recent",
     "refetch_when_cache_below",
 ];
@@ -351,6 +352,7 @@ pub(crate) fn block_field_label(block: usize, key: &str) -> String {
         CONFIG_BLOCK_LIBRARY => match key {
             "quota_enabled" => "Quota enabled".into(),
             "quota_size_mb" => "Quota size (MB)".into(),
+            "use_landscape_enabled" => "Use landscape filter".into(),
             "avoid_recent" => "Avoid recent count".into(),
             "refetch_when_cache_below" => "Refetch below cached count".into(),
             other => other.into(),
@@ -413,7 +415,7 @@ pub(crate) fn block_field_kind(block: usize, key: &str) -> EditFieldKind {
             _ => EditFieldKind::Text,
         },
         CONFIG_BLOCK_LIBRARY => match key {
-            "quota_enabled" => EditFieldKind::Bool,
+            "quota_enabled" | "use_landscape_enabled" => EditFieldKind::Bool,
             _ => EditFieldKind::Text,
         },
         CONFIG_BLOCK_APPLY_DISPLAY => match key {
@@ -637,6 +639,7 @@ fn block_field_value_at(
         CONFIG_BLOCK_LIBRARY => match *key {
             "quota_enabled" => config.quota.enabled.to_string(),
             "quota_size_mb" => config.quota.size_mb.to_string(),
+            "use_landscape_enabled" => config.selection.use_landscape_enabled.to_string(),
             "avoid_recent" => config.selection.avoid_recent.to_string(),
             "refetch_when_cache_below" => config.selection.refetch_when_cache_below.to_string(),
             _ => String::new(),
@@ -766,6 +769,10 @@ fn library_block_draft(config: &Config) -> std::collections::HashMap<String, Str
     let mut vals = std::collections::HashMap::new();
     vals.insert("quota_enabled".into(), config.quota.enabled.to_string());
     vals.insert("quota_size_mb".into(), config.quota.size_mb.to_string());
+    vals.insert(
+        "use_landscape_enabled".into(),
+        config.selection.use_landscape_enabled.to_string(),
+    );
     vals.insert(
         "avoid_recent".into(),
         config.selection.avoid_recent.to_string(),
@@ -942,6 +949,10 @@ fn apply_library_block_draft(
         if let Ok(size_mb) = v.parse::<u64>() {
             config.quota.size_mb = size_mb;
         }
+    }
+    if let Some(v) = draft.get("use_landscape_enabled") {
+        config.selection.use_landscape_enabled =
+            App::parse_bool_like(v).unwrap_or(config.selection.use_landscape_enabled);
     }
     if let Some(v) = draft.get("avoid_recent") {
         if let Ok(avoid_recent) = v.parse::<usize>() {
