@@ -103,6 +103,33 @@ impl WallsCtx {
         self.with_state_lock(WallsCtx::trash_current_inner)
     }
 
+    pub fn plan_trash_current(&self) -> anyhow::Result<TrashPlan> {
+        let current = self
+            .state
+            .current
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no current wallpaper"))?;
+        let original = current.original_path.clone();
+        let composed = current.composed_path.clone();
+        Ok(TrashPlan {
+            original_path: original.clone(),
+            composed_path: if composed == original {
+                None
+            } else {
+                Some(composed.clone())
+            },
+            original_exists: Path::new(&original).is_file(),
+            composed_exists: composed != original && Path::new(&composed).is_file(),
+            cache_queue_id: current.wallhaven_id.clone(),
+            history_entries_removed: self
+                .state
+                .history
+                .iter()
+                .filter(|entry| *entry == &original)
+                .count(),
+        })
+    }
+
     fn trash_current_inner(&mut self) -> anyhow::Result<()> {
         let Some(current) = self.state.current.take() else {
             anyhow::bail!("no current wallpaper");
@@ -141,4 +168,14 @@ impl WallsCtx {
         let src = Path::new(&current.original_path);
         crate::library::copy_into_dir(src, &self.paths.favorites_dir)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrashPlan {
+    pub original_path: String,
+    pub composed_path: Option<String>,
+    pub original_exists: bool,
+    pub composed_exists: bool,
+    pub cache_queue_id: Option<String>,
+    pub history_entries_removed: usize,
 }

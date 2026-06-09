@@ -21,6 +21,11 @@ fn trash_current_removes_file_and_clears_state() {
     ctx.apply_file(&wall, ApplyTrigger::Manual).unwrap();
     assert!(wall.exists());
 
+    let plan = ctx.plan_trash_current().unwrap();
+    assert_eq!(plan.original_path, wall.display().to_string());
+    assert!(plan.original_exists);
+    assert_eq!(plan.history_entries_removed, 1);
+
     ctx.trash_current().unwrap();
     assert!(!wall.exists());
     assert!(ctx.state.current.is_none());
