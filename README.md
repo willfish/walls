@@ -7,6 +7,52 @@ small JSON config under `~/.config/walls`.
 It is built around the way I actually use wallpapers: COSMIC first, Nix-friendly,
 scriptable from the CLI, and quiet enough to leave running all day.
 
+## Fastest Path To A Working Wallpaper
+
+From a clone, this is the shortest reliable path to install, create config, check
+the machine, and apply one known local image:
+
+```bash
+nix develop
+cargo install --path crates/cli --locked
+cargo install --path crates/tray --locked
+
+mkdir -p ~/.config/walls
+cp config.example.json ~/.config/walls/config.json
+cp secrets.example.json ~/.config/walls/secrets.json
+
+walls doctor
+walls apply ~/Pictures/wallpaper.jpg
+walls current
+walls tui
+```
+
+Expected shape:
+
+```text
+$ walls doctor
+walls doctor: ready
+...
+
+$ walls apply ~/Pictures/wallpaper.jpg
+/home/alex/Pictures/wallpaper.jpg
+
+$ walls current
+/home/alex/Pictures/wallpaper.jpg
+```
+
+If a step fails, run `walls doctor` first and follow its `fix:` lines. For
+journey-led setup and recovery paths, see:
+
+- [First install and first wallpaper](docs/journeys.md#first-install-and-first-wallpaper)
+- [Local-only rotation](docs/journeys.md#local-only-rotation-from-a-folder)
+- [Online providers](docs/journeys.md#online-providers)
+- [Tray and autostart](docs/journeys.md#tray-and-autostart)
+- [TUI usage and config editing](docs/journeys.md#tui-usage-and-config-editing)
+- [Cache and quota management](docs/journeys.md#cache-and-quota-management)
+- [CLI scripting and JSON output](docs/journeys.md#cli-scripting-and-json-output)
+- [Troubleshooting guide](docs/troubleshooting.md)
+
 ![walls CLI demo](demo/demo.gif)
 
 ## What It Does
@@ -37,6 +83,10 @@ nix-shell -p gpu-screen-recorder ffmpeg --run './demo/record-tui.sh'
 ```
 
 Headless TUI behaviour is covered separately by `scripts/validate-tui-pty.sh`.
+
+The TUI changes faster than a README GIF. Use `walls tui` and press `?` for
+current key help; see [docs/tui.md](docs/tui.md) for design and verification
+contracts.
 
 ## Scope And Non-Goals
 
@@ -88,6 +138,8 @@ declarative config tooling:
 Keep the example `$schema` paths when copying from the repo, or replace them with
 raw GitHub URLs when managing config outside the checkout.
 
+Run `walls config validate` after hand-editing config or secrets.
+
 ## Architecture
 
 Component flow (source: [`docs/diagrams/architecture.mmd`](docs/diagrams/architecture.mmd)):
@@ -120,26 +172,13 @@ flowchart TD
 - **Cache** — downloaded Wallhaven images and composed outputs.
 - **Triggers** — `walls-tray` polls `change.interval_secs` and calls `advance_next`; tray menu runs manual `prev` / `next` / `toggle-pause` and opens TUI. TUI runs the scheduler only when the tray did not start.
 
-### TUI layout (`walls tui`)
+### TUI (`walls tui`)
 
-Terminal screen regions (not a second runtime — same `walls` binary as the CLI). See [`docs/tui.md`](docs/tui.md) for the TUI architecture, style, layout, preview, and verification contracts.
-
-```
-┌ walls ────────────────────────────────────────────────┐
-│ [Config][Now][History][Browse][Search][Logs] 1-6 tabs │
-├───────────────────────────────────────────────────────┤
-│ > list (tab-specific)                                 │
-│   Config   sources, paths, apply, rotation            │
-│   Now      current wallpaper paths                    │
-│   History  j/k · Enter apply                          │
-│   Browse   queue · locals · history · Enter apply     │
-│   Search   / i query · Enter search/apply (API)       │
-│   Logs     recent TUI and command status              │
-├ keys ─────────────────────────────────────────────────┤
-│ n/p  f  d?  space  :  ?  q                            │
-└───────────────────────────────────────────────────────┘
-  ? key help   :next :prev :pause :favorite :status :quit   (Esc cancels : mode)
-```
+`walls tui` is the same runtime as the CLI, presented as a keyboard-first
+terminal control surface for current wallpaper state, history, browsing, search,
+config editing, and logs. Press `?` inside the TUI for current key help rather
+than relying on duplicated key tables in docs. See [`docs/tui.md`](docs/tui.md)
+for architecture, style, layout, preview, and verification contracts.
 
 ## Development (Nix)
 
@@ -161,18 +200,13 @@ Rust conventions for module boundaries, errors, validation, provider I/O, and te
 
 **Local hooks** (Nix-managed, like [forte#194](https://github.com/willfish/forte/pull/194)): on `nix develop` / direnv, **commit** runs hygiene + `nixfmt` + `rustfmt` + `actionlint` + shell checks; **push** runs `clippy` and `cargo test --workspace`. Run everything with `nix fmt` or `pre-commit run -a`.
 
-## Quick start
+## Journey Guides
 
-After [install](#install):
-
-```bash
-walls apply ~/Pictures/wallpaper.jpg
-walls doctor       # first-run readiness check
-walls next
-walls status
-walls tui          # or: walls (no args, on a TTY)
-walls-tray         # tray menu → walls prev/next/toggle-pause
-```
+Use the [journey guide](docs/journeys.md) when setting up a real machine or
+recovering a broken workflow. It covers first install, local folders, online
+providers, tray/autostart, apply backends, TUI config editing, cache/quota, and
+JSON scripting. Use the [troubleshooting guide](docs/troubleshooting.md) when
+you already have a symptom.
 
 ## Commands
 
