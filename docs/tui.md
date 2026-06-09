@@ -154,13 +154,13 @@ or deliberately defers it to a later focused slice.
 | `config.apply.cosmic.entry.rotation_frequency` | Manual | COSMIC-specific low-level patch field. |
 | `config.apply.cosmic.entry.filter_by_theme` | Manual | COSMIC-specific low-level patch field. |
 | `config.apply.custom_script` | Read-only | Apply block context; manual edit keeps trusted script changes explicit. |
-| `config.display.mode` | Read-only | Display block context; editable display controls are deferred. |
-| `config.display.auto_rotate` | Read-only | Display block context. |
-| `config.display.imagemagick_command` | Read-only | Display block context. |
-| `config.display.target_width` | Read-only | Display block context. |
-| `config.display.target_height` | Read-only | Display block context. |
-| `config.display.filters.enabled` | Read-only | Display block context. |
-| `config.display.filters.command` | Read-only | Display block context. |
+| `config.display.mode` | Editable | Apply/display edit form choice field. |
+| `config.display.auto_rotate` | Editable | Apply/display edit form boolean. |
+| `config.display.imagemagick_command` | Editable | Apply/display edit form text field. |
+| `config.display.target_width` | Editable | Apply/display edit form numeric text field; width and height validate as a pair. |
+| `config.display.target_height` | Editable | Apply/display edit form numeric text field; width and height validate as a pair. |
+| `config.display.filters.enabled` | Editable | Apply/display edit form boolean. |
+| `config.display.filters.command` | Editable | Apply/display edit form text field. |
 | `config.display.filters.filters[].name` | Manual | Multi-row ImageMagick filter editing remains file-based. |
 | `config.display.filters.filters[].args` | Manual | Multi-row ImageMagick filter editing remains file-based. |
 | `config.selection.use_landscape_enabled` | Read-only | Selection block context; editable selection controls are deferred. |

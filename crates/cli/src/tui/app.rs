@@ -163,11 +163,31 @@ pub(crate) const SEARCH_FILTER_FIELDS: &[&str] = &[
 
 pub(crate) const TUI_BLOCK_FIELDS: &[&str] = &["key_profile"];
 pub(crate) const TUI_KEY_PROFILE_CHOICES: &[&str] = &["emacs", "vim"];
+pub(crate) const DISPLAY_MODE_CHOICES: &[&str] = &[
+    "os",
+    "zoom",
+    "fill-with-black",
+    "fill-with-blur",
+    "spanned",
+    "centered",
+    "scaled",
+    "stretched",
+    "wallpaper",
+];
 pub(crate) const LIBRARY_BLOCK_FIELDS: &[&str] = &[
     "quota_enabled",
     "quota_size_mb",
     "avoid_recent",
     "refetch_when_cache_below",
+];
+pub(crate) const APPLY_DISPLAY_BLOCK_FIELDS: &[&str] = &[
+    "display_mode",
+    "auto_rotate",
+    "imagemagick_command",
+    "target_width",
+    "target_height",
+    "filters_enabled",
+    "filters_command",
 ];
 
 fn wallhaven_bit_at(s: &str, idx: usize, default: bool) -> bool {
@@ -315,6 +335,16 @@ pub(crate) fn block_field_label(block: usize, key: &str) -> String {
             "refetch_when_cache_below" => "Refetch below cached count".into(),
             other => other.into(),
         },
+        CONFIG_BLOCK_APPLY_DISPLAY => match key {
+            "display_mode" => "Display mode".into(),
+            "auto_rotate" => "EXIF auto-rotate".into(),
+            "imagemagick_command" => "ImageMagick command".into(),
+            "target_width" => "Target width".into(),
+            "target_height" => "Target height".into(),
+            "filters_enabled" => "Filters enabled".into(),
+            "filters_command" => "Filter command".into(),
+            other => other.into(),
+        },
         WALLHAVEN_FIELDS_BLOCK => match key {
             "enabled" => "Enabled".into(),
             "prefer" => "Prefer".into(),
@@ -359,6 +389,11 @@ pub(crate) fn block_field_kind(block: usize, key: &str) -> EditFieldKind {
         },
         CONFIG_BLOCK_LIBRARY => match key {
             "quota_enabled" => EditFieldKind::Bool,
+            _ => EditFieldKind::Text,
+        },
+        CONFIG_BLOCK_APPLY_DISPLAY => match key {
+            "display_mode" => EditFieldKind::Choice(DISPLAY_MODE_CHOICES),
+            "auto_rotate" | "filters_enabled" => EditFieldKind::Bool,
             _ => EditFieldKind::Text,
         },
         WALLHAVEN_FIELDS_BLOCK => match key {
@@ -537,6 +572,7 @@ fn block_field_value_at(
     let keys = match block {
         CONFIG_BLOCK_ROTATION => ROTATION_BLOCK_FIELDS,
         CONFIG_BLOCK_LIBRARY => LIBRARY_BLOCK_FIELDS,
+        CONFIG_BLOCK_APPLY_DISPLAY => APPLY_DISPLAY_BLOCK_FIELDS,
         CONFIG_BLOCK_TUI => TUI_BLOCK_FIELDS,
         WALLHAVEN_FIELDS_BLOCK => WALLHAVEN_BLOCK_FIELDS,
         _ => return String::new(),
@@ -576,6 +612,24 @@ fn block_field_value_at(
             "quota_size_mb" => config.quota.size_mb.to_string(),
             "avoid_recent" => config.selection.avoid_recent.to_string(),
             "refetch_when_cache_below" => config.selection.refetch_when_cache_below.to_string(),
+            _ => String::new(),
+        },
+        CONFIG_BLOCK_APPLY_DISPLAY => match *key {
+            "display_mode" => config.display.mode.clone(),
+            "auto_rotate" => config.display.auto_rotate.to_string(),
+            "imagemagick_command" => config.display.imagemagick_command.clone(),
+            "target_width" => config
+                .display
+                .target_width
+                .map(|width| width.to_string())
+                .unwrap_or_default(),
+            "target_height" => config
+                .display
+                .target_height
+                .map(|height| height.to_string())
+                .unwrap_or_default(),
+            "filters_enabled" => config.display.filters.enabled.to_string(),
+            "filters_command" => config.display.filters.command.clone(),
             _ => String::new(),
         },
         WALLHAVEN_FIELDS_BLOCK => match *key {
@@ -656,6 +710,7 @@ fn commit_block_field_buffer(
     let keys = match block {
         CONFIG_BLOCK_ROTATION => ROTATION_BLOCK_FIELDS,
         CONFIG_BLOCK_LIBRARY => LIBRARY_BLOCK_FIELDS,
+        CONFIG_BLOCK_APPLY_DISPLAY => APPLY_DISPLAY_BLOCK_FIELDS,
         CONFIG_BLOCK_TUI => TUI_BLOCK_FIELDS,
         WALLHAVEN_FIELDS_BLOCK => WALLHAVEN_BLOCK_FIELDS,
         _ => return,
@@ -686,6 +741,41 @@ fn library_block_draft(config: &Config) -> std::collections::HashMap<String, Str
     vals.insert(
         "refetch_when_cache_below".into(),
         config.selection.refetch_when_cache_below.to_string(),
+    );
+    vals
+}
+
+fn display_block_draft(config: &Config) -> std::collections::HashMap<String, String> {
+    let mut vals = std::collections::HashMap::new();
+    vals.insert("display_mode".into(), config.display.mode.clone());
+    vals.insert("auto_rotate".into(), config.display.auto_rotate.to_string());
+    vals.insert(
+        "imagemagick_command".into(),
+        config.display.imagemagick_command.clone(),
+    );
+    vals.insert(
+        "target_width".into(),
+        config
+            .display
+            .target_width
+            .map(|width| width.to_string())
+            .unwrap_or_default(),
+    );
+    vals.insert(
+        "target_height".into(),
+        config
+            .display
+            .target_height
+            .map(|height| height.to_string())
+            .unwrap_or_default(),
+    );
+    vals.insert(
+        "filters_enabled".into(),
+        config.display.filters.enabled.to_string(),
+    );
+    vals.insert(
+        "filters_command".into(),
+        config.display.filters.command.clone(),
     );
     vals
 }
@@ -761,6 +851,57 @@ fn apply_library_block_draft(
     if let Some(v) = draft.get("refetch_when_cache_below") {
         if let Ok(refetch_when_cache_below) = v.parse::<usize>() {
             config.selection.refetch_when_cache_below = refetch_when_cache_below;
+        }
+    }
+}
+
+fn parse_optional_u32(value: &str) -> Option<Option<u32>> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Some(None);
+    }
+    trimmed.parse::<u32>().ok().filter(|n| *n > 0).map(Some)
+}
+
+fn apply_display_block_draft(
+    config: &mut Config,
+    draft: &std::collections::HashMap<String, String>,
+) {
+    if let Some(v) = draft.get("display_mode") {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            config.display.mode = trimmed.to_string();
+        }
+    }
+    if let Some(v) = draft.get("auto_rotate") {
+        config.display.auto_rotate = App::parse_bool_like(v).unwrap_or(config.display.auto_rotate);
+    }
+    if let Some(v) = draft.get("imagemagick_command") {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            config.display.imagemagick_command = trimmed.to_string();
+        }
+    }
+    if let Some(v) = draft
+        .get("target_width")
+        .and_then(|v| parse_optional_u32(v))
+    {
+        config.display.target_width = v;
+    }
+    if let Some(v) = draft
+        .get("target_height")
+        .and_then(|v| parse_optional_u32(v))
+    {
+        config.display.target_height = v;
+    }
+    if let Some(v) = draft.get("filters_enabled") {
+        config.display.filters.enabled =
+            App::parse_bool_like(v).unwrap_or(config.display.filters.enabled);
+    }
+    if let Some(v) = draft.get("filters_command") {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            config.display.filters.command = trimmed.to_string();
         }
     }
 }
@@ -1734,6 +1875,14 @@ impl App {
                 field_buffer: String::new(),
                 validation_errors: vec![],
             }),
+            EditTarget::Block(CONFIG_BLOCK_APPLY_DISPLAY) => Some(EditSession {
+                target: target.clone(),
+                draft_source: None,
+                draft_block_values: display_block_draft(&self.ctx.config),
+                field_cursor: 0,
+                field_buffer: String::new(),
+                validation_errors: vec![],
+            }),
             EditTarget::Block(CONFIG_BLOCK_TUI) => Some(EditSession {
                 target: target.clone(),
                 draft_source: None,
@@ -1793,6 +1942,7 @@ impl App {
             }
             EditTarget::Block(CONFIG_BLOCK_ROTATION) => ROTATION_BLOCK_FIELDS.len(),
             EditTarget::Block(CONFIG_BLOCK_LIBRARY) => LIBRARY_BLOCK_FIELDS.len(),
+            EditTarget::Block(CONFIG_BLOCK_APPLY_DISPLAY) => APPLY_DISPLAY_BLOCK_FIELDS.len(),
             EditTarget::Block(CONFIG_BLOCK_TUI) => TUI_BLOCK_FIELDS.len(),
             EditTarget::Block(_) => 0,
             EditTarget::Wallhaven => WALLHAVEN_BLOCK_FIELDS.len(),
@@ -1822,6 +1972,7 @@ impl App {
                 let keys = match *block {
                     CONFIG_BLOCK_ROTATION => ROTATION_BLOCK_FIELDS,
                     CONFIG_BLOCK_LIBRARY => LIBRARY_BLOCK_FIELDS,
+                    CONFIG_BLOCK_APPLY_DISPLAY => APPLY_DISPLAY_BLOCK_FIELDS,
                     CONFIG_BLOCK_TUI => TUI_BLOCK_FIELDS,
                     _ => &[] as &[&str],
                 };
@@ -2198,6 +2349,16 @@ impl App {
                     .map(|diagnostic| diagnostic.to_string())
                     .collect()
             }
+            EditTarget::Block(CONFIG_BLOCK_APPLY_DISPLAY) => {
+                if config.display.target_width.is_some() ^ config.display.target_height.is_some() {
+                    vec![
+                        "display target: set both target_width and target_height, or clear both"
+                            .into(),
+                    ]
+                } else {
+                    Vec::new()
+                }
+            }
             EditTarget::Block(_) => Vec::new(),
         }
     }
@@ -2322,6 +2483,9 @@ impl App {
                 }
                 EditTarget::Block(CONFIG_BLOCK_LIBRARY) => {
                     apply_library_block_draft(&mut temp, &sess.draft_block_values);
+                }
+                EditTarget::Block(CONFIG_BLOCK_APPLY_DISPLAY) => {
+                    apply_display_block_draft(&mut temp, &sess.draft_block_values);
                 }
                 EditTarget::Block(CONFIG_BLOCK_TUI) => {
                     apply_tui_block_draft(&mut temp, &sess.draft_block_values);
@@ -2452,6 +2616,10 @@ impl App {
             EditTarget::Block(CONFIG_BLOCK_LIBRARY) => {
                 apply_library_block_draft(&mut config, &sess.draft_block_values);
                 success_msg = "config saved: library".into();
+            }
+            EditTarget::Block(CONFIG_BLOCK_APPLY_DISPLAY) => {
+                apply_display_block_draft(&mut config, &sess.draft_block_values);
+                success_msg = "config saved: display".into();
             }
             EditTarget::Block(CONFIG_BLOCK_TUI) => {
                 apply_tui_block_draft(&mut config, &sess.draft_block_values);
