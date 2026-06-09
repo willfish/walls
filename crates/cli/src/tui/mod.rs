@@ -1686,6 +1686,12 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
                     walls_core::config::SECRETS_EDIT_HINT.into(),
                     app::EditFieldKind::Text,
                 ));
+            } else if src.source_type == "wallhaven" {
+                fields.push((
+                    "Wallhaven API key".into(),
+                    walls_core::config::SECRETS_EDIT_HINT.into(),
+                    app::EditFieldKind::Text,
+                ));
             }
         } else if matches!(
             &sess.target,
@@ -4234,7 +4240,32 @@ mod tests {
         assert!(text.contains("Wallhaven space"), "{text}");
         assert!(text.contains("Search query"), "{text}");
         assert!(text.contains("Minimum resolution"), "{text}");
+        assert!(text.contains("Wallhaven API key"), "{text}");
+        assert!(
+            text.contains(walls_core::config::SECRETS_EDIT_HINT),
+            "{text}"
+        );
         assert!(!text.contains("Label"), "{text}");
+    }
+
+    #[test]
+    fn wallhaven_subnav_shows_api_key_presence() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "internet_enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [
+                    { "enabled": true, "type": "wallhaven", "query": "jupiter" }
+                ]
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
+        app.enter_config_subnav();
+
+        let text = render_text(&app, 120, 30);
+        assert!(text.contains("wallhaven api key: [missing]"), "{text}");
     }
 
     #[test]
