@@ -66,6 +66,15 @@ Do not add raw Ratatui colours in render code unless the semantic style module c
 
 `WALLS_TUI_COLOR=never` disables colour. Important states must remain legible through labels, markers, and modifiers, not colour alone. Any new token must define a no-colour representation before it is used.
 
+Colour is allowed to speed up scanning, but it must not be the only carrier of meaning:
+
+- Focus must also use a marker, reverse video, or both (`>`, `▸`, selected row styling).
+- Empty, disabled, unavailable, missing configuration, warning, error, and loading rows must include a text label such as `[empty]`, `[missing]`, or `[warning]`.
+- Validation errors must keep the `!!` cue and include the affected config path plus recovery hint where available.
+- Boolean/config state must use words such as `on`, `off`, `true`, `false`, or `unavailable`, not colour alone.
+- Muted and disabled text should remain readable on dark and light terminal themes. Prefer the terminal foreground plus `DIM` over fixed low-contrast foreground colours for body text.
+- Decorative borders and separators may use quieter styling because they do not carry critical state by themselves.
+
 ## Layout Contracts
 
 Supported terminal size classes are encoded in `terminal_size`:

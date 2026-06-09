@@ -1882,7 +1882,7 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
     use ratatui::layout::Rect;
-    use ratatui::prelude::Style;
+    use ratatui::prelude::{Color, Style};
     use ratatui::Terminal;
     use walls_core::WallsCtx;
 
@@ -2046,9 +2046,16 @@ mod tests {
     }
 
     fn assert_same_status_role(actual: Style, expected: Style) {
-        assert_eq!(actual.fg, expected.fg);
+        assert_eq!(normalized_fg(actual.fg), normalized_fg(expected.fg));
         assert_eq!(actual.add_modifier, expected.add_modifier);
         assert_eq!(actual.sub_modifier, expected.sub_modifier);
+    }
+
+    fn normalized_fg(color: Option<Color>) -> Option<Color> {
+        match color {
+            Some(Color::Reset) | None => None,
+            other => other,
+        }
     }
 
     #[test]
@@ -2695,6 +2702,56 @@ mod tests {
         app.tab = Tab::Logs;
         let logs = render_text(&app, 90, 18);
         assert!(logs.contains("[empty] no logs captured yet"), "{logs}");
+    }
+
+    #[test]
+    fn no_colour_rendering_keeps_critical_states_redundant_in_text() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "internet_enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [ { "enabled": true, "type": "reddit", "query": "wallpapers", "sort": "hot" } ]
+            }),
+            serde_json::json!({}),
+        );
+        app.color_mode = style::ColorMode::Never;
+
+        app.tab = Tab::Search;
+        let search = render_text(&app, 90, 18);
+        assert!(search.contains("[empty] no results"), "{search}");
+
+        app.set_message(style::StatusKind::Success, "applied: /tmp/wall.jpg");
+        let footer = render_text(&app, 90, 18);
+        assert!(footer.contains("applied: /tmp/wall.jpg"), "{footer}");
+
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = 0;
+        let config = render_text(&app, 120, 30);
+        assert!(config.contains("▸ Reddit"), "{config}");
+        assert!(
+            config.contains("reddit api credentials: [missing]"),
+            "{config}"
+        );
+        assert!(
+            config.contains("[warning] Reddit API credentials missing"),
+            "{config}"
+        );
+
+        app.start_edit_for_current();
+        app.editing
+            .as_mut()
+            .expect("editing")
+            .validation_errors
+            .push("sources[0].path is required (hint: choose an existing image folder)".into());
+        let edit = render_text(&app, 90, 24);
+        assert!(edit.contains("!! Validation errors:"), "{edit}");
+        assert!(edit.contains("!! - sources[0].path is required"), "{edit}");
+        assert!(
+            edit.contains("!!   hint: choose an existing image folder"),
+            "{edit}"
+        );
     }
 
     #[test]
