@@ -14,7 +14,7 @@ use std::process::Command;
 
 pub use bin::resolve_walls_bin;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WallsCommand {
     Next,
     Prev,
