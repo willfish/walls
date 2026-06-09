@@ -71,13 +71,22 @@ walls TUI demo recorder
 Output: $GIF_FILE
 Binary: $WALLS tui
 
+For the checked-in README demo, prefer:
+  ./demo/render-tui-gif.sh
+
+This recorder is for a live desktop/window capture. Start from a blank capture
+canvas before opening the portal picker; on Will's COSMIC desktop, use workspace
+3 because it is kept empty for clean recordings.
+
 Suggested capture:
-  1. Select this terminal/window in the portal picker.
-  2. When the TUI opens, press:
-     3  Browse
+  1. Move this terminal to the blank capture workspace/window.
+  2. Select this terminal/window in the portal picker.
+  3. When the TUI opens, press:
+     4  Browse
      j/k move
-     1  Status
+     2  Now
      n  next wallpaper
+     ?  help
      q  quit
 
 EOF

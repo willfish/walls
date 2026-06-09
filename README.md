@@ -53,7 +53,7 @@ journey-led setup and recovery paths, see:
 - [CLI scripting and JSON output](docs/journeys.md#cli-scripting-and-json-output)
 - [Troubleshooting guide](docs/troubleshooting.md)
 
-![walls CLI demo](demo/demo.gif)
+![walls TUI demo](demo/demo-tui.gif)
 
 ## What It Does
 
@@ -68,19 +68,25 @@ journey-led setup and recovery paths, see:
 
 ## Demo
 
-The checked-in GIF shows the isolated CLI workflow: apply an image, inspect
-status, pause rotation, and jump into the TUI entrypoint.
+The checked-in TUI GIF shows the keyboard-first control surface using an isolated
+demo config: startup intro, Config, Browse, Search, Now, manual next, and key
+help. It is generated from the real Ratatui alternate-screen output, so it stays
+reproducible without recording a personal desktop.
+
+```bash
+./demo/render-tui-gif.sh
+```
+
+The older CLI GIF is still useful for command output and scripting:
 
 ```bash
 nix-shell -p asciinema asciinema-agg --run './demo/record-cli.sh'
 ```
 
-The TUI uses the terminal alternate screen, so record it with portal-based screen
-capture instead of asciinema:
+![walls CLI demo](demo/demo.gif)
 
-```bash
-nix-shell -p gpu-screen-recorder ffmpeg --run './demo/record-tui.sh'
-```
+To record the real desktop/window version, use portal-based screen capture from
+a clean workspace/window and follow [`demo/record-tui.sh`](demo/record-tui.sh).
 
 Headless TUI behaviour is covered separately by `scripts/validate-tui-pty.sh`.
 
