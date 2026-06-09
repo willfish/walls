@@ -157,7 +157,7 @@ pub fn dispatch(action: MenuAction) -> ActionOutcome {
                 feedback: Some(ActionFeedback::success("Opened TUI")),
             },
             Err(err) => {
-                let message = format!("Open TUI failed: {err:#}");
+                let message = open_tui_error_message(&err);
                 tracing::warn!("{message}");
                 ActionOutcome {
                     refresh: true,
@@ -172,6 +172,12 @@ pub fn dispatch(action: MenuAction) -> ActionOutcome {
             feedback: None,
         },
     }
+}
+
+fn open_tui_error_message(error: &anyhow::Error) -> String {
+    format!(
+        "Open TUI failed: {error:#}. Run `walls tui` directly or set WALLS_TUI_CMD, for example `ghostty --class=walls -e {{walls}} tui`."
+    )
 }
 
 pub fn tooltip_with_feedback(base: &str, feedback: Option<&ActionFeedback>) -> String {
@@ -351,6 +357,16 @@ mod tests {
             "walls - Previous wallpaper failed: no previous wallpaper"
         );
         assert_eq!(tooltip_with_feedback("walls", None), "walls");
+    }
+
+    #[test]
+    fn open_tui_error_message_includes_recovery() {
+        let error = anyhow::anyhow!("terminal not found");
+        let message = open_tui_error_message(&error);
+
+        assert!(message.contains("terminal not found"), "{message}");
+        assert!(message.contains("walls tui"), "{message}");
+        assert!(message.contains("WALLS_TUI_CMD"), "{message}");
     }
 
     #[test]
