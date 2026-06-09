@@ -24,6 +24,10 @@ pub fn missing_apply_original(path: &std::path::Path) -> String {
     )
 }
 
+pub fn fetch_requires_path() -> &'static str {
+    "fetch requires at least one image path. Run `walls fetch <path>...` or use `walls next --manual --verbose` to select from configured sources."
+}
+
 pub fn tui_next_no_change() -> String {
     format!("next: {}", next_no_change())
 }
@@ -59,6 +63,7 @@ mod tests {
             missing_apply_original(std::path::Path::new("/tmp/missing.jpg"))
                 .contains("walls next --manual --verbose")
         );
+        assert!(fetch_requires_path().contains("walls fetch <path>"));
     }
 
     #[test]
