@@ -232,7 +232,8 @@ fn cli_manual_next_works_when_paused() {
         .arg("next")
         .assert()
         .success()
-        .stdout(predicate::str::contains("no change"));
+        .stdout(predicate::str::contains("no change"))
+        .stdout(predicate::str::contains("walls doctor"));
 
     let assert = walls_cmd()
         .env("XDG_CONFIG_HOME", &config_home)
@@ -324,6 +325,21 @@ fn cli_prev_json_reports_no_previous() {
     assert_eq!(value["changed"], false);
     assert_eq!(value["status"], "no_previous");
     assert_eq!(value["exit_code_reason"], "no_previous");
+}
+
+#[test]
+fn cli_prev_human_reports_recovery_hint_when_history_is_empty() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home) = setup_xdg_home(tmp.path());
+
+    walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .arg("prev")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("no previous wallpaper"))
+        .stdout(predicate::str::contains("at least two wallpapers"));
 }
 
 /// Red test for story #193: TUI launch attempts to start tray but does not block.

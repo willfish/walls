@@ -415,7 +415,10 @@ fn update(
                 Ok(Some(p)) => {
                     app.set_message(style::StatusKind::Success, format!("next: {}", p.display()))
                 }
-                Ok(None) => app.set_message(style::StatusKind::Neutral, "next: no change"),
+                Ok(None) => app.set_message(
+                    style::StatusKind::Neutral,
+                    crate::recovery::tui_next_no_change(),
+                ),
                 Err(e) => app.set_message(style::StatusKind::Error, format!("next error: {e}")),
             }
             return Ok(UpdateEffect::Reload);
@@ -425,7 +428,10 @@ fn update(
                 Ok(Some(p)) => {
                     app.set_message(style::StatusKind::Success, format!("prev: {}", p.display()))
                 }
-                Ok(None) => app.set_message(style::StatusKind::Neutral, "prev: none"),
+                Ok(None) => app.set_message(
+                    style::StatusKind::Neutral,
+                    crate::recovery::tui_no_previous(),
+                ),
                 Err(e) => app.set_message(style::StatusKind::Error, format!("prev error: {e}")),
             }
             return Ok(UpdateEffect::Reload);
@@ -435,7 +441,10 @@ fn update(
                 app.set_message(style::StatusKind::Success, msg);
                 return Ok(UpdateEffect::Reload);
             }
-            Err(e) => app.set_message(style::StatusKind::Error, format!("favorite error: {e}")),
+            Err(e) => app.set_message(
+                style::StatusKind::Error,
+                crate::recovery::favorite_error(&e),
+            ),
         },
         UiAction::Trash => {
             let prompt = app.trash_current_prompt();
@@ -3233,6 +3242,7 @@ mod tests {
 
         assert_eq!(kind, style::StatusKind::Error);
         assert!(message.starts_with("favorite error:"), "{message}");
+        assert!(message.contains("walls apply <path>"), "{message}");
     }
 
     #[test]
