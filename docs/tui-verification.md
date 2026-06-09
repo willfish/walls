@@ -25,6 +25,7 @@ scripts/verify-tui-visual.sh
 - Destructive confirmations: with a current wallpaper, press `d` and confirm the prompt names the target; unrelated keys do not perform unrelated actions, Esc cancels, and a second `d` confirms. Shift+X nuke still requires a second Shift+X and Esc cancels.
 - Narrow terminal around `42x10`: confirm mode/status and `q` remain visible.
 - Wide terminal around `120x32`: confirm the `Now` tab keeps metadata and preview/fallback regions stable.
+- Wide terminal around `120x32`: confirm History and Browse keep the selected list on the left and update the preview/fallback region on the right as `j`/`k` moves.
 - Preview disabled: `WALLS_TUI_PREVIEW=0 walls`
 - Unknown terminal fallback: run with a normal `xterm-256color`-style environment and confirm no raw image escape sequences are shown.
 - Ghostty: run in Ghostty with preview enabled. It should probe the Kitty-compatible graphics path when available, or show `preview unavailable: ...; showing metadata` without corrupting the UI.

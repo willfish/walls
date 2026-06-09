@@ -29,6 +29,7 @@ pub(crate) mod library;
 pub mod lock;
 pub mod paths;
 pub mod pipeline;
+pub mod preview_cache;
 pub(crate) mod provider_http;
 pub mod providers;
 pub mod quota;

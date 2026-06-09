@@ -95,6 +95,8 @@ Preview capability is decided in two stages:
 
 Ghostty and Kitty are treated as Kitty-graphics candidates. iTerm is treated as an iTerm2 candidate. Unknown terminals and explicit preview-disable settings show metadata-only fallback text.
 
+Wide layouts render previews for the current Now wallpaper and for the selected History/Browse item. Preview rendering uses normalized thumbnail files under the walls cache directory before converting the image into the terminal-specific protocol; terminal protocol output is still produced by the TUI because it depends on the active terminal and render area.
+
 Use `WALLS_TUI_PREVIEW=0`, `false`, `no`, `off`, `never`, or `metadata` for metadata-only mode.
 
 ## Verification
