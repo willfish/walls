@@ -10,7 +10,8 @@ use crate::autostart::{
     tray_autostart_enabled_for_desktop, AutostartSyncOpts,
 };
 use crate::config::{
-    secrets_credential_present, source_secrets_key, ApplyBackendSetting, SourceKind,
+    secrets_credential_field, secrets_credential_present, source_secrets_key, ApplyBackendSetting,
+    SourceKind,
 };
 use crate::ctx::WallsCtx;
 use crate::events::{last_run_summary, read_events, LastRunStatus, LastRunSummary};
@@ -685,7 +686,7 @@ fn check_providers(ctx: &WallsCtx, checks: &mut Vec<DoctorCheck>) {
                     DoctorSection::Providers,
                     format!("providers.source_{index}.credentials"),
                     format!("missing credentials for source {}", source.source_type),
-                    "add the required key to secrets.json or disable this source",
+                    source_credentials_remediation(key),
                 )
             });
         }
@@ -713,6 +714,13 @@ fn check_providers(ctx: &WallsCtx, checks: &mut Vec<DoctorCheck>) {
             "add images to a local source, enable a provider, or turn internet providers on",
         ));
     }
+}
+
+fn source_credentials_remediation(key: crate::config::SourceSecretsKey) -> String {
+    format!(
+        "add `{}` to secrets.json, run `walls config validate`, or disable this source",
+        secrets_credential_field(key)
+    )
 }
 
 fn check_local_source_candidates(ctx: &WallsCtx, index: usize, checks: &mut Vec<DoctorCheck>) {
@@ -1223,6 +1231,30 @@ mod tests {
         assert!(report.checks.iter().any(|check| {
             check.id == "providers.candidate_readiness" && check.status == DoctorStatus::Warn
         }));
+    }
+
+    #[test]
+    fn doctor_names_missing_source_credentials_in_recovery_guidance() {
+        let mut config = crate::config::default_config().expect("default config");
+        config.change.internet_enabled = true;
+        let mut source = folder_source();
+        source.source_type = "unsplash".into();
+        source.query = Some("mountains".into());
+        config.sources = vec![source];
+        let (_tmp, ctx) = ctx_with_config(config);
+
+        let report = run_doctor(&ctx, &DoctorOptions::default());
+
+        let check = report
+            .checks
+            .iter()
+            .find(|check| check.id == "providers.source_0.credentials")
+            .expect("credentials check");
+        assert_eq!(check.status, DoctorStatus::Fail);
+        let remediation = check.remediation.as_deref().expect("remediation");
+        assert!(remediation.contains("`unsplash_access_key`"));
+        assert!(remediation.contains("secrets.json"));
+        assert!(remediation.contains("walls config validate"));
     }
 
     #[test]

@@ -39,6 +39,13 @@ pub fn secrets_credential_label(key: SourceSecretsKey) -> &'static str {
     }
 }
 
+pub fn secrets_credential_field(key: SourceSecretsKey) -> &'static str {
+    match key {
+        SourceSecretsKey::UnsplashAccessKey => "unsplash_access_key",
+        SourceSecretsKey::RedditClientId => "reddit_client_id",
+    }
+}
+
 pub fn secrets_credential_warning(key: SourceSecretsKey) -> &'static str {
     match key {
         SourceSecretsKey::UnsplashAccessKey => {
