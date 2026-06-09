@@ -163,7 +163,7 @@ or deliberately defers it to a later focused slice.
 | `config.display.filters.command` | Editable | Apply/display edit form text field. |
 | `config.display.filters.filters[].name` | Manual | Multi-row ImageMagick filter editing remains file-based. |
 | `config.display.filters.filters[].args` | Manual | Multi-row ImageMagick filter editing remains file-based. |
-| `config.selection.use_landscape_enabled` | Read-only | Selection block context; editable selection controls are deferred. |
+| `config.selection.use_landscape_enabled` | Editable | Library edit form boolean. |
 | `config.selection.avoid_recent` | Editable | Library edit form numeric text field. |
 | `config.selection.refetch_when_cache_below` | Editable | Library edit form numeric text field. |
 | `config.selection.strategy` | Editable | Config block cycle action persists random/sequential. |
