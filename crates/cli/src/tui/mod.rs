@@ -121,6 +121,7 @@ pub fn run(startup_message: Option<String>, tray_owns_rotation: bool) -> anyhow:
     };
 
     loop {
+        app.sync_log_cursor();
         terminal.draw(|f| {
             if startup_intro.is_active() {
                 draw_startup_intro(f, &app, &startup_intro);
@@ -740,22 +741,13 @@ fn update(
             app.show_key_help = false;
         }
         UiAction::SwitchTab(tab) => {
-            app.tab = tab;
-            app.cursor = 0;
-            app.config_in_subnav = false;
-            app.editing = None;
+            app.switch_tab(tab);
         }
         UiAction::SwitchTabNext => {
-            app.tab = Tab::from_index((app.tab.index() + 1) % 6);
-            app.cursor = 0;
-            app.config_in_subnav = false;
-            app.editing = None;
+            app.switch_tab(Tab::from_index((app.tab.index() + 1) % 6));
         }
         UiAction::SwitchTabPrev => {
-            app.tab = Tab::from_index((app.tab.index() + 5) % 6);
-            app.cursor = 0;
-            app.config_in_subnav = false;
-            app.editing = None;
+            app.switch_tab(Tab::from_index((app.tab.index() + 5) % 6));
         }
         UiAction::EditSearch => {
             app.tab = Tab::Search;
@@ -974,7 +966,10 @@ fn render_tab_content(f: &mut Frame, area: Rect, app: &App, theme: style::Theme,
         render_config_tab(f, area, app, theme);
         return;
     }
-    let (title, body) = (app.tab.title().to_string(), tab_lines(app, width));
+    let (title, body) = (
+        app.tab.title().to_string(),
+        tab_lines(app, width, area.height),
+    );
     render_lines(f, area, &title, body, theme);
 }
 
@@ -986,14 +981,14 @@ fn render_config_tab(f: &mut Frame, area: Rect, app: &App, theme: style::Theme) 
     f.render_widget(list, area);
 }
 
-fn tab_lines(app: &App, width: u16) -> Vec<String> {
+fn tab_lines(app: &App, width: u16, height: u16) -> Vec<String> {
     match app.tab {
         Tab::Config => config_lines(app),
         Tab::Now => now_lines(app),
         Tab::History => app.history_lines(),
         Tab::Browse => app.browse_lines(),
         Tab::Search => app.search_lines(),
-        Tab::Logs => app.logs_lines(width),
+        Tab::Logs => app.logs_lines(width, height),
     }
 }
 
@@ -1342,6 +1337,7 @@ fn footer_keys(app: &App, width: u16) -> String {
                     "←/→ tabs | Esc | j/k Pg | e | t | n/p | sp | : | ? | q".into()
                 }
                 Tab::Config => "←/→ tabs | j/k Pg | Enter | e | t | n/p | sp | : | ? | q".into(),
+                Tab::Logs => "←/→ tabs | newest | j older k newer | : ? q".into(),
                 _ => "←/→ tabs | j/k Pg | n/p | f/d? | Shift+X | sp | : | ? | q".into(),
             },
         };
@@ -2160,7 +2156,7 @@ fn now_lines(app: &App) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, sync::Mutex};
 
     use ratatui::backend::TestBackend;
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
@@ -2169,6 +2165,8 @@ mod tests {
     use ratatui::Terminal;
     use walls_core::state::CurrentWall;
     use walls_core::WallsCtx;
+
+    static TUI_LOG_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     use super::{
         action_for_key,
@@ -3147,6 +3145,7 @@ mod tests {
 
     #[test]
     fn search_history_browse_and_logs_empty_states_use_state_labels() {
+        let _guard = TUI_LOG_TEST_LOCK.lock().unwrap();
         let mut app = test_app();
         app.ctx.state.history.clear();
         app.ctx.state.cache_queue.clear();
@@ -3178,6 +3177,125 @@ mod tests {
         app.tab = Tab::Logs;
         let logs = render_text(&app, 90, 18);
         assert!(logs.contains("[empty] no logs captured yet"), "{logs}");
+    }
+
+    #[test]
+    fn logs_tab_shows_newest_first_and_jk_moves_older_then_newer() {
+        let _guard = TUI_LOG_TEST_LOCK.lock().unwrap();
+        let mut app = test_app();
+        {
+            let mut logs = super::LOG_BUFFER.lock().unwrap();
+            logs.clear();
+            logs.extend(["oldest", "middle", "newest"].map(str::to_string));
+        }
+        app.switch_tab(Tab::Logs);
+
+        let lines = app.logs_lines(80, 12);
+        assert_eq!(lines[0], "> newest");
+        assert_eq!(lines[1], "  middle");
+        assert_eq!(lines[2], "  oldest");
+
+        app.move_down();
+        let lines = app.logs_lines(80, 12);
+        assert_eq!(lines[0], "  newest");
+        assert_eq!(lines[1], "> middle");
+
+        app.move_up();
+        let lines = app.logs_lines(80, 12);
+        assert_eq!(lines[0], "> newest");
+    }
+
+    #[test]
+    fn logs_wrapped_rows_keep_single_cursor_marker_on_selected_event() {
+        let _guard = TUI_LOG_TEST_LOCK.lock().unwrap();
+        let mut app = test_app();
+        {
+            let mut logs = super::LOG_BUFFER.lock().unwrap();
+            logs.clear();
+            logs.push("alpha beta gamma delta epsilon zeta".into());
+        }
+        app.switch_tab(Tab::Logs);
+
+        let lines = app.logs_lines(18, 8);
+
+        assert!(lines[0].starts_with("> "), "{lines:?}");
+        assert!(
+            lines.iter().skip(1).all(|line| line.starts_with("  ")),
+            "{lines:?}"
+        );
+        assert_eq!(
+            lines.iter().filter(|line| line.starts_with("> ")).count(),
+            1,
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn logs_crop_keeps_selected_wrapped_event_visible() {
+        let _guard = TUI_LOG_TEST_LOCK.lock().unwrap();
+        let mut app = test_app();
+        {
+            let mut logs = super::LOG_BUFFER.lock().unwrap();
+            logs.clear();
+            logs.extend(
+                [
+                    "oldest line",
+                    "older selected line wraps across several visual rows",
+                    "middle line",
+                    "newest line",
+                ]
+                .map(str::to_string),
+            );
+        }
+        app.switch_tab(Tab::Logs);
+        app.move_down();
+        app.move_down();
+
+        let lines = app.logs_lines(22, 5);
+
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.starts_with("> ") && line.contains("older selected")),
+            "{lines:?}"
+        );
+        assert!(lines.len() <= 3, "{lines:?}");
+    }
+
+    #[test]
+    fn logs_new_arrivals_follow_only_when_pinned_to_newest() {
+        let _guard = TUI_LOG_TEST_LOCK.lock().unwrap();
+        let mut app = test_app();
+        {
+            let mut logs = super::LOG_BUFFER.lock().unwrap();
+            logs.clear();
+            logs.extend(["oldest", "middle", "newest"].map(str::to_string));
+        }
+        app.switch_tab(Tab::Logs);
+        app.sync_log_cursor();
+
+        super::LOG_BUFFER
+            .lock()
+            .unwrap()
+            .push("newer than newest".into());
+        app.sync_log_cursor();
+        assert_eq!(app.logs_cursor, 0);
+        assert_eq!(app.logs_lines(80, 12)[0], "> newer than newest");
+
+        app.move_down();
+        app.move_down();
+        let selected_before = app.logs_lines(80, 12);
+        assert!(selected_before.iter().any(|line| line == "> middle"));
+
+        super::LOG_BUFFER
+            .lock()
+            .unwrap()
+            .push("newest while browsing".into());
+        app.sync_log_cursor();
+        let selected_after = app.logs_lines(80, 12);
+
+        assert!(selected_after.iter().any(|line| line == "> middle"));
+        assert_ne!(app.logs_cursor, 0);
     }
 
     #[test]
