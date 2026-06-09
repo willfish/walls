@@ -298,12 +298,12 @@ Structured command results use a stable envelope:
 
 - `command` is the invoked command family, for example `next`, `prev`, or `current`.
 - `changed` is `true` only when the command changed wallpaper state or applied a wallpaper.
-- `status` is a stable machine-readable result such as `applied`, `refreshed`, `no_change`, `no_previous`, `current`, or `missing_current`.
+- `status` is a stable machine-readable result such as `applied`, `refreshed`, `no_change`, `no_previous`, `missing_previous`, `current`, or `missing_current`.
 - `path` is the affected wallpaper path for path-oriented commands, otherwise `null`.
 - `current` is used by `walls current --json` and contains `path` plus metadata when present.
 - `exit_code_reason` is `null` on normal success and a stable reason string for no-op or failure-like outcomes that scripts may branch on.
 
-`walls current --json` exits non-zero with `status: "missing_current"` when no wallpaper is recorded. `walls next --json` and `walls prev --json` keep the existing successful no-op behavior for `no_change` and `no_previous`, while making the reason explicit.
+`walls current --json` exits non-zero with `status: "missing_current"` when no wallpaper is recorded. `walls next --json` and `walls prev --json` keep the existing successful no-op behavior for `no_change` and `no_previous`, while making the reason explicit. If history points at a deleted previous wallpaper, `walls prev --json` and `walls undo --json` exit non-zero with `status: "missing_previous"` and leave the history index unchanged.
 
 `walls next --verbose` prints the provider attempt report in human form after
 the normal path/no-op line. `walls next --json` includes the same data as
@@ -319,7 +319,8 @@ commands refuse to change state/files without `--force`; use `--dry-run` to see
 the planned queue clear or provider-file purge.
 
 `walls undo --json` uses `status: "restored_previous"` when it restores from
-history. `walls trash --json` uses `status: "force_required"` and exits with code
-2 when called without `--force`; `walls trash --dry-run --json` reports
+history, and `status: "missing_previous"` when the restore target has been
+deleted. `walls trash --json` uses `status: "force_required"` and exits with
+code 2 when called without `--force`; `walls trash --dry-run --json` reports
 `status: "would_trash"` plus the affected original/composed paths without
 removing files or changing state.

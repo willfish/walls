@@ -16,6 +16,7 @@ script or issue report.
 | --- | --- | --- |
 | First command creates config but no wallpaper changes | `walls doctor` | Apply a known local file with `walls apply <path>` or enable a source with candidates. |
 | `walls current` says no current wallpaper | `walls current --json` | Run `walls apply <path>` or `walls next --manual`; look for `"status": "missing_current"`. |
+| `walls prev` or `walls undo` reports a missing previous wallpaper | `walls prev --json` | The history entry points at a deleted file; re-apply an available wallpaper with `walls apply <path>` or inspect state with `walls current --json`. |
 | `walls next` does nothing | `walls next --manual --verbose` | If paused or rotation is disabled, use `--manual`; inspect provider attempts and local candidates. |
 | Local folder ignored | `walls doctor` | Fix the folder `path`, add supported image files, then run `walls config validate`. |
 | Backend command missing | `walls doctor` | Install the command for your desktop or set `apply.backend` explicitly. |
@@ -174,5 +175,8 @@ Recovery:
 
 - If `trash` reports `force_required`, rerun with `--dry-run` first to inspect
   affected paths.
+- If `prev` or `undo` reports `missing_previous`, the selected history entry was
+  deleted before it could be restored; `walls` does not advance the history index
+  on that failure.
 - If cache pruning would remove too much, inspect with
   `walls cache inspect --json` before using `--force`.
