@@ -5,10 +5,11 @@ use std::time::Duration;
 
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 
+use crate::actions::{dispatch, menu_actions, MenuAction};
 use crate::icon;
+use crate::resolve_walls_bin;
 use crate::rotation::RotationLoop;
 use crate::state_watch::StateWatcher;
-use crate::{resolve_walls_bin, run_walls, WallsCommand};
 
 pub fn run() -> anyhow::Result<()> {
     tracing::info!(
@@ -21,17 +22,15 @@ pub fn run() -> anyhow::Result<()> {
 
 fn run_loop() -> anyhow::Result<()> {
     let menu = Menu::new();
-    let next = MenuItem::new("Next wallpaper", true, None);
-    let prev = MenuItem::new("Previous wallpaper", true, None);
-    let pause = MenuItem::new("Toggle pause", true, None);
-    let open_tui = MenuItem::new("Open TUI", true, None);
-    let quit = MenuItem::new("Quit tray", true, None);
-    menu.append(&next)?;
-    menu.append(&prev)?;
-    menu.append(&pause)?;
-    menu.append(&open_tui)?;
-    menu.append(&PredefinedMenuItem::separator())?;
-    menu.append(&quit)?;
+    let mut action_items = Vec::new();
+    for spec in menu_actions() {
+        if spec.separator_before {
+            menu.append(&PredefinedMenuItem::separator())?;
+        }
+        let item = MenuItem::new(spec.label, true, None);
+        menu.append(&item)?;
+        action_items.push((item, spec.action));
+    }
 
     let icon = icon::appindicator_icon_from_state()
         .unwrap_or_else(|_| icon::default_appindicator_icon().expect("default tray icon"));
@@ -59,21 +58,14 @@ fn run_loop() -> anyhow::Result<()> {
         }
 
         if let Ok(event) = menu_channel.recv() {
-            let walls = resolve_walls_bin();
-            let id = event.id().0.clone();
-            if id == next.id().0 {
-                crate::rotation::advance_manual();
-                refresh_tray(&tray);
-            } else if id == prev.id().0 {
-                let _ = run_walls(&walls, WallsCommand::Prev.args());
-                refresh_tray(&tray);
-            } else if id == pause.id().0 {
-                let _ = run_walls(&walls, WallsCommand::TogglePause.args());
-                refresh_tray(&tray);
-            } else if id == open_tui.id().0 {
-                let _ = crate::tui::spawn_tui(&walls);
-            } else if id == quit.id().0 {
-                break;
+            if let Some(action) = action_for_menu_id(event.id().0.as_str(), &action_items) {
+                let outcome = dispatch(action);
+                if outcome.quit {
+                    break;
+                }
+                if outcome.refresh {
+                    refresh_tray(&tray);
+                }
             }
         }
         thread::sleep(Duration::from_millis(50));
@@ -86,4 +78,35 @@ fn refresh_tray(tray: &tray_icon::TrayIcon) {
         let _ = tray.set_icon(Some(icon));
     }
     let _ = tray.set_tooltip(Some(&icon::tooltip_from_state()));
+}
+
+fn action_for_menu_id(id: &str, items: &[(MenuItem, MenuAction)]) -> Option<MenuAction> {
+    items
+        .iter()
+        .find_map(|(item, action)| (item.id().0 == id).then_some(*action))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn action_lookup_maps_menu_ids_to_shared_actions() {
+        let next = MenuItem::new("Next wallpaper", true, None);
+        let quit = MenuItem::new("Quit tray", true, None);
+        let items = vec![
+            (next.clone(), MenuAction::Next),
+            (quit.clone(), MenuAction::Quit),
+        ];
+
+        assert_eq!(
+            action_for_menu_id(next.id().0.as_str(), &items),
+            Some(MenuAction::Next)
+        );
+        assert_eq!(
+            action_for_menu_id(quit.id().0.as_str(), &items),
+            Some(MenuAction::Quit)
+        );
+        assert_eq!(action_for_menu_id("missing", &items), None);
+    }
 }
