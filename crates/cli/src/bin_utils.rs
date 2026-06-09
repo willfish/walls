@@ -26,6 +26,22 @@ pub fn resolve_tray_bin_from(tray_bin_env: Option<&str>, current_exe: Option<&Pa
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrayRuntimeStatus {
+    pub resolved_bin: PathBuf,
+    pub resolved_bin_exists: bool,
+    pub running: bool,
+}
+
+pub fn tray_runtime_status() -> TrayRuntimeStatus {
+    let resolved_bin = resolve_tray_bin();
+    TrayRuntimeStatus {
+        resolved_bin_exists: resolved_bin.is_file(),
+        resolved_bin,
+        running: tray_is_running(),
+    }
+}
+
 /// Outcome of attempting to ensure the tray is running from the TUI launch path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EnsureTrayOutcome {

@@ -5,6 +5,7 @@ use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
 use tracing_subscriber::{prelude::*, EnvFilter, Layer};
 use walls_core::apply::ApplyTrigger;
+use walls_core::apply::{backend_setting_label, desktop_display_name, summarize_apply_environment};
 use walls_core::{RefreshLevel, WallsCtx};
 
 #[cfg(feature = "tui")]
@@ -183,6 +184,7 @@ fn cmd_status(json: bool) -> anyhow::Result<()> {
                 "current": ctx.state.current,
                 "history_len": ctx.state.history.len(),
                 "cache_queue_len": ctx.state.cache_queue.len(),
+                "desktop": desktop_status_json(&ctx),
             }))?
         );
     } else {
@@ -196,6 +198,95 @@ fn cmd_status(json: bool) -> anyhow::Result<()> {
         println!("cache queue: {} entries", ctx.state.cache_queue.len());
     }
     Ok(())
+}
+
+fn env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|value| !value.is_empty())
+}
+
+fn config_home_for_autostart(ctx: &WallsCtx) -> &std::path::Path {
+    ctx.paths
+        .config_dir
+        .parent()
+        .unwrap_or(ctx.paths.config_dir.as_path())
+}
+
+fn desktop_status_json(ctx: &WallsCtx) -> serde_json::Value {
+    let xdg_current_desktop = env_var("XDG_CURRENT_DESKTOP");
+    let xdg_session_desktop = env_var("XDG_SESSION_DESKTOP");
+    let desktop_startup_id = env_var("DESKTOP_STARTUP_ID");
+    let xdg_session_type = env_var("XDG_SESSION_TYPE");
+    let wayland_display = env_var("WAYLAND_DISPLAY");
+    let display = env_var("DISPLAY");
+    let walls_tray = env_var("WALLS_TRAY");
+    let walls_tray_bin = env_var("WALLS_TRAY_BIN");
+    let apply = summarize_apply_environment(&ctx.config.apply);
+    let tray_action = walls_core::tray::decide_tray_action();
+    let tray_runtime = bin_utils::tray_runtime_status();
+    let desktop = walls_core::apply::detect_desktop_from_env(
+        xdg_current_desktop.as_deref(),
+        xdg_session_desktop.as_deref(),
+        desktop_startup_id.as_deref(),
+    );
+    let autostart_opts = walls_core::autostart::AutostartSyncOpts {
+        config_home: config_home_for_autostart(ctx),
+        tray_bin: tray_runtime.resolved_bin.clone(),
+        config: &ctx.config,
+        xdg_current_desktop: xdg_current_desktop.as_deref(),
+        xdg_session_desktop: xdg_session_desktop.as_deref(),
+        desktop_startup_id: desktop_startup_id.as_deref(),
+        xdg_session_type: xdg_session_type.as_deref(),
+        wayland_display: wayland_display.as_deref(),
+        display: display.as_deref(),
+    };
+    let tray_action_json = match tray_action {
+        walls_core::tray::TrayAction::Spawn => serde_json::json!({
+            "action": "spawn",
+            "reason": null,
+        }),
+        walls_core::tray::TrayAction::Skip { reason } => serde_json::json!({
+            "action": "skip",
+            "reason": reason,
+        }),
+    };
+
+    serde_json::json!({
+        "environment": {
+            "XDG_CURRENT_DESKTOP": xdg_current_desktop,
+            "XDG_SESSION_DESKTOP": xdg_session_desktop,
+            "DESKTOP_STARTUP_ID": desktop_startup_id,
+            "XDG_SESSION_TYPE": xdg_session_type,
+            "WAYLAND_DISPLAY": wayland_display,
+            "DISPLAY": display,
+            "WALLS_TRAY": walls_tray,
+            "WALLS_TRAY_BIN": walls_tray_bin,
+        },
+        "detected": {
+            "desktop": desktop_display_name(apply.detected_desktop),
+            "autostart_desktop": walls_core::tray::desktop_display_name(desktop),
+        },
+        "apply": {
+            "configured_backend": backend_setting_label(apply.configured_backend),
+            "resolved_backend": backend_setting_label(apply.resolved_backend),
+            "effective_backend": apply.effective_backend_label(),
+            "uses_feh_fallback": apply.uses_feh_fallback,
+            "cosmic_config_path": apply.cosmic_config_path,
+            "cosmic_config_exists": apply.cosmic_config_exists,
+        },
+        "tray": {
+            "launch": tray_action_json,
+            "resolved_bin": tray_runtime.resolved_bin.display().to_string(),
+            "resolved_bin_exists": tray_runtime.resolved_bin_exists,
+            "running": tray_runtime.running,
+            "autostart": {
+                "desktop": walls_core::tray::desktop_display_name(desktop),
+                "available": walls_core::autostart::tray_autostart_available(desktop),
+                "desired": walls_core::autostart::tray_autostart_enabled_for_desktop(&ctx.config, desktop),
+                "out_of_sync": walls_core::autostart::autostart_out_of_sync(&autostart_opts),
+                "desktop_file": walls_core::autostart::autostart_desktop_file_path(config_home_for_autostart(ctx)).display().to_string(),
+            },
+        },
+    })
 }
 
 fn print_json(value: serde_json::Value) -> anyhow::Result<()> {

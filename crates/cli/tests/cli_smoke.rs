@@ -64,6 +64,46 @@ fn cli_status_json_shows_paused_flag() {
 }
 
 #[test]
+fn cli_status_json_includes_desktop_tray_and_apply_diagnostics() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home) = setup_xdg_home(tmp.path());
+
+    let assert = walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .env("XDG_CURRENT_DESKTOP", "GNOME")
+        .env("XDG_SESSION_TYPE", "wayland")
+        .env("WAYLAND_DISPLAY", "wayland-1")
+        .env("WALLS_TRAY", "0")
+        .args(["status", "--json"])
+        .assert()
+        .success();
+
+    let value: serde_json::Value =
+        serde_json::from_slice(&assert.get_output().stdout).expect("status json");
+    assert_eq!(
+        value["desktop"]["environment"]["XDG_CURRENT_DESKTOP"],
+        "GNOME"
+    );
+    assert_eq!(value["desktop"]["detected"]["desktop"], "GNOME");
+    assert_eq!(
+        value["desktop"]["apply"]["configured_backend"],
+        "custom-script"
+    );
+    assert_eq!(
+        value["desktop"]["apply"]["resolved_backend"],
+        "custom-script"
+    );
+    assert_eq!(value["desktop"]["tray"]["launch"]["action"], "skip");
+    assert_eq!(
+        value["desktop"]["tray"]["launch"]["reason"],
+        "tray disabled (WALLS_TRAY=0)"
+    );
+    assert_eq!(value["desktop"]["tray"]["autostart"]["desktop"], "GNOME");
+    assert_eq!(value["desktop"]["tray"]["autostart"]["available"], true);
+}
+
+#[test]
 fn cli_config_validate_formats_human_and_json_diagnostics() {
     let tmp = tempfile::tempdir().unwrap();
     let (config_home, state_home) = setup_xdg_home(tmp.path());
