@@ -70,6 +70,7 @@ fn tui_without_tty_returns_clear_error_not_panic() {
     let output = StdCommand::new(cargo_bin("walls"))
         .arg("tui")
         .env("RUST_BACKTRACE", "0")
+        .env("WALLS_TRAY", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -100,6 +101,7 @@ fn bare_walls_without_tty_attempts_tui_and_reports_terminal_requirement() {
     // (same behavior and error as explicit `walls tui`), not the old "no command specified".
     let output = StdCommand::new(cargo_bin("walls"))
         .env("RUST_BACKTRACE", "0")
+        .env("WALLS_TRAY", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -153,6 +155,7 @@ fn tui_with_pty_exits_cleanly_on_quit() {
     cmd.env("XDG_CONFIG_HOME", config_home);
     cmd.env("XDG_STATE_HOME", state_home);
     cmd.env("RUST_BACKTRACE", "0");
+    cmd.env("WALLS_TRAY", "0");
     cmd.env("WALLS_TUI_PREVIEW", "0");
     cmd.env("WALLS_TUI_INTRO", "0");
 
