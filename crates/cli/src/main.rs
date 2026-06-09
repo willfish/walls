@@ -1448,15 +1448,20 @@ fn provider_attempt_line(attempt: &ProviderAttempt) -> String {
             )
         }
         ProviderAttemptOutcome::Skipped { reason } => {
-            format!("{prefix}: skipped ({})", no_candidate_reason_label(*reason))
+            format!(
+                "{prefix}: skipped ({}); {}",
+                no_candidate_reason_label(*reason),
+                no_candidate_recovery_hint(*reason)
+            )
         }
         ProviderAttemptOutcome::NoCandidates {
             reason,
             candidate_count,
         } => format!(
-            "{prefix}: no candidates ({}){}",
+            "{prefix}: no candidates ({}){}; {}",
             no_candidate_reason_label(*reason),
-            candidate_count_suffix(*candidate_count)
+            candidate_count_suffix(*candidate_count),
+            no_candidate_recovery_hint(*reason)
         ),
         ProviderAttemptOutcome::Failed {
             kind,
@@ -1536,6 +1541,35 @@ fn no_candidate_reason_label(reason: ProviderNoCandidateReason) -> &'static str 
         ProviderNoCandidateReason::EmptyResult => "empty result",
         ProviderNoCandidateReason::FilteredByHistory => "filtered by history",
         ProviderNoCandidateReason::Unsupported => "unsupported",
+    }
+}
+
+fn no_candidate_recovery_hint(reason: ProviderNoCandidateReason) -> &'static str {
+    match reason {
+        ProviderNoCandidateReason::Disabled => {
+            "enable the source in config or choose another enabled provider"
+        }
+        ProviderNoCandidateReason::OfflineDisabled => {
+            "run `walls next --manual --verbose` when online sources are enabled, or keep a local fallback source enabled"
+        }
+        ProviderNoCandidateReason::CredentialMissing => {
+            "add the provider credential to secrets.json or disable this source"
+        }
+        ProviderNoCandidateReason::QueueEmpty => {
+            "run `walls cache status` and enable/fetch provider candidates before retrying"
+        }
+        ProviderNoCandidateReason::NoEnabledSource => {
+            "enable at least one source with candidates in config.json"
+        }
+        ProviderNoCandidateReason::EmptyResult => {
+            "loosen provider filters or search terms, then retry with `walls next --manual --verbose`"
+        }
+        ProviderNoCandidateReason::FilteredByHistory => {
+            "add more wallpapers or reduce selection.avoid_recent"
+        }
+        ProviderNoCandidateReason::Unsupported => {
+            "check the source type and run `walls config validate`"
+        }
     }
 }
 
@@ -1790,4 +1824,46 @@ fn cmd_current(meta: bool, json: bool) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use walls_core::providers::{ProviderCapability, ProviderDescriptor};
+
+    fn provider_attempt(kind: ProviderKind) -> ProviderAttempt {
+        ProviderDescriptor {
+            id: provider_kind_label(kind).into(),
+            kind,
+            enabled: true,
+            capabilities: vec![ProviderCapability::QueueRefill],
+        }
+        .attempt(ProviderOperation::AdvanceNext)
+    }
+
+    #[test]
+    fn provider_attempt_lines_include_recovery_for_missing_credentials() {
+        let line = provider_attempt(ProviderKind::Unsplash)
+            .with_status(ProviderStatus::CredentialMissing)
+            .skipped(ProviderNoCandidateReason::CredentialMissing);
+
+        let line = provider_attempt_line(&line);
+
+        assert!(line.contains("credential missing"), "{line}");
+        assert!(line.contains("secrets.json"), "{line}");
+    }
+
+    #[test]
+    fn provider_attempt_lines_include_recovery_for_empty_and_filtered_results() {
+        let empty = provider_attempt(ProviderKind::Wallhaven)
+            .no_candidates(ProviderNoCandidateReason::EmptyResult, Some(0));
+        let filtered = provider_attempt(ProviderKind::Local)
+            .no_candidates(ProviderNoCandidateReason::FilteredByHistory, Some(5));
+
+        let empty = provider_attempt_line(&empty);
+        let filtered = provider_attempt_line(&filtered);
+
+        assert!(empty.contains("loosen provider filters"), "{empty}");
+        assert!(filtered.contains("selection.avoid_recent"), "{filtered}");
+    }
 }
