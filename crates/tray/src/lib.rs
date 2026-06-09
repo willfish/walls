@@ -18,6 +18,7 @@ pub use bin::resolve_walls_bin;
 pub enum WallsCommand {
     Next,
     Prev,
+    Favorite,
     TogglePause,
 }
 
@@ -26,6 +27,7 @@ impl WallsCommand {
         match self {
             Self::Next => &["next"],
             Self::Prev => &["prev"],
+            Self::Favorite => &["favorite"],
             Self::TogglePause => &["toggle-pause"],
         }
     }
@@ -45,4 +47,17 @@ pub fn run_walls(walls: &PathBuf, args: &[&str]) -> anyhow::Result<()> {
         anyhow::bail!("{} {} failed: {status}", walls.display(), args.join(" "));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn walls_command_args_match_cli_subcommands() {
+        assert_eq!(WallsCommand::Next.args(), &["next"]);
+        assert_eq!(WallsCommand::Prev.args(), &["prev"]);
+        assert_eq!(WallsCommand::Favorite.args(), &["favorite"]);
+        assert_eq!(WallsCommand::TogglePause.args(), &["toggle-pause"]);
+    }
 }

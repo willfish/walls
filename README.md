@@ -170,7 +170,7 @@ flowchart TD
 
 - **Config** — `config.json`, `secrets.json`, locked `state.json` (history, queue, current).
 - **Cache** — downloaded Wallhaven images and composed outputs.
-- **Triggers** — `walls-tray` polls `change.interval_secs` and calls `advance_next`; tray menu runs manual `prev` / `next` / `toggle-pause` and opens TUI. TUI runs the scheduler only when the tray did not start.
+- **Triggers** — `walls-tray` polls `change.interval_secs` and calls `advance_next`; tray menu runs manual `prev` / `next`, favorites the current wallpaper, toggles pause, and opens TUI. TUI runs the scheduler only when the tray did not start.
 
 ### TUI (`walls tui`)
 
@@ -231,7 +231,7 @@ you already have a symptom.
 | `walls next [--manual] [--refresh <level>] [--verbose] [--json]` / `walls prev [--json]` | Works (auto `next` respects pause/rotation-off; `--manual` for explicit changes; `--verbose` prints provider attempts/skips/retries/fallbacks; refresh levels: `all`, `filters-and-texts`, `texts`, `clock-only`) |
 | `walls tui` | Works — tabs: Config/Now/History/Browse/Search/Logs; `?` key help; `/` or `i` search; `:` commands; `f` favorite; `d` requests trash confirmation |
 | `walls tui` with `--features tui-preview` | Optional Now-tab image preview in terminals supporting Kitty graphics (Ghostty/Kitty) or iTerm2 inline images; metadata-only fallback otherwise; set `WALLS_TUI_PREVIEW=0` to force metadata-only |
-| `walls-tray` | Works (prev/next/pause, Open TUI, brand tray icon from `assets/icons/walls-tray.svg`) |
+| `walls-tray` | Works (prev/next/favorite/pause, Open TUI, brand tray icon from `assets/icons/walls-tray.svg`) |
 
 **Terminal for tray “Open TUI”** (precedence order):
 
