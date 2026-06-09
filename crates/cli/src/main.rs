@@ -8,7 +8,11 @@ use walls_core::apply::ApplyTrigger;
 use walls_core::apply::{backend_setting_label, desktop_display_name, summarize_apply_environment};
 use walls_core::doctor::{DoctorOptions, DoctorReport, DoctorSection, DoctorStatus};
 use walls_core::downloads::{NukeDownloadsMode, NukeDownloadsPlan};
-use walls_core::providers::ProviderStatusReport;
+use walls_core::providers::{
+    ProviderAttempt, ProviderAttemptOutcome, ProviderFailureKind, ProviderKind,
+    ProviderNoCandidateReason, ProviderOperation, ProviderRetryReason, ProviderStatus,
+    ProviderStatusReport,
+};
 use walls_core::{RefreshLevel, WallsCtx};
 
 #[cfg(feature = "tui")]
@@ -35,6 +39,9 @@ enum Command {
         /// Refresh current wallpaper instead of selecting a new one
         #[arg(long, value_enum)]
         refresh: Option<CliRefreshLevel>,
+        /// Print provider attempts, retries, skips, failures, and fallbacks
+        #[arg(long, short = 'v')]
+        verbose: bool,
         /// Emit a stable JSON command result
         #[arg(long)]
         json: bool,
@@ -222,8 +229,9 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Next {
             manual,
             refresh,
+            verbose,
             json,
-        }) => cmd_next(manual, refresh, json).await?,
+        }) => cmd_next(manual, refresh, verbose, json).await?,
         Some(Command::Prev { json }) => cmd_prev(json)?,
         Some(Command::Undo { json }) => cmd_undo(json)?,
         Some(Command::Status { json }) => cmd_status(json)?,
@@ -852,6 +860,7 @@ fn next_result(
 async fn cmd_next(
     manual: bool,
     refresh: Option<CliRefreshLevel>,
+    verbose: bool,
     json: bool,
 ) -> anyhow::Result<()> {
     let mut ctx = WallsCtx::load()?;
@@ -864,7 +873,10 @@ async fn cmd_next(
                 None,
                 &ctx.provider_status_report,
             ))?,
-            Some(p) => println!("{}", p.display()),
+            Some(p) => {
+                println!("{}", p.display());
+                print_provider_attempts_human(verbose, &ctx.provider_status_report);
+            }
             None if json => print_json(next_result(
                 false,
                 "missing_current",
@@ -889,7 +901,10 @@ async fn cmd_next(
             None,
             &ctx.provider_status_report,
         ))?,
-        Some(p) => println!("{}", p.display()),
+        Some(p) => {
+            println!("{}", p.display());
+            print_provider_attempts_human(verbose, &ctx.provider_status_report);
+        }
         None if json => print_json(next_result(
             false,
             "no_change",
@@ -897,9 +912,172 @@ async fn cmd_next(
             Some("no_change"),
             &ctx.provider_status_report,
         ))?,
-        None => println!("no change"),
+        None => {
+            println!("no change");
+            print_provider_attempts_human(verbose, &ctx.provider_status_report);
+        }
     }
     Ok(())
+}
+
+fn print_provider_attempts_human(verbose: bool, report: &ProviderStatusReport) {
+    if !verbose {
+        return;
+    }
+    if report.attempts.is_empty() {
+        println!("provider attempts: none recorded");
+        return;
+    }
+    println!("provider attempts:");
+    for attempt in &report.attempts {
+        println!("  - {}", provider_attempt_line(attempt));
+        for retry in &attempt.retries {
+            let status = retry
+                .status_code
+                .map(|code| format!(" status {code}"))
+                .unwrap_or_default();
+            println!(
+                "    retry {}: {}{} after {}ms",
+                retry.attempt,
+                retry_reason_label(retry.reason),
+                status,
+                retry.backoff_ms
+            );
+        }
+        if let Some(fallback) = &attempt.fallback_provider_id {
+            println!("    fallback: {fallback}");
+        }
+    }
+}
+
+fn provider_attempt_line(attempt: &ProviderAttempt) -> String {
+    let prefix = format!(
+        "{} ({}) {} [{}]",
+        attempt.provider_id,
+        provider_kind_label(attempt.provider_kind),
+        provider_operation_label(attempt.operation),
+        provider_status_label(attempt.status)
+    );
+    match &attempt.outcome {
+        ProviderAttemptOutcome::NotRun => format!("{prefix}: not run"),
+        ProviderAttemptOutcome::Applied { candidate_count } => {
+            format!(
+                "{prefix}: applied{}",
+                candidate_count_suffix(*candidate_count)
+            )
+        }
+        ProviderAttemptOutcome::Skipped { reason } => {
+            format!("{prefix}: skipped ({})", no_candidate_reason_label(*reason))
+        }
+        ProviderAttemptOutcome::NoCandidates {
+            reason,
+            candidate_count,
+        } => format!(
+            "{prefix}: no candidates ({}){}",
+            no_candidate_reason_label(*reason),
+            candidate_count_suffix(*candidate_count)
+        ),
+        ProviderAttemptOutcome::Failed {
+            kind,
+            status_code,
+            message,
+        } => {
+            let status = status_code
+                .map(|code| format!(" status {code}"))
+                .unwrap_or_default();
+            let message = message
+                .as_deref()
+                .map(|message| format!(": {message}"))
+                .unwrap_or_default();
+            format!(
+                "{prefix}: failed ({}{}){}",
+                failure_kind_label(*kind),
+                status,
+                message
+            )
+        }
+    }
+}
+
+fn candidate_count_suffix(candidate_count: Option<usize>) -> String {
+    candidate_count
+        .map(|count| format!(" ({count} candidate{})", if count == 1 { "" } else { "s" }))
+        .unwrap_or_default()
+}
+
+fn provider_kind_label(kind: ProviderKind) -> &'static str {
+    match kind {
+        ProviderKind::Local => "local",
+        ProviderKind::Wallhaven => "wallhaven",
+        ProviderKind::Unsplash => "unsplash",
+        ProviderKind::Reddit => "reddit",
+        ProviderKind::Bing => "bing",
+        ProviderKind::Apod => "apod",
+        ProviderKind::MediaRss => "mediarss",
+        ProviderKind::Attribution => "attribution",
+        ProviderKind::Json => "json",
+        ProviderKind::Pixabay => "pixabay",
+        ProviderKind::Immich => "immich",
+        ProviderKind::Spotlight => "spotlight",
+        ProviderKind::Weighting => "weighting",
+        ProviderKind::Unsupported => "unsupported",
+    }
+}
+
+fn provider_operation_label(operation: ProviderOperation) -> &'static str {
+    match operation {
+        ProviderOperation::AdvanceNext => "advance_next",
+        ProviderOperation::QueueRefill => "queue_refill",
+        ProviderOperation::Search => "search",
+        ProviderOperation::Download => "download",
+        ProviderOperation::Metadata => "metadata",
+        ProviderOperation::DoctorCheck => "doctor_check",
+        ProviderOperation::LocalSourceListing => "local_source_listing",
+    }
+}
+
+fn provider_status_label(status: ProviderStatus) -> &'static str {
+    match status {
+        ProviderStatus::Enabled => "enabled",
+        ProviderStatus::Disabled => "disabled",
+        ProviderStatus::OfflineDisabled => "offline-disabled",
+        ProviderStatus::CredentialMissing => "credential-missing",
+    }
+}
+
+fn no_candidate_reason_label(reason: ProviderNoCandidateReason) -> &'static str {
+    match reason {
+        ProviderNoCandidateReason::Disabled => "disabled",
+        ProviderNoCandidateReason::OfflineDisabled => "offline disabled",
+        ProviderNoCandidateReason::CredentialMissing => "credential missing",
+        ProviderNoCandidateReason::QueueEmpty => "queue empty",
+        ProviderNoCandidateReason::NoEnabledSource => "no enabled source",
+        ProviderNoCandidateReason::EmptyResult => "empty result",
+        ProviderNoCandidateReason::FilteredByHistory => "filtered by history",
+        ProviderNoCandidateReason::Unsupported => "unsupported",
+    }
+}
+
+fn failure_kind_label(kind: ProviderFailureKind) -> &'static str {
+    match kind {
+        ProviderFailureKind::Request => "request",
+        ProviderFailureKind::RateLimited => "rate limited",
+        ProviderFailureKind::Timeout => "timeout",
+        ProviderFailureKind::Connect => "connect",
+        ProviderFailureKind::Decode => "decode",
+        ProviderFailureKind::Io => "io",
+        ProviderFailureKind::Config => "config",
+        ProviderFailureKind::Unknown => "unknown",
+    }
+}
+
+fn retry_reason_label(reason: ProviderRetryReason) -> &'static str {
+    match reason {
+        ProviderRetryReason::RateLimited => "rate limited",
+        ProviderRetryReason::ServerError => "server error",
+        ProviderRetryReason::Timeout => "timeout",
+        ProviderRetryReason::Connect => "connect",
+    }
 }
 
 fn cmd_prev(json: bool) -> anyhow::Result<()> {

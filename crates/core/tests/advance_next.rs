@@ -212,6 +212,66 @@ async fn advance_next_reports_missing_unsplash_credentials() {
 }
 
 #[tokio::test]
+async fn advance_next_reports_inline_provider_offline_skip() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    fs::create_dir_all(&images).unwrap();
+    let noop = root.path().join("noop.sh");
+    fs::write(&noop, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&noop, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let config = serde_json::json!({
+        "change": { "enabled": true, "internet_enabled": false },
+        "paths": {
+            "cache_dir": root.path().join("cache").display().to_string(),
+            "download_dir": root.path().join("downloaded").display().to_string(),
+            "favorites_dir": root.path().join("favorites").display().to_string(),
+            "fetched_dir": root.path().join("fetched").display().to_string(),
+            "compose_dir": root.path().join("wallpaper").display().to_string(),
+        },
+        "apply": {
+            "backend": "custom-script",
+            "custom_script": noop.display().to_string(),
+        },
+        "display": { "mode": "os" },
+        "wallhaven": { "enabled": false },
+        "sources": [
+            { "enabled": true, "type": "reddit", "subreddit": "EarthPorn" },
+            { "enabled": true, "type": "folder", "path": images.display().to_string() }
+        ],
+    });
+    fs::write(
+        root.path().join("config.json"),
+        serde_json::to_string_pretty(&config).unwrap(),
+    )
+    .unwrap();
+    fs::write(root.path().join("secrets.json"), "{}").unwrap();
+
+    let mut ctx = WallsCtx::load_from(root.path()).unwrap();
+    let applied = ctx.advance_next().await.unwrap();
+
+    assert!(applied.is_none());
+    let reddit = ctx
+        .provider_status_report
+        .attempts
+        .iter()
+        .find(|attempt| attempt.provider_kind == ProviderKind::Reddit)
+        .expect("reddit attempt");
+    assert_eq!(reddit.status, ProviderStatus::OfflineDisabled);
+    assert_eq!(reddit.fallback_provider_id.as_deref(), Some("apod"));
+    assert_eq!(
+        reddit.outcome,
+        ProviderAttemptOutcome::Skipped {
+            reason: ProviderNoCandidateReason::OfflineDisabled
+        }
+    );
+}
+
+#[tokio::test]
 async fn advance_next_avoids_recent_candidates_across_many_local_files() {
     let root = tempfile::tempdir().unwrap();
     let images = root.path().join("images");
