@@ -91,8 +91,8 @@ pub struct TrayAutostartConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TrayAccent {
-    #[default]
     Blue,
+    #[default]
     White,
     Cosmic,
     Green,

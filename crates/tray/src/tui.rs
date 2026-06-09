@@ -41,6 +41,13 @@ pub(crate) fn tui_command(
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("walls path is not valid UTF-8"))?;
 
+    if let Some(xdg_terminal_exec) = xdg_terminal_exec {
+        return Ok(TuiCommand {
+            program: xdg_terminal_exec.into(),
+            args: vec!["--app-id=walls".into(), walls_str.into(), "tui".into()],
+        });
+    }
+
     if let Some(terminal) = terminal {
         if terminal_basename(terminal) == "ghostty" {
             return Ok(TuiCommand {
@@ -56,13 +63,6 @@ pub(crate) fn tui_command(
         return Ok(TuiCommand {
             program: terminal.into(),
             args: vec!["-e".into(), walls_str.into(), "tui".into()],
-        });
-    }
-
-    if let Some(xdg_terminal_exec) = xdg_terminal_exec {
-        return Ok(TuiCommand {
-            program: xdg_terminal_exec.into(),
-            args: vec!["--app-id=walls".into(), walls_str.into(), "tui".into()],
         });
     }
 
@@ -110,7 +110,24 @@ mod tests {
     }
 
     #[test]
-    fn tui_command_defaults_to_terminal_exec() {
+    fn tui_command_uses_xdg_terminal_exec_before_terminal_env() {
+        let command = tui_command(
+            Path::new("/opt/walls/bin/walls"),
+            None,
+            Some("foot"),
+            Some("/usr/bin/xdg-terminal-exec"),
+        )
+        .unwrap();
+
+        assert_eq!(command.program, "/usr/bin/xdg-terminal-exec");
+        assert_eq!(
+            command.args,
+            vec!["--app-id=walls", "/opt/walls/bin/walls", "tui"]
+        );
+    }
+
+    #[test]
+    fn tui_command_uses_terminal_env_when_desktop_wrapper_is_missing() {
         let command =
             tui_command(Path::new("/opt/walls/bin/walls"), None, Some("foot"), None).unwrap();
 
