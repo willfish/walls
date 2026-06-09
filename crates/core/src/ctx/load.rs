@@ -26,6 +26,7 @@ impl WallsCtx {
             config_file: root.join("config.json"),
             secrets_file: root.join("secrets.json"),
             state_file: root.join("state.json"),
+            event_journal_file: root.join("events.jsonl"),
             cache_dir: root.join("cache"),
             download_dir: root.join("downloaded"),
             favorites_dir: root.join("favorites"),
