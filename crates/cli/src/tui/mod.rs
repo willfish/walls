@@ -205,6 +205,8 @@ enum UiAction {
     ExitConfigSubnav,
     #[allow(dead_code)]
     SaveEditItem,
+    OpenHelp,
+    CloseHelp,
     SwitchTab(Tab),
     SwitchTabNext,
     SwitchTabPrev,
@@ -258,6 +260,13 @@ fn is_shift_x(key: KeyEvent) -> bool {
 }
 
 fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
+    if app.show_key_help {
+        return match key.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => UiAction::CloseHelp,
+            _ => UiAction::Ignore,
+        };
+    }
+
     if app.pending_nuke_confirm {
         return match key.code {
             KeyCode::Esc => UiAction::CancelNuke,
@@ -310,6 +319,7 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
 
     match key.code {
         KeyCode::Char('q') => UiAction::Quit,
+        KeyCode::Char('?') => UiAction::OpenHelp,
         KeyCode::Char(':') => UiAction::EnterCommandMode,
         KeyCode::Char('n') => UiAction::Next,
         KeyCode::Char('p') => UiAction::Prev,
@@ -563,6 +573,12 @@ fn update(
             // The (now un-bound in edit UI) Save action does full commit+persist and exits the edit form.
             let _ = app.save_edit_item(true);
         }
+        UiAction::OpenHelp => {
+            app.show_key_help = true;
+        }
+        UiAction::CloseHelp => {
+            app.show_key_help = false;
+        }
         UiAction::SwitchTab(tab) => {
             app.tab = tab;
             app.cursor = 0;
@@ -790,6 +806,10 @@ fn render_tab_body(
 }
 
 fn render_tab_content(f: &mut Frame, area: Rect, app: &App, theme: style::Theme, width: u16) {
+    if app.show_key_help {
+        render_lines(f, area, "Key help", key_help_lines(app, width), theme);
+        return;
+    }
     if app.tab == Tab::Config {
         render_config_tab(f, area, app, theme);
         return;
@@ -814,6 +834,61 @@ fn tab_lines(app: &App, width: u16) -> Vec<String> {
         Tab::Browse => app.browse_lines(),
         Tab::Search => app.search_lines(),
         Tab::Logs => app.logs_lines(width),
+    }
+}
+
+fn key_help_lines(app: &App, width: u16) -> Vec<String> {
+    let compact = width < 70;
+    let mut lines = vec![
+        "Global".into(),
+        "  Esc/q close help".into(),
+        "  ? help   q quit   n/p next/prev   Space pause".into(),
+        "  f favorite current   d trash current   Shift+X nuke downloads".into(),
+        "Tabs and lists".into(),
+        "  1-6 jump tabs   ←/→ switch tabs   j/k or ↑/↓ move".into(),
+        "  Home/End first/last   PageUp/PageDown jump   Enter apply/open".into(),
+        "Search".into(),
+        "  / opens Search input from normal mode; i edits from Search tab".into(),
+        "  Search input: type, Backspace, Enter search, Esc cancel".into(),
+        "Command mode".into(),
+        "  : opens commands; Enter runs; Esc cancels".into(),
+        "  :next :prev :pause :favorite :status :quit".into(),
+        "Config".into(),
+        "  Enter opens Sources subnav   Esc leaves subnav   e edit   t toggle".into(),
+        "Config edit".into(),
+        "  ↑/↓ fields   text keys type   Backspace deletes".into(),
+        "  Space or ←/→ cycle bool/choice fields   Enter save   Esc cancel".into(),
+        "Destructive confirmations".into(),
+        "  Nuke prompt: Shift+X confirm   Esc cancel".into(),
+        format!("Current mode: {}", key_help_mode_label(app)),
+    ];
+
+    if compact {
+        lines.retain(|line| {
+            !line.contains("Home/End")
+                && !line.contains(":next")
+                && !line.contains("Backspace deletes")
+                && !line.contains("Nuke prompt")
+        });
+    }
+
+    lines
+}
+
+fn key_help_mode_label(app: &App) -> &'static str {
+    if app.pending_nuke_confirm {
+        "nuke confirmation"
+    } else if app.is_editing() {
+        "config edit"
+    } else {
+        match app.input_mode {
+            InputMode::Command => "command input",
+            InputMode::SearchInput => "search input",
+            InputMode::Normal if app.tab == Tab::Config && app.config_in_subnav => {
+                "config sources subnav"
+            }
+            InputMode::Normal => "normal",
+        }
     }
 }
 
@@ -1080,6 +1155,9 @@ fn footer_paragraph(app: &App, width: u16, theme: style::Theme) -> Paragraph<'_>
 }
 
 fn footer_keys(app: &App, width: u16) -> String {
+    if app.show_key_help {
+        return "help | Esc/q close".into();
+    }
     if width < 50 {
         return match app.input_mode {
             InputMode::Command => format!(":{}_ | Enter | Esc | q", app.cmd_line),
@@ -1091,15 +1169,15 @@ fn footer_keys(app: &App, width: u16) -> String {
                     } else {
                         "Enter apply"
                     };
-                    format!("←/→ | / i | {enter_hint} | j/k | : | q")
+                    format!("←/→ /i | {enter_hint} | j/k | : ? q")
                 }
                 Tab::Config
                     if app.config_in_subnav && app.is_sources_list_block(app.config_cursor) =>
                 {
-                    "←/→ tabs | Esc | j/k Pg | e | t | n/p | sp | : | q".into()
+                    "←/→ tabs | Esc | j/k Pg | e | t | n/p | sp | : | ? | q".into()
                 }
-                Tab::Config => "←/→ tabs | j/k Pg | Enter | e | t | n/p | sp | : | q".into(),
-                _ => "←/→ tabs | j/k Pg | n/p | f/d | Shift+X | sp | : | q".into(),
+                Tab::Config => "←/→ tabs | j/k Pg | Enter | e | t | n/p | sp | : | ? | q".into(),
+                _ => "←/→ tabs | j/k Pg | n/p | f/d | Shift+X | sp | : | ? | q".into(),
             },
         };
     }
@@ -2713,10 +2791,10 @@ mod tests {
         assert!(text.contains("query: mountains"), "{text}");
         assert!(text.contains("normal"), "{text}");
         assert!(text.contains("←/→"), "{text}");
-        assert!(text.contains("/ i"), "{text}");
+        assert!(text.contains("/i"), "{text}");
         assert!(text.contains("Enter search"), "{text}");
         assert!(text.contains("j/k"), "{text}");
-        assert!(text.contains(": | q"), "{text}");
+        assert!(text.contains(": ? q"), "{text}");
 
         app.search_results.push(SearchHit {
             id: "id-1".into(),
@@ -2984,11 +3062,19 @@ mod tests {
             UiAction::EditSearch
         );
         assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('?'))),
+            UiAction::OpenHelp
+        );
+        assert_eq!(
             action_for_key(&app, KeyEvent::from(KeyCode::Char('q'))),
             UiAction::Quit
         );
 
         app.input_mode = InputMode::Command;
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('?'))),
+            UiAction::CommandChar('?')
+        );
         assert_eq!(
             action_for_key(&app, KeyEvent::from(KeyCode::Char('/'))),
             UiAction::CommandChar('/')
@@ -3003,6 +3089,10 @@ mod tests {
         );
 
         app.input_mode = InputMode::SearchInput;
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('?'))),
+            UiAction::SearchChar('?')
+        );
         assert_eq!(
             action_for_key(&app, KeyEvent::from(KeyCode::Char('/'))),
             UiAction::SearchChar('/')
@@ -3019,6 +3109,44 @@ mod tests {
             action_for_key(&app, KeyEvent::from(KeyCode::Enter)),
             UiAction::SubmitSearch
         );
+    }
+
+    #[test]
+    fn key_help_opens_and_closes_without_quitting() {
+        let mut app = test_app();
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+
+        assert!(
+            !handle_key(&mut app, KeyEvent::from(KeyCode::Char('?')), rt.handle())
+                .expect("open help")
+        );
+        assert!(app.show_key_help);
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('q'))),
+            UiAction::CloseHelp
+        );
+
+        let text = render_text(&app, 80, 30);
+        assert!(text.contains("Key help"), "{text}");
+        assert!(text.contains("Global"), "{text}");
+        assert!(text.contains("Config edit"), "{text}");
+        assert!(text.contains("Esc/q close help"), "{text}");
+
+        assert!(
+            !handle_key(&mut app, KeyEvent::from(KeyCode::Char('q')), rt.handle())
+                .expect("close help with q")
+        );
+        assert!(!app.show_key_help);
+
+        assert!(
+            !handle_key(&mut app, KeyEvent::from(KeyCode::Char('?')), rt.handle())
+                .expect("open help again")
+        );
+        assert!(
+            !handle_key(&mut app, KeyEvent::from(KeyCode::Esc), rt.handle())
+                .expect("close help with esc")
+        );
+        assert!(!app.show_key_help);
     }
 
     #[test]
