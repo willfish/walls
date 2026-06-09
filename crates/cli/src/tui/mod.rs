@@ -1,5 +1,6 @@
 mod app;
 mod command;
+mod now_view;
 #[cfg(feature = "tui-preview")]
 mod preview;
 mod sources_view;
@@ -935,7 +936,7 @@ fn render_config_tab(f: &mut Frame, area: Rect, app: &App, theme: style::Theme) 
 fn tab_lines(app: &App, width: u16, height: u16) -> Vec<String> {
     match app.tab {
         Tab::Config => config_lines(app),
-        Tab::Now => now_lines(app),
+        Tab::Now => now_view::lines(app),
         Tab::History => app.history_lines(),
         Tab::Browse => app.browse_lines(),
         Tab::Search => app.search_lines(),
@@ -2176,41 +2177,6 @@ fn render_rich_edit(f: &mut Frame, area: Rect, app: &App, theme: style::Theme, b
         .block(theme.content_block(block_title))
         .style(theme.normal());
     f.render_widget(list, area);
-}
-
-fn now_lines(app: &App) -> Vec<String> {
-    let mut lines = match &app.ctx.state.current {
-        Some(c) => vec![
-            format!("source: {}", c.source_id),
-            format!("wallhaven: {:?}", c.wallhaven_id),
-            format!("original: {}", c.original_path),
-            format!("composed: {}", c.composed_path),
-            app.message.clone(),
-        ],
-        None => vec![
-            style::state_text(style::StateKind::Empty, "no current wallpaper"),
-            app.message.clone(),
-        ],
-    };
-    lines.extend(last_run_lines(app));
-    lines
-}
-
-fn last_run_lines(app: &App) -> Vec<String> {
-    let Ok(events) = walls_core::events::read_events(&app.ctx.paths.event_journal_file) else {
-        return vec!["last run: unavailable".into()];
-    };
-    let Some(summary) = walls_core::events::last_run_summary(&events) else {
-        return vec!["last run: (none)".into()];
-    };
-    let mut lines = vec![format!("last run: {}", summary.message)];
-    if let Some(warning) = summary.warnings.first() {
-        lines.push(format!("last warning: {warning}"));
-    }
-    if let Some(error) = summary.errors.first() {
-        lines.push(format!("last error: {error}"));
-    }
-    lines
 }
 
 #[cfg(test)]
