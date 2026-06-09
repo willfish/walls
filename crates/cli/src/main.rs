@@ -1785,7 +1785,18 @@ fn cmd_config_sync(dry_run: bool) -> anyhow::Result<()> {
 
 fn cmd_trash(dry_run: bool, force: bool, json: bool) -> anyhow::Result<()> {
     let mut ctx = WallsCtx::load()?;
-    let plan = ctx.plan_trash_current()?;
+    let plan = match ctx.plan_trash_current() {
+        Ok(plan) => plan,
+        Err(error) if recovery::is_missing_current_error(&error) => {
+            if json {
+                print_json(missing_current_command_json("trash"))?;
+            } else {
+                eprintln!("{}", recovery::current_required_error("trash", &error));
+            }
+            std::process::exit(1);
+        }
+        Err(error) => return Err(error),
+    };
     if dry_run {
         return print_json_or_human(json, trash_plan_json(&plan, true), || {
             println!("would trash original: {}", plan.original_path);
@@ -1843,6 +1854,16 @@ fn trash_plan_details_json(plan: &walls_core::ctx::TrashPlan) -> serde_json::Val
     })
 }
 
+fn missing_current_command_json(command: &str) -> serde_json::Value {
+    serde_json::json!({
+        "command": command,
+        "changed": false,
+        "status": "missing_current",
+        "message": recovery::missing_current_wallpaper(),
+        "exit_code_reason": "missing_current",
+    })
+}
+
 fn cmd_fetch(paths: Vec<PathBuf>, move_files: bool) -> anyhow::Result<()> {
     if paths.is_empty() {
         eprintln!("{}", recovery::fetch_requires_path());
@@ -1857,9 +1878,17 @@ fn cmd_fetch(paths: Vec<PathBuf>, move_files: bool) -> anyhow::Result<()> {
 
 fn cmd_favorite() -> anyhow::Result<()> {
     let ctx = WallsCtx::load()?;
-    let dest = ctx.favorite_current()?;
-    println!("{}", dest.display());
-    Ok(())
+    match ctx.favorite_current() {
+        Ok(dest) => {
+            println!("{}", dest.display());
+            Ok(())
+        }
+        Err(error) if recovery::is_missing_current_error(&error) => {
+            eprintln!("{}", recovery::favorite_error(&error));
+            std::process::exit(1);
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn cmd_current(meta: bool, json: bool) -> anyhow::Result<()> {

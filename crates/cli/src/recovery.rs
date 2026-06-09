@@ -37,12 +37,20 @@ pub fn tui_no_previous() -> String {
 }
 
 pub fn favorite_error(error: &anyhow::Error) -> String {
+    current_required_error("favorite", error)
+}
+
+pub fn current_required_error(command: &str, error: &anyhow::Error) -> String {
     let message = error.to_string();
-    if message.contains("no current wallpaper") {
-        format!("favorite error: {}", missing_current_wallpaper())
+    if is_missing_current_error(error) {
+        format!("{command} error: {}", missing_current_wallpaper())
     } else {
-        format!("favorite error: {error}")
+        format!("{command} error: {message}")
     }
+}
+
+pub fn is_missing_current_error(error: &anyhow::Error) -> bool {
+    error.to_string().contains("no current wallpaper")
 }
 
 #[cfg(test)]
@@ -79,6 +87,16 @@ mod tests {
         assert_eq!(
             favorite_error(&err),
             "favorite error: no current wallpaper. Run `walls apply <path>` or `walls next --manual` first."
+        );
+    }
+
+    #[test]
+    fn current_required_error_uses_command_prefix() {
+        let err = anyhow::anyhow!("no current wallpaper");
+
+        assert_eq!(
+            current_required_error("trash", &err),
+            "trash error: no current wallpaper. Run `walls apply <path>` or `walls next --manual` first."
         );
     }
 }
