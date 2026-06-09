@@ -244,6 +244,8 @@ The **desktop launcher** (`walls.desktop`, installed on Linux via Nix) runs `xdg
 
 Tray/desktop icon SVGs live under `assets/icons/` (`walls-tray.svg` for launchers and the active tray icon, `walls-tray-paused.svg` when rotation is inactive). Rebuild `walls-tray` after editing. Set `WALLS_TRAY_WALLPAPER_THUMBNAIL=1` to restore the old live-wallpaper thumbnail icon (paused still uses the paused brand icon).
 
+Tray actions update the tray tooltip with the latest success, no-op, or failure message, and the pause menu label changes between pause/resume based on current state.
+
 Tray scroll support is backend-specific: StatusNotifier exposes wheel events, so vertical scroll over the icon maps to next/previous wallpaper. The legacy AppIndicator backend used through `tray-icon` on Linux does not expose tray icon wheel events, so its behaviour remains menu-only.
 
 ## Automatic rotation

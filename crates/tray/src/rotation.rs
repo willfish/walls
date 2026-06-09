@@ -71,14 +71,23 @@ impl Default for RotationLoop {
 }
 
 /// Tray menu "Next" — explicit user action, ignores pause/rotation-off.
-pub fn advance_manual() {
+pub fn advance_manual() -> anyhow::Result<Option<std::path::PathBuf>> {
     let result = runtime().block_on(async {
         let mut ctx = WallsCtx::load()?;
         walls_core::rotation::advance_manual(&mut ctx).await
     });
     match result {
-        Ok(Some(path)) => tracing::info!("manual next: {}", path.display()),
-        Ok(None) => tracing::info!("manual next: no change"),
-        Err(err) => tracing::warn!("manual next failed: {err:#}"),
+        Ok(Some(path)) => {
+            tracing::info!("manual next: {}", path.display());
+            Ok(Some(path))
+        }
+        Ok(None) => {
+            tracing::info!("manual next: no change");
+            Ok(None)
+        }
+        Err(err) => {
+            tracing::warn!("manual next failed: {err:#}");
+            Err(err)
+        }
     }
 }
