@@ -45,13 +45,13 @@ pub(crate) struct ConsoleWriter;
 impl io::Write for ConsoleWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if !IN_TUI.load(Ordering::Relaxed) {
-            let _ = io::stdout().write_all(buf);
+            let _ = io::stderr().write_all(buf);
         }
         Ok(buf.len())
     }
     fn flush(&mut self) -> io::Result<()> {
         if !IN_TUI.load(Ordering::Relaxed) {
-            let _ = io::stdout().flush();
+            let _ = io::stderr().flush();
         }
         Ok(())
     }

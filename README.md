@@ -178,14 +178,14 @@ walls-tray         # tray menu → walls prev/next/toggle-pause
 |---------|--------|
 | `walls apply <path>` | Works |
 | `walls status [--json]` | Works |
-| `walls current [--meta]` | Works |
+| `walls current [--json] [--meta]` | Works (`--meta` is the legacy metadata-only JSON shape; prefer `--json` for scripts) |
 | `walls favorite` | Works |
 | `walls fetch <paths...> [--move]` | Works |
 | `walls trash` | Works |
 | `walls config validate [--json]` | Works |
 | `walls config sync` | Reconcile tray autostart desktop entry with `config.json` |
 | `walls pause` / `walls resume` / `walls toggle-pause` | Works |
-| `walls next [--manual] [--refresh <level>]` / `walls prev` | Works (auto `next` respects pause/rotation-off; `--manual` for explicit changes; refresh levels: `all`, `filters-and-texts`, `texts`, `clock-only`) |
+| `walls next [--manual] [--refresh <level>] [--json]` / `walls prev [--json]` | Works (auto `next` respects pause/rotation-off; `--manual` for explicit changes; refresh levels: `all`, `filters-and-texts`, `texts`, `clock-only`) |
 | `walls tui` | Works — tabs: Status/Now/History/Browse/Search; `:` commands; `f`/`d` favorite/trash |
 | `walls tui` with `--features tui-preview` | Optional Now-tab image preview in terminals supporting Kitty graphics (Ghostty/Kitty) or iTerm2 inline images; metadata-only fallback otherwise; set `WALLS_TUI_PREVIEW=0` to force metadata-only |
 | `walls-tray` | Works (prev/next/pause, Open TUI, brand tray icon from `assets/icons/walls-tray.svg`) |
@@ -217,3 +217,30 @@ Configure rotation in `config.json`:
 Optional legacy `systemd/` units remain for headless setups without a tray host; prefer the tray scheduler when a graphical session is available.
 
 See `docs/home-manager.example.nix` for a home-manager sketch.
+
+## CLI output contract
+
+Human output stays compact and backwards-compatible: commands such as `walls next`,
+`walls prev`, and `walls current` print the affected path or a short no-op message.
+Use `--json` where available when scripting.
+
+Structured command results use a stable envelope:
+
+```json
+{
+  "command": "next",
+  "changed": false,
+  "status": "no_change",
+  "path": null,
+  "exit_code_reason": "no_change"
+}
+```
+
+- `command` is the invoked command family, for example `next`, `prev`, or `current`.
+- `changed` is `true` only when the command changed wallpaper state or applied a wallpaper.
+- `status` is a stable machine-readable result such as `applied`, `refreshed`, `no_change`, `no_previous`, `current`, or `missing_current`.
+- `path` is the affected wallpaper path for path-oriented commands, otherwise `null`.
+- `current` is used by `walls current --json` and contains `path` plus metadata when present.
+- `exit_code_reason` is `null` on normal success and a stable reason string for no-op or failure-like outcomes that scripts may branch on.
+
+`walls current --json` exits non-zero with `status: "missing_current"` when no wallpaper is recorded. `walls next --json` and `walls prev --json` keep the existing successful no-op behavior for `no_change` and `no_previous`, while making the reason explicit.
