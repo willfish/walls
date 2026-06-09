@@ -13,6 +13,7 @@ use crate::config::{
     secrets_credential_present, source_secrets_key, ApplyBackendSetting, SourceKind,
 };
 use crate::ctx::WallsCtx;
+use crate::events::{last_run_summary, read_events, LastRunStatus, LastRunSummary};
 use crate::providers::{
     configured_providers, provider_for_source, ProviderAttempt, ProviderNoCandidateReason,
     ProviderOperation, ProviderStatus,
@@ -154,6 +155,7 @@ pub fn run_doctor(ctx: &WallsCtx, options: &DoctorOptions) -> DoctorReport {
     check_desktop_apply(ctx, options, &mut checks);
     check_tray(ctx, options, &mut checks);
     check_providers(ctx, &mut checks);
+    check_last_run(ctx, &mut checks);
     check_storage_cache(ctx, &mut checks);
     check_tui(options, &mut checks);
     let provider_attempts = provider_doctor_attempts(ctx);
@@ -163,6 +165,62 @@ pub fn run_doctor(ctx: &WallsCtx, options: &DoctorOptions) -> DoctorReport {
             .any(|check| check.status == DoctorStatus::Fail),
         checks,
         provider_attempts,
+    }
+}
+
+fn check_last_run(ctx: &WallsCtx, checks: &mut Vec<DoctorCheck>) {
+    let summary = read_events(&ctx.paths.event_journal_file)
+        .ok()
+        .and_then(|events| last_run_summary(&events));
+    match summary.as_ref() {
+        Some(summary) => push_last_run_checks(summary, checks),
+        None => checks.push(DoctorCheck::pass(
+            DoctorSection::Providers,
+            "providers.last_run",
+            "no recent wallpaper run recorded",
+        )),
+    }
+}
+
+fn push_last_run_checks(summary: &LastRunSummary, checks: &mut Vec<DoctorCheck>) {
+    match summary.status {
+        LastRunStatus::Applied => {
+            checks.push(DoctorCheck::pass(
+                DoctorSection::Providers,
+                "providers.last_run",
+                format!("last run succeeded: {}", summary.message),
+            ));
+            for warning in &summary.warnings {
+                checks.push(DoctorCheck::warn(
+                    DoctorSection::Providers,
+                    "providers.last_run.warning",
+                    format!("last run warning: {warning}"),
+                    "run `walls logs --tail 20` to inspect provider skips and fallbacks",
+                ));
+            }
+        }
+        LastRunStatus::NoChange => checks.push(DoctorCheck::warn(
+            DoctorSection::Providers,
+            "providers.last_run.no_change",
+            format!("last run made no change: {}", summary.message),
+            "run `walls next --manual --verbose` to see provider skips, or check source readiness",
+        )),
+        LastRunStatus::Failed => {
+            checks.push(DoctorCheck::fail(
+                DoctorSection::Providers,
+                "providers.last_run.failed",
+                format!("last run failed: {}", summary.message),
+                "run `walls logs --level error --tail 20` for the recent failure details",
+            ));
+            for error in &summary.errors {
+                checks.push(DoctorCheck::fail(
+                    DoctorSection::Providers,
+                    "providers.last_run.error",
+                    format!("last run error: {error}"),
+                    "fix the provider or backend error, then run `walls next --manual` again",
+                ));
+            }
+        }
     }
 }
 
