@@ -88,8 +88,7 @@ and validation work, consistent with the rest of the repo.
 - Keep the standard workspace gates green before publishing code changes:
   `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
   and `cargo test --workspace`.
-- If a change touches optional features, run the relevant feature gate, such as
-  `cargo clippy -p walls --features tui-preview --all-targets -- -D warnings`
-  and `cargo test -p walls --features tui-preview`.
+- If a change touches optional features outside the default build, run the
+  relevant explicit feature gate in addition to the standard workspace gates.
 - New dependencies must pass `cargo deny`; duplicate-version exceptions need an
   exact-version reason in `deny.toml`.
