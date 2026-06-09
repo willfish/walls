@@ -52,7 +52,7 @@ impl ImagePreview {
                     cached: None,
                     status: PreviewFallback::new(
                         style::StateKind::Disabled,
-                        "preview disabled; showing metadata",
+                        preview_disabled_message(),
                     ),
                 };
             }
@@ -62,7 +62,7 @@ impl ImagePreview {
                     cached: None,
                     status: PreviewFallback::new(
                         style::StateKind::Unavailable,
-                        "preview unsupported; showing metadata",
+                        preview_unsupported_message(),
                     ),
                 };
             }
@@ -88,11 +88,7 @@ impl ImagePreview {
                 cached: None,
                 status: PreviewFallback::new(
                     style::StateKind::Unavailable,
-                    format!(
-                        "preview unsupported ({:?}); showing metadata",
-                        picker.protocol_type()
-                    )
-                    .to_lowercase(),
+                    preview_unsupported_protocol_message(picker.protocol_type()),
                 ),
             },
             Err(err) => Self {
@@ -100,7 +96,7 @@ impl ImagePreview {
                 cached: None,
                 status: PreviewFallback::new(
                     style::StateKind::Unavailable,
-                    format!("preview unavailable: {err}; showing metadata"),
+                    preview_unavailable_message(&err.to_string()),
                 ),
             },
         }
@@ -143,7 +139,7 @@ impl ImagePreview {
                 self.cached = None;
                 self.status = PreviewFallback::new(
                     style::StateKind::ValidationError,
-                    format!("preview failed: {err}; showing metadata"),
+                    preview_failed_message(&err.to_string()),
                 );
                 let status = self.status.clone();
                 self.render_fallback(f, inner, status.kind, &status.message, theme);
@@ -158,7 +154,7 @@ impl ImagePreview {
                 f,
                 inner,
                 style::StateKind::Unavailable,
-                "preview unavailable; showing metadata",
+                &preview_unavailable_message("no image protocol response"),
                 theme,
             );
         }
@@ -266,9 +262,41 @@ fn preview_disabled_value(value: &str) -> bool {
     }
 }
 
+fn preview_disabled_message() -> &'static str {
+    "preview disabled; showing metadata. Unset WALLS_TUI_PREVIEW or use a Kitty/Ghostty/iTerm terminal for images."
+}
+
+fn preview_unsupported_message() -> &'static str {
+    "preview unsupported in this terminal; showing metadata. Use Kitty, Ghostty, iTerm, or set WALLS_TUI_PREVIEW=0."
+}
+
+fn preview_unsupported_protocol_message(protocol: ProtocolType) -> String {
+    format!(
+        "preview unsupported ({protocol:?}); showing metadata. Use Kitty, Ghostty, iTerm, or set WALLS_TUI_PREVIEW=0."
+    )
+    .to_lowercase()
+}
+
+fn preview_unavailable_message(error: &str) -> String {
+    format!(
+        "preview unavailable: {error}; showing metadata. Set WALLS_TUI_PREVIEW=0 or try Kitty/Ghostty/iTerm."
+    )
+}
+
+fn preview_failed_message(error: &str) -> String {
+    format!(
+        "preview failed: {error}; showing metadata. The image may be corrupt; inspect it with `walls current --json` or choose another wallpaper."
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{preview_disabled_value, PreviewCapability, TerminalHints};
+    use super::{
+        preview_disabled_message, preview_disabled_value, preview_failed_message,
+        preview_unavailable_message, preview_unsupported_message,
+        preview_unsupported_protocol_message, PreviewCapability, TerminalHints,
+    };
+    use ratatui_image::picker::ProtocolType;
 
     #[test]
     fn preview_disable_values_force_metadata_only_mode() {
@@ -331,5 +359,14 @@ mod tests {
             PreviewCapability::from_hints(true, &iterm),
             PreviewCapability::Disabled
         );
+    }
+
+    #[test]
+    fn preview_fallback_messages_include_recovery_actions() {
+        assert!(preview_disabled_message().contains("Unset WALLS_TUI_PREVIEW"));
+        assert!(preview_unsupported_message().contains("WALLS_TUI_PREVIEW=0"));
+        assert!(preview_unsupported_protocol_message(ProtocolType::Halfblocks).contains("kitty"));
+        assert!(preview_unavailable_message("probe failed").contains("Ghostty"));
+        assert!(preview_failed_message("decode failed").contains("walls current --json"));
     }
 }
