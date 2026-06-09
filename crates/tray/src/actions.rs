@@ -201,7 +201,7 @@ fn dispatch_next() -> ActionOutcome {
 fn dispatch_prev() -> ActionOutcome {
     let result: anyhow::Result<Option<PathBuf>> = (|| {
         let mut ctx = WallsCtx::load()?;
-        ctx.advance_prev()
+        Ok(ctx.advance_prev()?)
     })();
     match result {
         Ok(Some(path)) => ActionOutcome::refreshing(Some(ActionFeedback::success(format!(

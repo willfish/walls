@@ -74,4 +74,8 @@ pub enum WallsError {
     /// The state points at a composed wallpaper file that no longer exists.
     #[error("current composed wallpaper does not exist: {}", path.display())]
     CurrentComposedMissing { path: PathBuf },
+
+    /// The history points at a previous wallpaper file that no longer exists.
+    #[error("previous wallpaper file does not exist: {}", path.display())]
+    PreviousOriginalMissing { path: PathBuf },
 }

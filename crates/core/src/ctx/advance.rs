@@ -1,6 +1,7 @@
 use super::WallsCtx;
 use crate::apply::ApplyTrigger;
 use crate::config::SourceKind;
+use crate::error::{Result, WallsError};
 use crate::providers::{
     ProviderAttempt, ProviderCapability, ProviderDescriptor, ProviderFailureKind, ProviderKind,
     ProviderNoCandidateReason, ProviderOperation, ProviderRetry, ProviderStatus,
@@ -58,22 +59,27 @@ impl WallsCtx {
         AdvanceNext::new(self, mode).run().await
     }
 
-    pub fn advance_prev(&mut self) -> anyhow::Result<Option<PathBuf>> {
-        self.with_state_lock(WallsCtx::advance_prev_inner)
+    pub fn advance_prev(&mut self) -> Result<Option<PathBuf>> {
+        self.with_typed_state_lock(WallsCtx::advance_prev_inner)
     }
 
-    fn advance_prev_inner(&mut self) -> anyhow::Result<Option<PathBuf>> {
+    fn advance_prev_inner(&mut self) -> Result<Option<PathBuf>> {
         if self.state.history.len() < 2 {
             return Ok(None);
         }
-        self.state.history_index = (self.state.history_index + 1).min(self.state.history.len() - 1);
-        let id = self.state.history[self.state.history_index].clone();
+        let next_index = (self.state.history_index + 1).min(self.state.history.len() - 1);
+        let id = self.state.history[next_index].clone();
         let path = PathBuf::from(&id);
-        if path.exists() {
-            self.apply_file_inner(&path, ApplyTrigger::Manual, None, false)?;
-            return Ok(Some(path));
+        if !path.exists() {
+            return Err(WallsError::PreviousOriginalMissing { path });
         }
-        Ok(None)
+        self.state.history_index = next_index;
+        self.apply_file_inner(&path, ApplyTrigger::Manual, None, false)
+            .map_err(|source| WallsError::ApplyFile {
+                original: path.clone(),
+                source,
+            })?;
+        Ok(Some(path))
     }
 }
 
