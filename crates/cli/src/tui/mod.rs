@@ -1,4 +1,5 @@
 mod app;
+mod command;
 #[cfg(feature = "tui-preview")]
 mod preview;
 mod sources_view;
