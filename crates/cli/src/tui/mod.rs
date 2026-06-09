@@ -341,7 +341,14 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
             KeyCode::Down => UiAction::EditFieldDown,
             KeyCode::Left => UiAction::EditFieldCycle { forward: false },
             KeyCode::Right => UiAction::EditFieldCycle { forward: true },
-            KeyCode::Char(' ') => UiAction::EditFieldCycle { forward: true },
+            KeyCode::Char(' ')
+                if matches!(
+                    app.current_edit_field_kind(),
+                    app::EditFieldKind::Bool | app::EditFieldKind::Choice(_)
+                ) =>
+            {
+                UiAction::EditFieldCycle { forward: true }
+            }
             KeyCode::Esc => UiAction::CancelEdit,
             KeyCode::Backspace => UiAction::EditFieldBackspace,
             KeyCode::Enter => UiAction::EditFieldCommit,
@@ -2893,6 +2900,55 @@ mod tests {
         assert!(text.contains("Category: Anime"), "{text}");
         assert!(text.contains("Purity: SFW"), "{text}");
         assert!(text.contains("secrets.json"), "{text}");
+    }
+
+    #[test]
+    fn wallhaven_search_query_edit_accepts_spaces_and_saves_human_text() {
+        let mut app = test_app_with_wallhaven(
+            true,
+            serde_json::json!({
+                "prefer": "search_only",
+                "search": {
+                    "q": "cosmic",
+                    "categories": "111",
+                    "purity": "100",
+                    "sorting": "random",
+                    "order": "desc",
+                    "atleast": "1920x1080"
+                }
+            }),
+            serde_json::json!({ "wallhaven_api_key": "key" }),
+        );
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = app.ctx.config.sources.len();
+        app.start_edit_for_current();
+
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("prefer field");
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("query field");
+        assert_eq!(app.editing.as_ref().unwrap().field_buffer, "cosmic");
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char(' '))),
+            UiAction::EditFieldChar(' ')
+        );
+
+        for action in [
+            UiAction::EditFieldChar(' '),
+            UiAction::EditFieldChar('d'),
+            UiAction::EditFieldChar('e'),
+            UiAction::EditFieldChar('s'),
+            UiAction::EditFieldChar('k'),
+            UiAction::EditFieldChar('t'),
+            UiAction::EditFieldChar('o'),
+            UiAction::EditFieldChar('p'),
+            UiAction::EditFieldCommit,
+        ] {
+            update(&mut app, action, rt.handle()).expect("edit query");
+        }
+
+        assert_eq!(app.ctx.config.wallhaven.search.q, "cosmic desktop");
     }
 
     #[test]
