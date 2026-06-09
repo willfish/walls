@@ -698,6 +698,8 @@ pub struct App {
     pub tab: Tab,
     pub config_cursor: usize,
     pub cursor: usize,
+    pub logs_cursor: usize,
+    logs_seen_len: usize,
     pub config_in_subnav: bool,
     pub config_sub_cursor: usize,
     pub message: String,
@@ -755,6 +757,8 @@ impl App {
             tab: Tab::Config,
             config_cursor: 0,
             cursor: 0,
+            logs_cursor: 0,
+            logs_seen_len: super::log_len(),
             config_in_subnav: false,
             config_sub_cursor: 0,
             message: String::new(),
@@ -829,6 +833,7 @@ impl App {
             }
             return;
         }
+        self.sync_log_cursor();
         let len = self.list_len();
         if len > 0 {
             let is_config = self.tab == Tab::Config;
@@ -849,6 +854,7 @@ impl App {
     }
 
     pub fn move_up(&mut self) {
+        self.sync_log_cursor();
         if self.tab == Tab::Config
             && self.config_in_subnav
             && self.is_sources_list_block(self.config_cursor)
@@ -904,6 +910,8 @@ impl App {
             self.config_sub_cursor
         } else if self.tab == Tab::Config {
             self.config_cursor
+        } else if self.tab == Tab::Logs {
+            self.logs_cursor
         } else {
             self.cursor
         }
@@ -927,6 +935,38 @@ impl App {
         if self.tab == Tab::Config && was_sources && !self.is_sources_list_block(row) {
             self.config_in_subnav = false;
         }
+    }
+
+    pub fn switch_tab(&mut self, tab: Tab) {
+        self.tab = tab;
+        self.cursor = 0;
+        self.config_in_subnav = false;
+        self.editing = None;
+        if self.tab == Tab::Logs {
+            self.sync_log_cursor();
+        }
+    }
+
+    pub fn sync_log_cursor(&mut self) {
+        if self.tab != Tab::Logs {
+            return;
+        }
+        let len = super::log_len();
+        if len == 0 {
+            self.logs_cursor = 0;
+            self.logs_seen_len = 0;
+            return;
+        }
+        if self.logs_cursor == 0 {
+            self.logs_seen_len = len;
+            return;
+        }
+        if len > self.logs_seen_len {
+            self.logs_cursor = (self.logs_cursor + (len - self.logs_seen_len)).min(len - 1);
+        } else if self.logs_cursor >= len {
+            self.logs_cursor = len - 1;
+        }
+        self.logs_seen_len = len;
     }
 
     pub fn list_len(&self) -> usize {
@@ -953,6 +993,7 @@ impl App {
     fn active_cursor_mut(&mut self) -> &mut usize {
         match self.tab {
             Tab::Config => &mut self.config_cursor,
+            Tab::Logs => &mut self.logs_cursor,
             _ => &mut self.cursor,
         }
     }
@@ -1006,25 +1047,30 @@ impl App {
         lines
     }
 
-    pub fn logs_lines(&self, width: u16) -> Vec<String> {
+    pub fn logs_lines(&self, width: u16, height: u16) -> Vec<String> {
         let logs = super::LOG_BUFFER.lock().unwrap();
         if logs.is_empty() {
             return vec![style::state_text(StateKind::Empty, "no logs captured yet")];
         }
         let wrap_width = usize::from(width).saturating_sub(4);
         let mut lines = Vec::new();
-        for (i, line) in logs.iter().enumerate() {
-            let mark = if i == self.cursor { ">" } else { " " };
+        let mut selected_row = 0;
+        for (i, line) in logs.iter().rev().enumerate() {
+            let selected = i == self.logs_cursor;
+            let mark = if selected { ">" } else { " " };
             let wrapped = wrap_log_text(line, wrap_width);
             for (j, segment) in wrapped.into_iter().enumerate() {
                 if j == 0 {
+                    if selected {
+                        selected_row = lines.len();
+                    }
                     lines.push(format!("{mark} {segment}"));
                 } else {
                     lines.push(format!("  {segment}"));
                 }
             }
         }
-        lines
+        crop_lines_around_selection(lines, selected_row, height)
     }
 
     pub fn browse_items(&self) -> Vec<String> {
@@ -2032,6 +2078,10 @@ impl App {
                         "1 Config | ←/→ tabs | j/k Pg Home/End | e edit | t toggle | n/p | space pause | : cmd | ? help".into()
                     }
                 }
+                Tab::Logs => {
+                    "6 Logs | newest first | j older k newer | Home newest End oldest | : cmd | ? help"
+                        .into()
+                }
                 _ => {
                     "1-6 tabs ←/→ | j/k Pg Home/End | n/p next/prev | f favorite d request trash | Shift+X nuke | space pause | : cmd | ? help"
                         .into()
@@ -2184,6 +2234,22 @@ fn wrap_log_text(text: &str, width: usize) -> Vec<String> {
         lines.push(text.to_string());
     }
     lines
+}
+
+fn crop_lines_around_selection(
+    lines: Vec<String>,
+    selected_row: usize,
+    viewport_height: u16,
+) -> Vec<String> {
+    let visible_rows = usize::from(viewport_height).saturating_sub(2).max(1);
+    if lines.len() <= visible_rows {
+        return lines;
+    }
+    let start = selected_row
+        .saturating_add(1)
+        .saturating_sub(visible_rows)
+        .min(lines.len().saturating_sub(visible_rows));
+    lines.into_iter().skip(start).take(visible_rows).collect()
 }
 
 #[cfg(test)]
