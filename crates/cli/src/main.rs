@@ -1558,10 +1558,11 @@ fn provider_attempt_line(attempt: &ProviderAttempt) -> String {
                 .map(|message| format!(": {message}"))
                 .unwrap_or_default();
             format!(
-                "{prefix}: failed ({}{}){}",
+                "{prefix}: failed ({}{}){}; {}",
                 failure_kind_label(*kind),
                 status,
-                message
+                message,
+                provider_failure_recovery_hint(*kind, *status_code)
             )
         }
     }
@@ -1665,6 +1666,36 @@ fn failure_kind_label(kind: ProviderFailureKind) -> &'static str {
         ProviderFailureKind::Io => "io",
         ProviderFailureKind::Config => "config",
         ProviderFailureKind::Unknown => "unknown",
+    }
+}
+
+fn provider_failure_recovery_hint(
+    kind: ProviderFailureKind,
+    status_code: Option<u16>,
+) -> &'static str {
+    match (kind, status_code) {
+        (_, Some(401 | 403)) => {
+            "check the provider credential in secrets.json or disable this source"
+        }
+        (_, Some(429)) | (ProviderFailureKind::RateLimited, _) => {
+            "wait for the provider rate limit to reset or reduce rotation frequency"
+        }
+        (_, Some(500..=599)) => {
+            "retry later or keep a local fallback source enabled while the provider is unavailable"
+        }
+        (ProviderFailureKind::Timeout | ProviderFailureKind::Connect, _) => {
+            "check network connectivity, then retry with `walls next --manual --verbose`"
+        }
+        (ProviderFailureKind::Decode, _) => {
+            "run `walls logs --level error --tail 20` and update provider filters if the response changed"
+        }
+        (ProviderFailureKind::Io, _) => {
+            "check cache/download paths and permissions, then run `walls doctor`"
+        }
+        (ProviderFailureKind::Config, _) => "run `walls config validate` and fix the provider config",
+        (ProviderFailureKind::Request | ProviderFailureKind::Unknown, _) => {
+            "retry with `walls next --manual --verbose` or inspect `walls logs --level error --tail 20`"
+        }
     }
 }
 
@@ -1977,5 +2008,37 @@ mod tests {
 
         assert!(empty.contains("loosen provider filters"), "{empty}");
         assert!(filtered.contains("selection.avoid_recent"), "{filtered}");
+    }
+
+    #[test]
+    fn provider_attempt_lines_include_recovery_for_failed_providers() {
+        let unauthorized = provider_attempt(ProviderKind::Wallhaven).failed(
+            ProviderFailureKind::Request,
+            Some(401),
+            Some("[redacted]".into()),
+        );
+        let timeout = provider_attempt(ProviderKind::Reddit).failed(
+            ProviderFailureKind::Timeout,
+            None,
+            Some("deadline exceeded".into()),
+        );
+        let config = provider_attempt(ProviderKind::Immich).failed(
+            ProviderFailureKind::Config,
+            None,
+            Some("server not set".into()),
+        );
+
+        let unauthorized = provider_attempt_line(&unauthorized);
+        let timeout = provider_attempt_line(&timeout);
+        let config = provider_attempt_line(&config);
+
+        assert!(unauthorized.contains("status 401"), "{unauthorized}");
+        assert!(unauthorized.contains("secrets.json"), "{unauthorized}");
+        assert!(timeout.contains("check network connectivity"), "{timeout}");
+        assert!(
+            timeout.contains("walls next --manual --verbose"),
+            "{timeout}"
+        );
+        assert!(config.contains("walls config validate"), "{config}");
     }
 }
