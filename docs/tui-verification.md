@@ -8,7 +8,7 @@ Run:
 
 ```sh
 cargo fmt --all
-cargo test -p walls tui:: --features tui-preview
+cargo test -p walls tui::
 cargo test --workspace --all-features
 cargo clippy --workspace --all-features -- -D warnings
 scripts/validate-tui-pty.sh
