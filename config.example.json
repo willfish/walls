@@ -148,7 +148,7 @@
     "enabled": true,
     "collections": [],
     "search": {
-      "q": "",
+      "q": "space",
       "categories": "111",
       "purity": "100",
       "sorting": "random",

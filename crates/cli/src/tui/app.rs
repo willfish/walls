@@ -347,6 +347,7 @@ pub(crate) fn block_field_kind(block: usize, key: &str) -> EditFieldKind {
                 "toplist",
             ]),
             "order" => EditFieldKind::Choice(&["desc", "asc"]),
+            "atleast" => EditFieldKind::Choice(walls_core::config::wallhaven_resolution_choices()),
             _ => EditFieldKind::Text,
         },
         _ => EditFieldKind::Text,

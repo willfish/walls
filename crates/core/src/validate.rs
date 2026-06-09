@@ -1,5 +1,8 @@
 use crate::config::UnsplashSourceConfig;
-use crate::config::{ApplyBackendSetting, Config, Secrets, SourceEntry, SourceKind};
+use crate::config::{
+    wallhaven_resolution_choices, wallhaven_resolution_supported, ApplyBackendSetting, Config,
+    Secrets, SourceEntry, SourceKind,
+};
 use crate::paths::{expand_home, WallsPaths};
 use serde::Serialize;
 use std::fmt;
@@ -480,7 +483,7 @@ fn validate_wallhaven_provider(
         WALLHAVEN_ORDER_CHOICES,
         errors,
     );
-    validate_resolution("wallhaven.search.atleast", &search.atleast, errors);
+    validate_wallhaven_resolution("wallhaven.search.atleast", &search.atleast, errors);
 
     for (index, collection) in config.wallhaven.collections.iter().enumerate() {
         if collection.username.trim().is_empty() {
@@ -545,26 +548,16 @@ fn validate_choice(
     );
 }
 
-fn validate_resolution(field: &str, value: &str, errors: &mut Vec<ValidationDiagnostic>) {
-    let Some((width, height)) = value.split_once('x') else {
-        errors.push(
-            ValidationDiagnostic::error(
-                field,
-                "must use WIDTHxHEIGHT format, for example 1920x1080",
-            )
-            .with_hint("set a resolution such as 1920x1080"),
-        );
+fn validate_wallhaven_resolution(field: &str, value: &str, errors: &mut Vec<ValidationDiagnostic>) {
+    if wallhaven_resolution_supported(value) {
         return;
-    };
-
-    let width = width.parse::<u32>().ok();
-    let height = height.parse::<u32>().ok();
-    if !matches!((width, height), (Some(width), Some(height)) if width > 0 && height > 0) {
-        errors.push(
-            ValidationDiagnostic::error(field, "must use positive numeric WIDTHxHEIGHT values")
-                .with_hint("set both width and height to positive numbers"),
-        );
     }
+
+    let choices = wallhaven_resolution_choices().join(", ");
+    errors.push(
+        ValidationDiagnostic::error(field, format!("must be one of: {choices}"))
+            .with_hint(format!("choose Minimum resolution in the TUI, or replace {value:?} with one of the listed values")),
+    );
 }
 
 fn validate_tray_autostart(config: &Config, errors: &mut Vec<ValidationDiagnostic>) {

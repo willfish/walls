@@ -29,7 +29,11 @@ pub use source_schema::{
     SECRETS_EDIT_HINT,
 };
 pub use unsplash::UnsplashSourceConfig;
-pub use wallhaven::{WallhavenCollection, WallhavenConfig, WallhavenPrefer, WallhavenSearch};
+pub use wallhaven::{
+    wallhaven_resolution_choices, wallhaven_resolution_supported, WallhavenCollection,
+    WallhavenConfig, WallhavenPrefer, WallhavenSearch, WALLHAVEN_DEFAULT_QUERY,
+    WALLHAVEN_FALLBACK_RESOLUTION,
+};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
@@ -221,11 +225,13 @@ impl Default for SelectionConfig {
     }
 }
 
-/// Default configuration for a fresh install (matches `config.example.json` at repo root).
+/// Default configuration for a fresh install, seeded from `config.example.json` at repo root.
 pub fn default_config() -> anyhow::Result<Config> {
-    Ok(serde_json::from_str(include_str!(
-        "../../../../config.example.json"
-    ))?)
+    let mut config: Config = serde_json::from_str(include_str!("../../../../config.example.json"))?;
+    config.wallhaven.search.atleast = wallhaven::detected_wallhaven_atleast()
+        .unwrap_or(wallhaven::WALLHAVEN_FALLBACK_RESOLUTION)
+        .into();
+    Ok(config)
 }
 
 pub fn load_config(path: &Path) -> anyhow::Result<Config> {
@@ -328,6 +334,10 @@ mod tests {
         assert!(path.is_file());
         assert!(loaded.change.enabled);
         assert_eq!(loaded.paths.compose_dir, "~/.local/share/walls/wallpaper");
+        assert_eq!(loaded.wallhaven.search.q, super::WALLHAVEN_DEFAULT_QUERY);
+        assert!(super::wallhaven_resolution_supported(
+            &loaded.wallhaven.search.atleast
+        ));
     }
 
     #[test]

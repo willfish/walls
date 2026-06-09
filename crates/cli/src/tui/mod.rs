@@ -3045,6 +3045,49 @@ mod tests {
     }
 
     #[test]
+    fn edit_form_space_cycles_wallhaven_minimum_resolution_choice() {
+        let mut app = test_app_with_wallhaven(
+            true,
+            serde_json::json!({
+                "search": {
+                    "sorting": "random",
+                    "purity": "100",
+                    "categories": "111",
+                    "order": "desc",
+                    "atleast": "1920x1080"
+                }
+            }),
+            serde_json::json!({ "wallhaven_api_key": "key" }),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = app.ctx.config.sources.len();
+        app.start_edit_for_current();
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+
+        for _ in 0..11 {
+            update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
+        }
+        assert_eq!(
+            app.editing.as_ref().unwrap().field_buffer,
+            "1920x1080",
+            "should land on Wallhaven minimum resolution field"
+        );
+        update(
+            &mut app,
+            UiAction::EditFieldCycle { forward: true },
+            rt.handle(),
+        )
+        .ok();
+        assert_eq!(
+            app.editing.as_ref().unwrap().field_buffer,
+            "2560x1440",
+            "Space should cycle minimum resolution through shared choices"
+        );
+    }
+
+    #[test]
     fn config_focus_does_not_share_list_cursor_state() {
         let mut app = test_app();
         app.cursor = 7;
