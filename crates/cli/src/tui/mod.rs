@@ -328,6 +328,7 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
         }
         KeyCode::Right => UiAction::SwitchTabNext,
         KeyCode::Left => UiAction::SwitchTabPrev,
+        KeyCode::Char('/') => UiAction::EditSearch,
         KeyCode::Char('i') if app.tab == Tab::Search => UiAction::EditSearch,
         KeyCode::Down | KeyCode::Char('j') => UiAction::MoveDown,
         KeyCode::Up | KeyCode::Char('k') => UiAction::MoveUp,
@@ -581,6 +582,10 @@ fn update(
             app.editing = None;
         }
         UiAction::EditSearch => {
+            app.tab = Tab::Search;
+            app.cursor = 0;
+            app.config_in_subnav = false;
+            app.editing = None;
             app.input_mode = InputMode::SearchInput;
         }
         UiAction::MoveDown => app.move_down(),
@@ -1080,7 +1085,14 @@ fn footer_keys(app: &App, width: u16) -> String {
             InputMode::Command => format!(":{}_ | Enter | Esc | q", app.cmd_line),
             InputMode::SearchInput => "type | Enter search | Esc | q".into(),
             InputMode::Normal => match app.tab {
-                Tab::Search => "←/→ tabs | i | Enter | j/k Pg | : | q".into(),
+                Tab::Search => {
+                    let enter_hint = if app.search_results.is_empty() {
+                        "Enter search"
+                    } else {
+                        "Enter apply"
+                    };
+                    format!("←/→ | / i | {enter_hint} | j/k | : | q")
+                }
                 Tab::Config
                     if app.config_in_subnav && app.is_sources_list_block(app.config_cursor) =>
                 {
@@ -2700,9 +2712,18 @@ mod tests {
         assert!(text.contains("Search"), "{text}");
         assert!(text.contains("query: mountains"), "{text}");
         assert!(text.contains("normal"), "{text}");
-        assert!(text.contains("←/→ tabs"), "{text}");
-        assert!(text.contains("j/k Pg"), "{text}");
+        assert!(text.contains("←/→"), "{text}");
+        assert!(text.contains("/ i"), "{text}");
+        assert!(text.contains("Enter search"), "{text}");
+        assert!(text.contains("j/k"), "{text}");
         assert!(text.contains(": | q"), "{text}");
+
+        app.search_results.push(SearchHit {
+            id: "id-1".into(),
+            label: "hit-1".into(),
+        });
+        let text = render_text(&app, 42, 10);
+        assert!(text.contains("Enter apply"), "{text}");
     }
 
     #[test]
@@ -2714,7 +2735,10 @@ mod tests {
 
         app.tab = Tab::Search;
         let search = render_text(&app, 90, 18);
-        assert!(search.contains("[empty] no results; press i"), "{search}");
+        assert!(
+            search.contains("[empty] no results; press / or i"),
+            "{search}"
+        );
 
         app.tab = Tab::History;
         let history = render_text(&app, 90, 18);
@@ -2952,11 +2976,19 @@ mod tests {
             UiAction::EnterCommandMode
         );
         assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('/'))),
+            UiAction::EditSearch
+        );
+        assert_eq!(
             action_for_key(&app, KeyEvent::from(KeyCode::Char('q'))),
             UiAction::Quit
         );
 
         app.input_mode = InputMode::Command;
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('/'))),
+            UiAction::CommandChar('/')
+        );
         assert_eq!(
             action_for_key(&app, KeyEvent::from(KeyCode::Char('q'))),
             UiAction::CommandChar('q')
@@ -2968,6 +3000,14 @@ mod tests {
 
         app.input_mode = InputMode::SearchInput;
         assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('/'))),
+            UiAction::SearchChar('/')
+        );
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char(':'))),
+            UiAction::SearchChar(':')
+        );
+        assert_eq!(
             action_for_key(&app, KeyEvent::from(KeyCode::Char('q'))),
             UiAction::SearchChar('q')
         );
@@ -2975,6 +3015,38 @@ mod tests {
             action_for_key(&app, KeyEvent::from(KeyCode::Enter)),
             UiAction::SubmitSearch
         );
+    }
+
+    #[test]
+    fn slash_enters_search_from_any_normal_tab() {
+        let mut app = test_app();
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+
+        app.tab = Tab::Config;
+        app.config_in_subnav = true;
+        app.cursor = 3;
+
+        update(&mut app, UiAction::EditSearch, rt.handle()).expect("enter search");
+
+        assert_eq!(app.tab, Tab::Search);
+        assert_eq!(app.cursor, 0);
+        assert!(!app.config_in_subnav);
+        assert!(matches!(app.input_mode, InputMode::SearchInput));
+    }
+
+    #[test]
+    fn command_favorite_alias_runs_through_dispatch() {
+        let mut app = test_app();
+        app.cmd_line = "favorite".into();
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+
+        let (message, kind) = app
+            .run_command(rt.handle())
+            .expect("run command")
+            .expect("message");
+
+        assert_eq!(kind, style::StatusKind::Error);
+        assert!(message.starts_with("favorite error:"), "{message}");
     }
 
     #[test]

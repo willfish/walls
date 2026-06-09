@@ -720,6 +720,7 @@ enum ParsedCommand<'a> {
     Next,
     Prev,
     TogglePause,
+    Favorite,
     Status,
     Quit,
     Empty,
@@ -732,6 +733,7 @@ impl<'a> ParsedCommand<'a> {
             "next" | "n" => Self::Next,
             "prev" | "p" => Self::Prev,
             "pause" | "toggle-pause" => Self::TogglePause,
+            "favorite" | "fav" | "f" => Self::Favorite,
             "status" => Self::Status,
             "quit" | "q" => Self::Quit,
             "" => Self::Empty,
@@ -988,7 +990,7 @@ impl App {
         if self.search_results.is_empty() {
             lines.push(style::state_text(
                 StateKind::Empty,
-                "no results; press i to edit query, Enter to search",
+                "no results; press / or i to edit query, Enter to search",
             ));
         } else {
             for (i, hit) in self.search_results.iter().enumerate() {
@@ -1925,6 +1927,10 @@ impl App {
                     StatusKind::Success,
                 )
             }
+            ParsedCommand::Favorite => match self.favorite_current() {
+                Ok(msg) => (msg, StatusKind::Success),
+                Err(e) => (format!("favorite error: {e}"), StatusKind::Error),
+            },
             ParsedCommand::Status => (
                 format!(
                     "paused={} history={} queue={}",
@@ -1937,7 +1943,9 @@ impl App {
             ParsedCommand::Quit => return Ok(None),
             ParsedCommand::Empty => ("(empty command)".into(), StatusKind::Warning),
             ParsedCommand::Unknown(other) => (
-                format!("unknown command: {other} (try :next :prev :pause :status :quit)"),
+                format!(
+                    "unknown command: {other} (try :next :prev :pause :favorite :status :quit)"
+                ),
                 StatusKind::Error,
             ),
         };
@@ -1971,12 +1979,17 @@ impl App {
         }
         let keys = match self.input_mode {
             InputMode::Command => format!(":{}_ | Enter run Esc cancel", self.cmd_line),
-            InputMode::SearchInput => {
-                "Search: type query | Enter search Esc cancel | i".to_string()
-            }
+            InputMode::SearchInput => "Search: type query | Enter search Esc cancel".to_string(),
             InputMode::Normal => match self.tab {
                 Tab::Search => {
-                    "5 Search | ←/→ tabs | i edit Enter search | j/k Pg Home/End | Enter apply | : cmd".into()
+                    let enter_hint = if self.search_results.is_empty() {
+                        "Enter search"
+                    } else {
+                        "Enter apply"
+                    };
+                    format!(
+                        "5 Search | ←/→ tabs | / or i edit query | {enter_hint} | j/k Pg Home/End | : cmd"
+                    )
                 }
                 Tab::Config => {
                     if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
@@ -2178,6 +2191,9 @@ mod tests {
             ParsedCommand::parse("toggle-pause"),
             ParsedCommand::TogglePause
         );
+        assert_eq!(ParsedCommand::parse("favorite"), ParsedCommand::Favorite);
+        assert_eq!(ParsedCommand::parse("fav"), ParsedCommand::Favorite);
+        assert_eq!(ParsedCommand::parse("f"), ParsedCommand::Favorite);
         assert_eq!(ParsedCommand::parse("status"), ParsedCommand::Status);
         assert_eq!(ParsedCommand::parse("quit"), ParsedCommand::Quit);
         assert_eq!(ParsedCommand::parse("q"), ParsedCommand::Quit);

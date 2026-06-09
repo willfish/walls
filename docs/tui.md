@@ -112,6 +112,7 @@ Normal mode navigation:
 
 - Left/right switch top-level tabs and leave Config Sources subnav.
 - Number keys `1` through `6` jump directly to visible tabs.
+- `/` enters Search input from any top-level tab; `/`, `:`, and `q` remain normal typed characters while command, search, or config edit input is active.
 - `j/k` and arrow up/down move within the active list.
 - Home/End jump to the first/last row for History, Browse, Search, Config blocks, and Config Sources subnav.
 - PageUp/PageDown jump five rows and clamp at list boundaries.
