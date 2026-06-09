@@ -865,6 +865,63 @@ impl App {
         }
     }
 
+    pub fn move_first(&mut self) {
+        self.move_to_row(0);
+    }
+
+    pub fn move_last(&mut self) {
+        let len = self.list_len();
+        if len > 0 {
+            self.move_to_row(len - 1);
+        }
+    }
+
+    pub fn page_up(&mut self) {
+        let cursor = self.active_cursor_value();
+        self.move_to_row(cursor.saturating_sub(5));
+    }
+
+    pub fn page_down(&mut self) {
+        let len = self.list_len();
+        if len > 0 {
+            let cursor = self.active_cursor_value();
+            self.move_to_row((cursor + 5).min(len - 1));
+        }
+    }
+
+    fn active_cursor_value(&self) -> usize {
+        if self.tab == Tab::Config
+            && self.config_in_subnav
+            && self.is_sources_list_block(self.config_cursor)
+        {
+            self.config_sub_cursor
+        } else if self.tab == Tab::Config {
+            self.config_cursor
+        } else {
+            self.cursor
+        }
+    }
+
+    fn move_to_row(&mut self, row: usize) {
+        let len = self.list_len();
+        if len == 0 {
+            return;
+        }
+        let row = row.min(len - 1);
+        if self.tab == Tab::Config
+            && self.config_in_subnav
+            && self.is_sources_list_block(self.config_cursor)
+        {
+            self.config_sub_cursor = row;
+            return;
+        }
+        let was_sources = self.tab == Tab::Config && self.is_sources_list_block(self.config_cursor);
+        *self.active_cursor_mut() = row;
+        if self.tab == Tab::Config && was_sources && !self.is_sources_list_block(row) {
+            self.config_in_subnav = false;
+        }
+    }
+
     pub fn list_len(&self) -> usize {
         match self.tab {
             Tab::Config => {
@@ -1919,20 +1976,20 @@ impl App {
             }
             InputMode::Normal => match self.tab {
                 Tab::Search => {
-                    "5 Search | i edit query Enter search | j/k | Enter apply | : cmd".into()
+                    "5 Search | ←/→ tabs | i edit Enter search | j/k Pg Home/End | Enter apply | : cmd".into()
                 }
                 Tab::Config => {
                     if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
-                        "1 Config | Esc back | j/k pick source | e edit | t toggle | n/p | space pause | : cmd".into()
+                        "1 Config | ←/→ tabs Esc back | j/k Pg Home/End pick source | e edit | t toggle | n/p | space pause | : cmd".into()
                     } else if self.is_sources_list_block(self.config_cursor) {
-                        "1 Config | j/k | Enter sub | e edit | t toggle | n/p | space pause | : cmd"
+                        "1 Config | ←/→ tabs | j/k Pg Home/End | Enter sub | e edit | t toggle | n/p | space pause | : cmd"
                             .into()
                     } else {
-                        "1 Config | j/k | e edit | t toggle | n/p | space pause | : cmd".into()
+                        "1 Config | ←/→ tabs | j/k Pg Home/End | e edit | t toggle | n/p | space pause | : cmd".into()
                     }
                 }
                 _ => {
-                    "1-6 tabs | n/p next/prev | f favorite d trash | Shift+X nuke | space pause | : cmd"
+                    "1-6 tabs ←/→ | j/k Pg Home/End | n/p next/prev | f favorite d trash | Shift+X nuke | space pause | : cmd"
                         .into()
                 }
             },

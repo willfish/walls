@@ -206,9 +206,15 @@ enum UiAction {
     #[allow(dead_code)]
     SaveEditItem,
     SwitchTab(Tab),
+    SwitchTabNext,
+    SwitchTabPrev,
     EditSearch,
     MoveDown,
     MoveUp,
+    MoveFirst,
+    MoveLast,
+    PageDown,
+    PageUp,
     Enter,
     Ignore,
 }
@@ -320,9 +326,15 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
                 - 1;
             UiAction::SwitchTab(Tab::from_index(index))
         }
+        KeyCode::Right => UiAction::SwitchTabNext,
+        KeyCode::Left => UiAction::SwitchTabPrev,
         KeyCode::Char('i') if app.tab == Tab::Search => UiAction::EditSearch,
         KeyCode::Down | KeyCode::Char('j') => UiAction::MoveDown,
         KeyCode::Up | KeyCode::Char('k') => UiAction::MoveUp,
+        KeyCode::Home => UiAction::MoveFirst,
+        KeyCode::End => UiAction::MoveLast,
+        KeyCode::PageDown => UiAction::PageDown,
+        KeyCode::PageUp => UiAction::PageUp,
         KeyCode::Esc
             if app.tab == Tab::Config
                 && app.config_in_subnav
@@ -556,11 +568,27 @@ fn update(
             app.config_in_subnav = false;
             app.editing = None;
         }
+        UiAction::SwitchTabNext => {
+            app.tab = Tab::from_index((app.tab.index() + 1) % 6);
+            app.cursor = 0;
+            app.config_in_subnav = false;
+            app.editing = None;
+        }
+        UiAction::SwitchTabPrev => {
+            app.tab = Tab::from_index((app.tab.index() + 5) % 6);
+            app.cursor = 0;
+            app.config_in_subnav = false;
+            app.editing = None;
+        }
         UiAction::EditSearch => {
             app.input_mode = InputMode::SearchInput;
         }
         UiAction::MoveDown => app.move_down(),
         UiAction::MoveUp => app.move_up(),
+        UiAction::MoveFirst => app.move_first(),
+        UiAction::MoveLast => app.move_last(),
+        UiAction::PageDown => app.page_down(),
+        UiAction::PageUp => app.page_up(),
         UiAction::Enter => return handle_enter(app, rt),
         UiAction::Ignore => {}
     }
@@ -1052,14 +1080,14 @@ fn footer_keys(app: &App, width: u16) -> String {
             InputMode::Command => format!(":{}_ | Enter | Esc | q", app.cmd_line),
             InputMode::SearchInput => "type | Enter search | Esc | q".into(),
             InputMode::Normal => match app.tab {
-                Tab::Search => "i edit | Enter | j/k | : | q".into(),
+                Tab::Search => "←/→ tabs | i | Enter | j/k Pg | : | q".into(),
                 Tab::Config
                     if app.config_in_subnav && app.is_sources_list_block(app.config_cursor) =>
                 {
-                    "Esc back | j/k | e edit | t | n/p | sp | : | q".into()
+                    "←/→ tabs | Esc | j/k Pg | e | t | n/p | sp | : | q".into()
                 }
-                Tab::Config => "j/k | Enter sub | e edit | t | n/p | sp | : | q".into(),
-                _ => "1-5 | n/p | f/d | Shift+X | sp | : | q".into(),
+                Tab::Config => "←/→ tabs | j/k Pg | Enter | e | t | n/p | sp | : | q".into(),
+                _ => "←/→ tabs | j/k Pg | n/p | f/d | Shift+X | sp | : | q".into(),
             },
         };
     }
@@ -1887,8 +1915,10 @@ mod tests {
     use walls_core::WallsCtx;
 
     use super::{
-        action_for_key, app::App, apply_effect, draw_inner, footer_paragraph, handle_key,
-        line_style, style, update, InputMode, Tab, TerminalSize, UiAction, UpdateEffect,
+        action_for_key,
+        app::{App, SearchHit},
+        apply_effect, draw_inner, footer_paragraph, handle_key, line_style, style, update,
+        InputMode, Tab, TerminalSize, UiAction, UpdateEffect,
     };
 
     fn test_app() -> App {
@@ -2331,7 +2361,8 @@ mod tests {
         assert!(text.contains("Config"), "{text}");
         assert!(text.contains("▸ Wallhaven"), "{text}");
         assert!(text.contains("enabled: true"), "{text}");
-        assert!(text.contains("Esc back | j/k"), "{text}");
+        assert!(text.contains("←/→ tabs"), "{text}");
+        assert!(text.contains("j/k Pg"), "{text}");
     }
 
     #[test]
@@ -2669,7 +2700,9 @@ mod tests {
         assert!(text.contains("Search"), "{text}");
         assert!(text.contains("query: mountains"), "{text}");
         assert!(text.contains("normal"), "{text}");
-        assert!(text.contains("i edit | Enter | j/k | : | q"), "{text}");
+        assert!(text.contains("←/→ tabs"), "{text}");
+        assert!(text.contains("j/k Pg"), "{text}");
+        assert!(text.contains(": | q"), "{text}");
     }
 
     #[test]
@@ -2871,6 +2904,46 @@ mod tests {
     }
 
     #[test]
+    fn arrow_keys_move_between_visible_tabs_in_normal_mode() {
+        let mut app = test_app();
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+
+        assert!(
+            !handle_key(&mut app, KeyEvent::from(KeyCode::Right), rt.handle())
+                .expect("handle right")
+        );
+        assert_eq!(app.tab, Tab::Now);
+
+        assert!(
+            !handle_key(&mut app, KeyEvent::from(KeyCode::Left), rt.handle()).expect("handle left")
+        );
+        assert_eq!(app.tab, Tab::Config);
+
+        assert!(
+            !handle_key(&mut app, KeyEvent::from(KeyCode::Left), rt.handle())
+                .expect("handle wrap left")
+        );
+        assert_eq!(app.tab, Tab::Logs);
+
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        assert!(app.config_in_subnav);
+        assert!(
+            !handle_key(&mut app, KeyEvent::from(KeyCode::Right), rt.handle())
+                .expect("handle right from subnav")
+        );
+        assert_eq!(app.tab, Tab::Now);
+        assert!(!app.config_in_subnav);
+
+        app.input_mode = InputMode::SearchInput;
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Left)),
+            UiAction::Ignore
+        );
+    }
+
+    #[test]
     fn key_mapping_separates_normal_command_and_search_input_modes() {
         let mut app = test_app();
 
@@ -2902,6 +2975,79 @@ mod tests {
             action_for_key(&app, KeyEvent::from(KeyCode::Enter)),
             UiAction::SubmitSearch
         );
+    }
+
+    #[test]
+    fn list_jump_keys_translate_only_in_normal_mode() {
+        let mut app = test_app();
+
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Home)),
+            UiAction::MoveFirst
+        );
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::End)),
+            UiAction::MoveLast
+        );
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::PageDown)),
+            UiAction::PageDown
+        );
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::PageUp)),
+            UiAction::PageUp
+        );
+
+        app.input_mode = InputMode::Command;
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Home)),
+            UiAction::Ignore
+        );
+    }
+
+    #[test]
+    fn home_end_and_page_keys_move_active_list_cursor() {
+        let mut app = test_app();
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+
+        app.tab = Tab::Browse;
+        app.cursor = 0;
+        update(&mut app, UiAction::PageDown, rt.handle()).expect("page down");
+        assert_eq!(app.cursor, 5);
+        update(&mut app, UiAction::MoveLast, rt.handle()).expect("end");
+        assert_eq!(app.cursor, app.browse_items().len() - 1);
+        update(&mut app, UiAction::PageUp, rt.handle()).expect("page up");
+        assert_eq!(app.cursor, app.browse_items().len().saturating_sub(6));
+        update(&mut app, UiAction::MoveFirst, rt.handle()).expect("home");
+        assert_eq!(app.cursor, 0);
+
+        app.tab = Tab::Search;
+        app.search_results = (0..8)
+            .map(|i| SearchHit {
+                id: format!("id-{i}"),
+                label: format!("hit-{i}"),
+            })
+            .collect();
+        app.cursor = 2;
+        update(&mut app, UiAction::MoveLast, rt.handle()).expect("search end");
+        assert_eq!(app.cursor, 7);
+        update(&mut app, UiAction::MoveFirst, rt.handle()).expect("search home");
+        assert_eq!(app.cursor, 0);
+
+        app.tab = Tab::Config;
+        app.config_cursor = 0;
+        update(&mut app, UiAction::MoveLast, rt.handle()).expect("config end");
+        assert_eq!(app.config_cursor, App::config_block_count() - 1);
+        update(&mut app, UiAction::MoveFirst, rt.handle()).expect("config home");
+        assert_eq!(app.config_cursor, 0);
+
+        app.config_cursor = 1;
+        app.enter_config_subnav();
+        app.config_sub_cursor = 0;
+        update(&mut app, UiAction::MoveLast, rt.handle()).expect("subnav end");
+        assert_eq!(app.config_sub_cursor, app.sources_subnav_len() - 1);
+        update(&mut app, UiAction::MoveFirst, rt.handle()).expect("subnav home");
+        assert_eq!(app.config_sub_cursor, 0);
     }
 
     #[test]
