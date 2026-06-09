@@ -1077,7 +1077,17 @@ impl App {
     }
 
     pub fn search_lines(&self) -> Vec<String> {
-        let mut lines = vec![format!("query: {}", self.search_query)];
+        let mut lines = vec![
+            format!("provider: Wallhaven | query: {}", self.search_query),
+            format!(
+                "filters: purity {} | categories {} | sorting {} {} | minimum {}",
+                self.wallhaven_summary.purity,
+                self.wallhaven_summary.categories,
+                self.wallhaven_summary.sorting,
+                self.wallhaven_summary.order,
+                self.wallhaven_summary.atleast
+            ),
+        ];
         if self.search_results.is_empty() {
             lines.push(style::state_text(
                 StateKind::Empty,
@@ -1086,7 +1096,7 @@ impl App {
         } else {
             for (i, hit) in self.search_results.iter().enumerate() {
                 let mark = if i == self.cursor { ">" } else { " " };
-                lines.push(format!("{mark} {} — {}", hit.id, hit.label));
+                lines.push(format!("{mark} Wallhaven {} — {}", hit.id, hit.label));
             }
         }
         lines
@@ -1132,6 +1142,11 @@ impl App {
             self.cursor,
             &self.ctx.paths.cache_dir,
         )
+    }
+
+    pub fn selected_search_preview_path(&self) -> Option<PathBuf> {
+        let hit = self.search_results.get(self.cursor)?;
+        walls_core::wallhaven::cached_wallpaper_path(&self.ctx.paths.cache_dir, &hit.id)
     }
 
     pub fn apply_history_selection(&mut self) -> Option<PathBuf> {
