@@ -135,6 +135,57 @@ fn cli_config_validate_formats_human_and_json_diagnostics() {
 }
 
 #[test]
+fn cli_doctor_json_reports_ready_checks() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home) = setup_xdg_home(tmp.path());
+
+    let assert = walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .env("WALLS_TRAY", "0")
+        .args(["doctor", "--json"])
+        .assert()
+        .success();
+    let value: serde_json::Value =
+        serde_json::from_slice(&assert.get_output().stdout).expect("doctor json");
+    assert_eq!(value["ready"], true);
+    let checks = value["checks"].as_array().expect("checks array");
+    assert!(checks
+        .iter()
+        .any(|check| { check["id"] == "config.validation" && check["status"] == "pass" }));
+    assert!(checks
+        .iter()
+        .any(|check| { check["id"] == "providers.local_sources" && check["status"] == "pass" }));
+    assert!(checks
+        .iter()
+        .all(|check| check["id"].as_str().is_some_and(|id| !id.is_empty())));
+}
+
+#[test]
+fn cli_doctor_fails_with_remediation_for_invalid_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home) = setup_xdg_home(tmp.path());
+    let config_file = config_home.join("walls/config.json");
+    let mut config: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&config_file).unwrap()).unwrap();
+    config["sources"][0]["path"] = serde_json::json!("/nonexistent/walls-doctor-test-folder");
+    fs::write(&config_file, serde_json::to_string_pretty(&config).unwrap()).unwrap();
+
+    walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .env("WALLS_TRAY", "0")
+        .args(["doctor"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("walls doctor: needs attention"))
+        .stdout(predicate::str::contains(
+            "[fail] config.validation.sources[0].path",
+        ))
+        .stdout(predicate::str::contains("fix: create the path"));
+}
+
+#[test]
 fn cli_manual_next_works_when_paused() {
     let tmp = tempfile::tempdir().unwrap();
     let (config_home, state_home) = setup_xdg_home(tmp.path());
