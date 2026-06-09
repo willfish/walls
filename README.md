@@ -226,7 +226,7 @@ you already have a symptom.
 | `walls cache clear-queue [--dry-run] [--force] [--json]` | Clear queued provider downloads |
 | `walls cache purge-provider-files [--dry-run] [--force] [--json]` | Remove provider cache files/downloads and prune affected state |
 | `walls config validate [--json]` | Works |
-| `walls config sync` | Reconcile tray autostart desktop entry with `config.json` |
+| `walls config sync [--dry-run]` | Reconcile tray autostart desktop entry with `config.json`; preview file changes with `--dry-run` |
 | `walls pause` / `walls resume` / `walls toggle-pause` | Works |
 | `walls next [--manual] [--refresh <level>] [--verbose] [--json]` / `walls prev [--json]` | Works (auto `next` respects pause/rotation-off; `--manual` for explicit changes; `--verbose` prints provider attempts/skips/retries/fallbacks; refresh levels: `all`, `filters-and-texts`, `texts`, `clock-only`) |
 | `walls tui` | Works — tabs: Config/Now/History/Browse/Search/Logs; `?` key help; `/` or `i` search; `:` commands; `f` favorite; `d` requests trash confirmation |
@@ -259,7 +259,10 @@ Configure rotation in `config.json`:
 
 `walls pause` stops automatic rotation; use `walls next --manual` (or tray/TUI next) while paused.
 
-`walls config sync` reconciles the tray autostart entry after hand-editing `config.json`. Autostart is skipped on desktops where tray is unavailable (Awesome, Fluxbox, Enlightenment, Trinity, Lingmo).
+`walls config sync --dry-run` previews the tray autostart file that would be
+written or removed after hand-editing `config.json`; run without `--dry-run` to
+apply it. Autostart is skipped on desktops where tray is unavailable (Awesome,
+Fluxbox, Enlightenment, Trinity, Lingmo).
 
 Optional legacy `systemd/` units remain for headless setups without a tray host; prefer the tray scheduler when a graphical session is available.
 

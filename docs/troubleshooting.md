@@ -126,6 +126,7 @@ Run:
 
 ```bash
 walls doctor
+walls config sync --dry-run
 walls config sync
 walls-tray
 ```
@@ -135,7 +136,8 @@ Recovery:
 - `walls-tray` missing: install the tray crate/package and make sure it is on
   `PATH`, or set `WALLS_TRAY_BIN` where supported.
 - Autostart mismatch: update `tray.autostart.desktops` and run
-  `walls config sync`.
+  `walls config sync --dry-run`, then `walls config sync` if the planned file
+  change is correct.
 - Desktop has no tray host: use `walls tui` or CLI commands directly, or install
   a status notifier host for the desktop.
 - Open TUI terminal mismatch: set `WALLS_TUI_CMD`, for example

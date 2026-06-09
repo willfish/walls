@@ -7,8 +7,8 @@ use std::path::PathBuf;
 use walls_core::apply::Desktop;
 use walls_core::autostart::{
     autostart_desktop_file_path, autostart_out_of_sync, build_autostart_desktop_entry,
-    desktop_config_key, enabled_autostart_only_show_in, sync_tray_autostart_with,
-    AutostartSyncOpts,
+    desktop_config_key, dry_run_tray_autostart_sync_with, enabled_autostart_only_show_in,
+    sync_tray_autostart_with, AutostartSyncOpts, AutostartSyncOutcome,
 };
 use walls_core::config::{Config, TrayAutostartConfig, TrayConfig};
 
@@ -95,6 +95,28 @@ fn sync_writes_autostart_file_when_desktop_enabled() {
 }
 
 #[test]
+fn dry_run_reports_write_without_creating_autostart_file() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let config_home = root.path().join("config");
+    let tray_bin = root.path().join("walls-tray");
+    fs::write(&tray_bin, b"tray").expect("tray bin");
+
+    let mut desktops = HashMap::new();
+    desktops.insert("kde".into(), true);
+    let config = minimal_config(TrayAutostartConfig { desktops });
+
+    let opts = sync_opts(&config_home, tray_bin, &config);
+    let outcome = dry_run_tray_autostart_sync_with(&opts).expect("sync");
+
+    let path = autostart_desktop_file_path(&config_home);
+    assert_eq!(
+        outcome,
+        AutostartSyncOutcome::WouldWrite { path: path.clone() }
+    );
+    assert!(!path.exists());
+}
+
+#[test]
 fn sync_removes_autostart_file_when_all_desktops_disabled() {
     let root = tempfile::tempdir().expect("tempdir");
     let config_home = root.path().join("config");
@@ -116,6 +138,37 @@ fn sync_removes_autostart_file_when_all_desktops_disabled() {
     let opts = sync_opts(&config_home, tray_bin, &config);
     sync_tray_autostart_with(&opts).expect("sync");
     assert!(!autostart_path.exists());
+}
+
+#[test]
+fn dry_run_reports_remove_without_deleting_autostart_file() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let config_home = root.path().join("config");
+    let tray_bin = root.path().join("walls-tray");
+    fs::write(&tray_bin, b"tray").expect("tray bin");
+
+    let autostart_path = autostart_desktop_file_path(&config_home);
+    fs::create_dir_all(autostart_path.parent().expect("parent")).expect("mkdir");
+    fs::write(
+        &autostart_path,
+        build_autostart_desktop_entry("/old/walls-tray", &["KDE"]),
+    )
+    .expect("seed");
+
+    let config = minimal_config(TrayAutostartConfig {
+        desktops: HashMap::new(),
+    });
+
+    let opts = sync_opts(&config_home, tray_bin, &config);
+    let outcome = dry_run_tray_autostart_sync_with(&opts).expect("sync");
+
+    assert_eq!(
+        outcome,
+        AutostartSyncOutcome::WouldRemove {
+            path: autostart_path.clone()
+        }
+    );
+    assert!(autostart_path.exists());
 }
 
 #[test]
