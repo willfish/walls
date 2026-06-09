@@ -713,6 +713,7 @@ pub struct App {
     pub(crate) config_warnings: Vec<String>,
     pub color_mode: ColorMode,
     pub pending_nuke_confirm: bool,
+    pub show_key_help: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -767,6 +768,7 @@ impl App {
             config_warnings,
             color_mode: ColorMode::from_env(),
             pending_nuke_confirm: false,
+            show_key_help: false,
         };
         app.refresh_local_candidates()?;
         Ok(app)
@@ -1953,6 +1955,9 @@ impl App {
     }
 
     pub fn footer_keys(&self) -> String {
+        if self.show_key_help {
+            return "Key help | Esc/q close".into();
+        }
         if self.is_editing() {
             let choice_hint = if self.current_edit_field_locked() {
                 if self
@@ -1988,21 +1993,21 @@ impl App {
                         "Enter apply"
                     };
                     format!(
-                        "5 Search | ←/→ tabs | / or i edit query | {enter_hint} | j/k Pg Home/End | : cmd"
+                        "5 Search | ←/→ tabs | / or i edit query | {enter_hint} | j/k Pg Home/End | : cmd | ? help"
                     )
                 }
                 Tab::Config => {
                     if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
-                        "1 Config | ←/→ tabs Esc back | j/k Pg Home/End pick source | e edit | t toggle | n/p | space pause | : cmd".into()
+                        "1 Config | ←/→ tabs Esc back | j/k Pg Home/End pick source | e edit | t toggle | n/p | space pause | : cmd | ? help".into()
                     } else if self.is_sources_list_block(self.config_cursor) {
-                        "1 Config | ←/→ tabs | j/k Pg Home/End | Enter sub | e edit | t toggle | n/p | space pause | : cmd"
+                        "1 Config | ←/→ tabs | j/k Pg Home/End | Enter sub | e edit | t toggle | n/p | space pause | : cmd | ? help"
                             .into()
                     } else {
-                        "1 Config | ←/→ tabs | j/k Pg Home/End | e edit | t toggle | n/p | space pause | : cmd".into()
+                        "1 Config | ←/→ tabs | j/k Pg Home/End | e edit | t toggle | n/p | space pause | : cmd | ? help".into()
                     }
                 }
                 _ => {
-                    "1-6 tabs ←/→ | j/k Pg Home/End | n/p next/prev | f favorite d trash | Shift+X nuke | space pause | : cmd"
+                    "1-6 tabs ←/→ | j/k Pg Home/End | n/p next/prev | f favorite d trash | Shift+X nuke | space pause | : cmd | ? help"
                         .into()
                 }
             },
