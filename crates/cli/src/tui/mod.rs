@@ -827,7 +827,7 @@ fn render_tab_body(
 ) {
     f.render_widget(Clear, area);
     if !app.show_key_help
-        && matches!(app.tab, Tab::Now | Tab::History | Tab::Browse)
+        && matches!(app.tab, Tab::Now | Tab::History | Tab::Browse | Tab::Search)
         && terminal_size(area) == TerminalSize::Wide
     {
         let chunks = Layout::default()
@@ -892,6 +892,9 @@ fn selected_preview_path(app: &App) -> Option<String> {
             .map(|path| path.display().to_string()),
         Tab::Browse => app
             .selected_browse_preview_path()
+            .map(|path| path.display().to_string()),
+        Tab::Search => app
+            .selected_search_preview_path()
             .map(|path| path.display().to_string()),
         _ => None,
     }
@@ -3219,6 +3222,7 @@ mod tests {
         let text = render_text(&app, 42, 10);
 
         assert!(text.contains("Search"), "{text}");
+        assert!(text.contains("provider: Wallhaven"), "{text}");
         assert!(text.contains("query: mountains"), "{text}");
         assert!(text.contains("normal"), "{text}");
         assert!(text.contains("←/→"), "{text}");
@@ -3233,6 +3237,9 @@ mod tests {
         });
         let text = render_text(&app, 42, 10);
         assert!(text.contains("Enter apply"), "{text}");
+
+        let text = render_text(&app, 90, 18);
+        assert!(text.contains("Wallhaven id-1"), "{text}");
     }
 
     #[test]
@@ -3245,6 +3252,7 @@ mod tests {
 
         app.tab = Tab::Search;
         let search = render_text(&app, 90, 18);
+        assert!(search.contains("provider: Wallhaven"), "{search}");
         assert!(
             search.contains("[empty] no results; press / or i"),
             "{search}"
@@ -3619,10 +3627,12 @@ mod tests {
         let history = root.join("history.jpg");
         let local = root.join("local.jpg");
         let queued = app.ctx.paths.cache_dir.join("wallhaven-wh1.jpg");
+        let search = app.ctx.paths.cache_dir.join("wallhaven-search1.jpg");
         fs::create_dir_all(&app.ctx.paths.cache_dir).expect("cache dir");
         fs::write(&history, b"history").expect("history image");
         fs::write(&local, b"local").expect("local image");
         fs::write(&queued, b"queued").expect("queued image");
+        fs::write(&search, b"search").expect("search image");
 
         app.ctx.state.history = vec![history.display().to_string()];
         app.local_candidates = vec![local.clone()];
@@ -3652,6 +3662,26 @@ mod tests {
         assert_eq!(
             super::selected_preview_path(&app).as_deref(),
             history.to_str()
+        );
+
+        app.tab = Tab::Search;
+        app.search_results = vec![
+            SearchHit {
+                id: "missing-search".into(),
+                label: "missing".into(),
+            },
+            SearchHit {
+                id: "search1".into(),
+                label: "cached".into(),
+            },
+        ];
+        app.cursor = 0;
+        assert_eq!(super::selected_preview_path(&app), None);
+
+        app.cursor = 1;
+        assert_eq!(
+            super::selected_preview_path(&app).as_deref(),
+            search.to_str()
         );
     }
 
