@@ -192,10 +192,10 @@ or deliberately defers it to a later focused slice.
 | `config.sources[].ratios` | Editable | Wallhaven aspect ratio choice field. |
 | `config.sources[].atleast` | Editable | Wallhaven minimum resolution choice field. |
 | `config.sources[].prefer` | Editable | Wallhaven collection/search preference choice field. |
-| `config.sources[].collections` | Manual | Wallhaven collection list is persisted on each Wallhaven source. |
-| `config.sources[].collections[].username` | Manual | Wallhaven collection username. |
-| `config.sources[].collections[].id` | Manual | Wallhaven collection id. |
-| `config.sources[].collections[].label` | Manual | Optional Wallhaven collection label. |
+| `config.sources[].collections` | Editable | Wallhaven source edit form text field using `username/id[:label]` entries separated by commas. |
+| `config.sources[].collections[].username` | Editable | Parsed from each Wallhaven collection entry before save. |
+| `config.sources[].collections[].id` | Editable | Parsed from each Wallhaven collection entry before save. |
+| `config.sources[].collections[].label` | Editable | Optional suffix parsed from each Wallhaven collection entry. |
 | `config.sources[].source` | Deferred | Attribution metadata schema field; source normalization does not persist it from TUI edits yet. |
 | `config.sources[].author` | Deferred | Attribution metadata schema field; source normalization does not persist it from TUI edits yet. |
 | `secrets.$schema` | Manual | Schema hint for external editors. |

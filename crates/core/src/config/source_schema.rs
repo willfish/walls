@@ -136,6 +136,7 @@ pub fn source_editable_fields(entry: &SourceEntry) -> Vec<&'static str> {
             "ratios",
             "atleast",
             "prefer",
+            "collections",
         ],
         SourceKind::Pixabay => vec!["enabled", "label", "query", "api_key"],
         SourceKind::Immich => vec!["enabled", "label", "url", "api_key"],
