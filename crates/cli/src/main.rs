@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::Context;
@@ -30,9 +31,16 @@ enum Command {
         /// Refresh current wallpaper instead of selecting a new one
         #[arg(long, value_enum)]
         refresh: Option<CliRefreshLevel>,
+        /// Emit a stable JSON command result
+        #[arg(long)]
+        json: bool,
     },
     /// Show previous wallpaper from history
-    Prev,
+    Prev {
+        /// Emit a stable JSON command result
+        #[arg(long)]
+        json: bool,
+    },
     /// Print status
     Status {
         #[arg(long)]
@@ -46,8 +54,12 @@ enum Command {
     TogglePause,
     /// Print the current wallpaper path
     Current {
-        #[arg(long)]
+        /// Emit the current wallpaper metadata JSON. Prefer --json for scripts that need a stable envelope.
+        #[arg(long, conflicts_with = "json")]
         meta: bool,
+        /// Emit a stable JSON command result
+        #[arg(long)]
+        json: bool,
     },
     /// Copy the current wallpaper into the favorites folder
     Favorite,
@@ -121,13 +133,17 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Some(Command::Apply { path }) => cmd_apply(path)?,
-        Some(Command::Next { manual, refresh }) => cmd_next(manual, refresh).await?,
-        Some(Command::Prev) => cmd_prev()?,
+        Some(Command::Next {
+            manual,
+            refresh,
+            json,
+        }) => cmd_next(manual, refresh, json).await?,
+        Some(Command::Prev { json }) => cmd_prev(json)?,
         Some(Command::Status { json }) => cmd_status(json)?,
         Some(Command::Pause) => cmd_pause(true)?,
         Some(Command::Resume) => cmd_pause(false)?,
         Some(Command::TogglePause) => cmd_toggle_pause()?,
-        Some(Command::Current { meta }) => cmd_current(meta)?,
+        Some(Command::Current { meta, json }) => cmd_current(meta, json)?,
         Some(Command::Favorite) => cmd_favorite()?,
         Some(Command::Fetch { paths, r#move }) => cmd_fetch(paths, r#move)?,
         Some(Command::Trash) => cmd_trash()?,
@@ -182,11 +198,47 @@ fn cmd_status(json: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn cmd_next(manual: bool, refresh: Option<CliRefreshLevel>) -> anyhow::Result<()> {
+fn print_json(value: serde_json::Value) -> anyhow::Result<()> {
+    println!("{}", serde_json::to_string_pretty(&value)?);
+    std::io::stdout().flush()?;
+    Ok(())
+}
+
+fn command_result(
+    command: &str,
+    changed: bool,
+    status: &str,
+    path: Option<PathBuf>,
+    exit_code_reason: Option<&str>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "command": command,
+        "changed": changed,
+        "status": status,
+        "path": path.map(|path| path.display().to_string()),
+        "exit_code_reason": exit_code_reason,
+    })
+}
+
+async fn cmd_next(
+    manual: bool,
+    refresh: Option<CliRefreshLevel>,
+    json: bool,
+) -> anyhow::Result<()> {
     let mut ctx = WallsCtx::load()?;
     if let Some(level) = refresh {
         match ctx.refresh_current(level.into())? {
+            Some(p) if json => {
+                print_json(command_result("next", true, "refreshed", Some(p), None))?
+            }
             Some(p) => println!("{}", p.display()),
+            None if json => print_json(command_result(
+                "next",
+                false,
+                "missing_current",
+                None,
+                Some("missing_current"),
+            ))?,
             None => println!("no current wallpaper"),
         }
         return Ok(());
@@ -197,16 +249,38 @@ async fn cmd_next(manual: bool, refresh: Option<CliRefreshLevel>) -> anyhow::Res
         ctx.advance_next().await?
     };
     match applied {
+        Some(p) if json => print_json(command_result("next", true, "applied", Some(p), None))?,
         Some(p) => println!("{}", p.display()),
+        None if json => print_json(command_result(
+            "next",
+            false,
+            "no_change",
+            None,
+            Some("no_change"),
+        ))?,
         None => println!("no change"),
     }
     Ok(())
 }
 
-fn cmd_prev() -> anyhow::Result<()> {
+fn cmd_prev(json: bool) -> anyhow::Result<()> {
     let mut ctx = WallsCtx::load()?;
     match ctx.advance_prev()? {
+        Some(p) if json => print_json(command_result(
+            "prev",
+            true,
+            "applied_previous",
+            Some(p),
+            None,
+        ))?,
         Some(p) => println!("{}", p.display()),
+        None if json => print_json(command_result(
+            "prev",
+            false,
+            "no_previous",
+            None,
+            Some("no_previous"),
+        ))?,
         None => println!("no previous"),
     }
     Ok(())
@@ -288,7 +362,7 @@ fn cmd_favorite() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cmd_current(meta: bool) -> anyhow::Result<()> {
+fn cmd_current(meta: bool, json: bool) -> anyhow::Result<()> {
     let ctx = WallsCtx::load()?;
     if meta {
         let value = ctx
@@ -298,6 +372,32 @@ fn cmd_current(meta: bool) -> anyhow::Result<()> {
             .unwrap_or(serde_json::Value::Null);
         println!("{}", serde_json::to_string_pretty(&value)?);
         return Ok(());
+    }
+    if json {
+        match ctx.current_path() {
+            Some(path) => {
+                return print_json(serde_json::json!({
+                    "command": "current",
+                    "changed": false,
+                    "status": "current",
+                    "current": {
+                        "path": path.display().to_string(),
+                        "meta": ctx.current_meta().map(serde_json::to_value).transpose()?,
+                    },
+                    "exit_code_reason": null,
+                }));
+            }
+            None => {
+                print_json(serde_json::json!({
+                    "command": "current",
+                    "changed": false,
+                    "status": "missing_current",
+                    "current": null,
+                    "exit_code_reason": "missing_current",
+                }))?;
+                std::process::exit(1);
+            }
+        }
     }
     match ctx.current_path() {
         Some(p) => println!("{}", p.display()),
