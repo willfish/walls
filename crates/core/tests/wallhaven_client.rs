@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use walls_core::config::WallhavenSearch;
@@ -26,6 +26,45 @@ async fn wallhaven_search_sends_api_key_and_parses_response() {
 
     assert_eq!(resp.data.len(), 1);
     assert_eq!(resp.data[0].id, "94x38z");
+}
+
+#[tokio::test]
+async fn wallhaven_search_url_encodes_human_query_text() {
+    let server = MockServer::start().await;
+    let raw_query = Arc::new(Mutex::new(None::<String>));
+    let raw_query_for_responder = Arc::clone(&raw_query);
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/search"))
+        .respond_with(move |request: &Request| {
+            *raw_query_for_responder.lock().expect("raw query lock") =
+                request.url.query().map(str::to_string);
+            ResponseTemplate::new(200).set_body_raw(
+                include_str!("fixtures/wallhaven-search.json"),
+                "application/json",
+            )
+        })
+        .mount(&server)
+        .await;
+
+    let client = WallhavenClient::new(server.uri(), "test-key").unwrap();
+    let params = WallhavenSearch {
+        q: "cosmic desktop & stars".into(),
+        ..Default::default()
+    };
+
+    client.search(&params, 1).await.unwrap();
+
+    let raw_query = raw_query
+        .lock()
+        .expect("raw query lock")
+        .clone()
+        .expect("request query");
+    assert!(
+        raw_query.contains("q=cosmic+desktop+%26+stars"),
+        "{raw_query}"
+    );
+    assert!(!raw_query.contains("cosmic desktop"), "{raw_query}");
 }
 
 #[tokio::test]
