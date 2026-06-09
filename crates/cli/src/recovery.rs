@@ -56,6 +56,19 @@ pub fn tui_no_previous() -> String {
     format!("prev: {}", no_previous_wallpaper())
 }
 
+pub fn next_error(error: &anyhow::Error) -> String {
+    current_required_error("next", error)
+}
+
+pub fn prev_error(error: &walls_core::error::WallsError) -> String {
+    match error {
+        walls_core::error::WallsError::PreviousOriginalMissing { path } => {
+            format!("prev error: {}", missing_previous_wallpaper(path))
+        }
+        _ => format!("prev error: {error}"),
+    }
+}
+
 pub fn favorite_error(error: &anyhow::Error) -> String {
     current_required_error("favorite", error)
 }
@@ -131,5 +144,18 @@ mod tests {
             current_required_error("trash", &err),
             "trash error: no current wallpaper. Run `walls apply <path>` or `walls next --manual` first."
         );
+    }
+
+    #[test]
+    fn prev_error_rewrites_missing_history_file_with_recovery() {
+        let err = walls_core::error::WallsError::PreviousOriginalMissing {
+            path: std::path::PathBuf::from("/tmp/missing.jpg"),
+        };
+
+        let message = prev_error(&err);
+
+        assert!(message.starts_with("prev error: previous wallpaper file is missing"));
+        assert!(message.contains("/tmp/missing.jpg"));
+        assert!(message.contains("walls apply <path>"));
     }
 }
