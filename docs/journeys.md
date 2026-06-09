@@ -125,6 +125,10 @@ Online sources work best when there is also a local fallback source such as
 `favorites`, `fetched`, or a `folder`. Provider failures then degrade instead of
 leaving you with no candidate.
 
+The default `config.example.json` keeps the first-run source list short. Copyable
+source shapes for credentialed or specialised providers live in
+`config.sources.example.json`.
+
 `downloaded` paths are provider-managed outputs. `fetched` paths are local
 library imports created by `walls fetch`; keep them enabled as a durable fallback
 when provider storage is reset.

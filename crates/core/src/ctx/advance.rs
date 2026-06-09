@@ -746,7 +746,6 @@ impl<'ctx> AdvanceNext<'ctx> {
     }
 
     // Minimal support for JSON image feed (url + optional image_path like "$.download_url").
-    // Used by the default in config.example.json for the "json" provider type.
     async fn apply_json_feed(&mut self) -> anyhow::Result<Option<PathBuf>> {
         self.try_direct_provider(SourceKind::Json, "mediarss").await
     }
