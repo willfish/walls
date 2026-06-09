@@ -12,6 +12,7 @@ static ATOMIC_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub enum NukeDownloadsMode {
     ClearQueue,
     PurgeProviderFiles,
+    ProviderReset,
     Nothing,
 }
 
@@ -21,6 +22,8 @@ pub struct NukeDownloadsPlan {
     pub queue_len: usize,
     pub cache_files: usize,
     pub download_files: usize,
+    pub history_provider_entries: usize,
+    pub current_provider_storage: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +32,8 @@ pub struct NukeDownloadsResult {
     pub queue_cleared: usize,
     pub cache_removed: usize,
     pub download_removed: usize,
+    pub history_pruned: usize,
+    pub current_cleared: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -128,28 +133,29 @@ pub fn is_provider_cache_file_name(name: &str) -> bool {
 }
 
 pub fn plan_nuke_downloads(paths: &WallsPaths, state: &State) -> NukeDownloadsPlan {
-    if !state.cache_queue.is_empty() {
-        return NukeDownloadsPlan {
-            mode: NukeDownloadsMode::ClearQueue,
-            queue_len: state.cache_queue.len(),
-            cache_files: 0,
-            download_files: 0,
-        };
-    }
-
-    let cache_files = count_provider_cache_files(&paths.cache_dir);
+    let queue_len = state.cache_queue.len();
+    let cache_files = count_dir_files(&paths.cache_dir);
     let download_files = count_dir_files(&paths.download_dir);
-    let mode = if cache_files == 0 && download_files == 0 {
+    let history_provider_entries = count_history_provider_entries(paths, state);
+    let current_provider_storage = current_uses_provider_storage(paths, state);
+    let mode = if queue_len == 0
+        && cache_files == 0
+        && download_files == 0
+        && history_provider_entries == 0
+        && !current_provider_storage
+    {
         NukeDownloadsMode::Nothing
     } else {
-        NukeDownloadsMode::PurgeProviderFiles
+        NukeDownloadsMode::ProviderReset
     };
 
     NukeDownloadsPlan {
         mode,
-        queue_len: 0,
+        queue_len,
         cache_files,
         download_files,
+        history_provider_entries,
+        current_provider_storage,
     }
 }
 
@@ -159,17 +165,8 @@ pub fn inspect_cache(paths: &WallsPaths, state: &State) -> CacheInspection {
         downloads: dir_stats(&paths.download_dir, false),
         queue_len: state.cache_queue.len(),
         queue_ids: state.cache_queue.clone(),
-        current_provider_storage: state.current.as_ref().is_some_and(|current| {
-            let original = PathBuf::from(&current.original_path);
-            let composed = PathBuf::from(&current.composed_path);
-            is_under_provider_storage(paths, &original)
-                || is_under_provider_storage(paths, &composed)
-        }),
-        history_provider_entries: state
-            .history
-            .iter()
-            .filter(|entry| is_under_provider_storage(paths, Path::new(entry)))
-            .count(),
+        current_provider_storage: current_uses_provider_storage(paths, state),
+        history_provider_entries: count_history_provider_entries(paths, state),
     }
 }
 
@@ -207,12 +204,31 @@ pub fn purge_provider_files(paths: &WallsPaths, state: &mut State) -> NukeDownlo
     let download_removed = remove_all_dir_files(&paths.download_dir);
     state.wallhaven.collection_pages.clear();
     state.wallhaven.search_page = 0;
-    prune_state_after_provider_purge(paths, state);
+    let state_prune = prune_state_after_provider_purge(paths, state);
     NukeDownloadsResult {
         mode: NukeDownloadsMode::PurgeProviderFiles,
         queue_cleared: 0,
         cache_removed,
         download_removed,
+        history_pruned: state_prune.history_pruned,
+        current_cleared: state_prune.current_cleared,
+    }
+}
+
+pub fn reset_provider_storage(paths: &WallsPaths, state: &mut State) -> NukeDownloadsResult {
+    let queue_cleared = clear_cache_queue(state);
+    let cache_removed = remove_all_dir_files(&paths.cache_dir);
+    let download_removed = remove_all_dir_files(&paths.download_dir);
+    state.wallhaven.collection_pages.clear();
+    state.wallhaven.search_page = 0;
+    let state_prune = prune_state_after_provider_purge(paths, state);
+    NukeDownloadsResult {
+        mode: NukeDownloadsMode::ProviderReset,
+        queue_cleared,
+        cache_removed,
+        download_removed,
+        history_pruned: state_prune.history_pruned,
+        current_cleared: state_prune.current_cleared,
     }
 }
 
@@ -229,14 +245,19 @@ pub fn nuke_downloads(
                 queue_cleared: cleared,
                 cache_removed: 0,
                 download_removed: 0,
+                history_pruned: 0,
+                current_cleared: false,
             })
         }
         NukeDownloadsMode::PurgeProviderFiles => Ok(purge_provider_files(paths, state)),
+        NukeDownloadsMode::ProviderReset => Ok(reset_provider_storage(paths, state)),
         NukeDownloadsMode::Nothing => Ok(NukeDownloadsResult {
             mode: NukeDownloadsMode::Nothing,
             queue_cleared: 0,
             cache_removed: 0,
             download_removed: 0,
+            history_pruned: 0,
+            current_cleared: false,
         }),
     }
 }
@@ -255,6 +276,7 @@ impl NukeDownloadsMode {
         match self {
             Self::ClearQueue => "clear_queue",
             Self::PurgeProviderFiles => "purge_provider_files",
+            Self::ProviderReset => "provider_reset",
             Self::Nothing => "nothing",
         }
     }
@@ -374,13 +396,6 @@ fn provider_name_from_download_file(name: &str) -> Option<String> {
         .or_else(|| Some("downloaded".into()))
 }
 
-fn count_provider_cache_files(cache_dir: &Path) -> usize {
-    read_dir_files(cache_dir)
-        .into_iter()
-        .filter(|name| is_provider_cache_file_name(name))
-        .count()
-}
-
 fn count_dir_files(dir: &Path) -> usize {
     read_dir_files(dir).len()
 }
@@ -415,33 +430,72 @@ fn remove_provider_cache_files(cache_dir: &Path) -> usize {
 
 fn remove_all_dir_files(dir: &Path) -> usize {
     let mut removed = 0usize;
-    for name in read_dir_files(dir) {
-        if fs::remove_file(dir.join(&name)).is_ok() {
-            removed += 1;
+    for entry in fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        let removed_entry = if entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
+            fs::remove_dir_all(&path).is_ok()
+        } else {
+            fs::remove_file(&path).is_ok()
+        };
+        if removed_entry {
+            removed = removed.saturating_add(1);
         }
     }
     removed
 }
 
-fn prune_state_after_provider_purge(paths: &WallsPaths, state: &mut State) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StatePruneResult {
+    history_pruned: usize,
+    current_cleared: bool,
+}
+
+fn prune_state_after_provider_purge(paths: &WallsPaths, state: &mut State) -> StatePruneResult {
+    let history_before = state.history.len();
     state.history.retain(|entry| {
         let path = PathBuf::from(entry);
-        path.exists() && !is_under_provider_storage(paths, &path)
+        !is_under_provider_storage(paths, &path)
     });
     if state.history_index >= state.history.len() && !state.history.is_empty() {
         state.history_index = state.history.len() - 1;
     }
 
+    let mut current_cleared = false;
     if let Some(current) = &state.current {
         let original = PathBuf::from(&current.original_path);
         let composed = PathBuf::from(&current.composed_path);
-        let original_gone = !original.exists() || is_under_provider_storage(paths, &original);
-        let composed_gone = composed != original
-            && (!composed.exists() || is_under_provider_storage(paths, &composed));
-        if original_gone || composed_gone {
+        if is_under_provider_storage(paths, &original)
+            || is_under_provider_storage(paths, &composed)
+        {
             state.current = None;
+            current_cleared = true;
         }
     }
+
+    StatePruneResult {
+        history_pruned: history_before.saturating_sub(state.history.len()),
+        current_cleared,
+    }
+}
+
+fn count_history_provider_entries(paths: &WallsPaths, state: &State) -> usize {
+    state
+        .history
+        .iter()
+        .filter(|entry| is_under_provider_storage(paths, Path::new(entry)))
+        .count()
+}
+
+fn current_uses_provider_storage(paths: &WallsPaths, state: &State) -> bool {
+    state.current.as_ref().is_some_and(|current| {
+        let original = PathBuf::from(&current.original_path);
+        let composed = PathBuf::from(&current.composed_path);
+        is_under_provider_storage(paths, &original) || is_under_provider_storage(paths, &composed)
+    })
 }
 
 fn is_under_provider_storage(paths: &WallsPaths, path: &Path) -> bool {

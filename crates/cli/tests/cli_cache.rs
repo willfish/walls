@@ -97,7 +97,9 @@ fn cli_cache_prune_requires_force_and_dry_run_does_not_mutate() {
         .args(["cache", "prune", "--dry-run"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("would clear queue: 1 entries"));
+        .stdout(predicate::str::contains(
+            "would reset provider storage: 1 queued",
+        ));
 
     let state = fs::read_to_string(&state_file).unwrap();
     assert!(state.contains("wallhaven:abc"));
@@ -108,7 +110,9 @@ fn cli_cache_prune_requires_force_and_dry_run_does_not_mutate() {
         .args(["cache", "prune", "--force", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"status\": \"cleared_queue\""))
+        .stdout(predicate::str::contains(
+            "\"status\": \"reset_provider_storage\"",
+        ))
         .stdout(predicate::str::contains("\"queue_cleared\": 1"));
 
     let state = fs::read_to_string(state_file).unwrap();
