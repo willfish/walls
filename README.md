@@ -53,8 +53,6 @@ journey-led setup and recovery paths, see:
 - [CLI scripting and JSON output](docs/journeys.md#cli-scripting-and-json-output)
 - [Troubleshooting guide](docs/troubleshooting.md)
 
-![walls TUI demo](demo/demo-tui.gif)
-
 ## What It Does
 
 - Rotates wallpapers from local folders and online providers.
@@ -68,16 +66,22 @@ journey-led setup and recovery paths, see:
 
 ## Demo
 
-The checked-in TUI GIF shows the keyboard-first control surface using an isolated
-demo config: startup intro, Config, Browse, Search, Now, manual next, and key
-help. It is generated from the real Ratatui alternate-screen output, so it stays
-reproducible without recording a personal desktop.
+The README showcase should use the real desktop capture path so it proves the
+COSMIC tray icon, transparent Ghostty TUI, and wallpaper switch together. The
+draft capture helper is:
+
+```bash
+./demo/capture-tui-showcase.sh
+```
+
+The deterministic TUI renderer is useful for quick local inspection, but it does
+not replace the real desktop showcase:
 
 ```bash
 ./demo/render-tui-gif.sh
 ```
 
-The older CLI GIF is still useful for command output and scripting:
+The CLI GIF is still useful for command output and scripting:
 
 ```bash
 nix-shell -p asciinema asciinema-agg --run './demo/record-cli.sh'
@@ -85,8 +89,8 @@ nix-shell -p asciinema asciinema-agg --run './demo/record-cli.sh'
 
 ![walls CLI demo](demo/demo.gif)
 
-To record the real desktop/window version, use portal-based screen capture from
-a clean workspace/window and follow [`demo/record-tui.sh`](demo/record-tui.sh).
+For a portal-based video attempt, use [`demo/record-tui.sh`](demo/record-tui.sh)
+from a clean workspace/window.
 
 Headless TUI behaviour is covered separately by `scripts/validate-tui-pty.sh`.
 
