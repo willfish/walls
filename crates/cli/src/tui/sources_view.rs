@@ -4,16 +4,15 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::ListItem;
 use walls_core::config::{reddit_summary, source_secrets_detail_lines, SourceEntry};
 
-use super::app::{App, WallhavenProviderSummary};
+use super::app::App;
 use super::style::{self, StateKind, Theme};
 
 const SOURCE_LABEL_WIDTH: usize = 26;
 
 pub fn sources_block_summary(app: &App) -> String {
     let sources = &app.ctx.config.sources;
-    let total = sources.len() + 1;
-    let active =
-        sources.iter().filter(|s| s.enabled).count() + usize::from(app.wallhaven_summary.enabled);
+    let total = sources.len();
+    let active = sources.iter().filter(|s| s.enabled).count();
     format!("{active} active · {total} total")
 }
 
@@ -125,26 +124,6 @@ fn source_rows(app: &App) -> Vec<SourceRow> {
             label: label.clone(),
             meta: meta.clone(),
             plain: format_source_row(selected, src.enabled, &label, &meta),
-            detail_lines,
-        });
-    }
-
-    let wallhaven_index = sources.len();
-    if browse_all || app.wallhaven_summary.enabled {
-        let label = "Wallhaven".to_string();
-        let meta = wallhaven_display_meta(&app.wallhaven_summary);
-        let selected = sub_sel == Some(wallhaven_index);
-        let detail_lines = if selected {
-            wallhaven_detail_lines(&app.wallhaven_summary)
-        } else {
-            Vec::new()
-        };
-        rows.push(SourceRow {
-            selected,
-            enabled: app.wallhaven_summary.enabled,
-            label: label.clone(),
-            meta: meta.clone(),
-            plain: format_source_row(selected, app.wallhaven_summary.enabled, &label, &meta),
             detail_lines,
         });
     }
@@ -347,80 +326,6 @@ pub fn source_display_meta(src: &SourceEntry) -> String {
     }
 }
 
-pub fn wallhaven_display_meta(provider: &WallhavenProviderSummary) -> String {
-    let mut parts = Vec::new();
-    if provider.query != "(empty query)" && !provider.query.is_empty() {
-        parts.push(format!("query {}", short_query(&provider.query)));
-    }
-    parts.push(human_wallhaven_prefer(&provider.prefer).to_string());
-    if provider.api_key_present {
-        parts.push("API key".into());
-    } else {
-        parts.push("no API key".into());
-    }
-    parts.push(if provider.internet_enabled {
-        "online".into()
-    } else {
-        "offline".into()
-    });
-    parts.join(" · ")
-}
-
-fn wallhaven_detail_lines(provider: &WallhavenProviderSummary) -> Vec<String> {
-    let key = if provider.api_key_present {
-        "present"
-    } else {
-        "missing"
-    };
-    let mut lines = vec![
-        format!("enabled: {}", provider.enabled),
-        format!("api key: {key}"),
-        format!("prefer: {}", human_wallhaven_prefer(&provider.prefer)),
-        format!("search query: {}", provider.query),
-        format!(
-            "categories: {}",
-            super::app::format_wallhaven_categories(&provider.categories)
-        ),
-        format!(
-            "purity: {}",
-            super::app::format_wallhaven_purity(&provider.purity, provider.api_key_present)
-        ),
-        format!(
-            "sort: {} {} minimum {}",
-            provider.sorting, provider.order, provider.atleast
-        ),
-    ];
-    if provider.collections.is_empty() {
-        lines.push(format!(
-            "collections: {}",
-            style::state_text(StateKind::Empty, "none")
-        ));
-    } else {
-        lines.push(format!("collections: {}", provider.collections.len()));
-        lines.extend(
-            provider
-                .collections
-                .iter()
-                .take(5)
-                .map(|c| format!("  - {c}")),
-        );
-        if provider.collections.len() > 5 {
-            lines.push(format!("  … +{}", provider.collections.len() - 5));
-        }
-    }
-    lines.extend(provider.warnings.iter().cloned());
-    lines
-}
-
-fn human_wallhaven_prefer(prefer: &str) -> &'static str {
-    match prefer {
-        "CollectionsThenSearch" => "collections then search",
-        "SearchOnly" => "search only",
-        "CollectionsOnly" => "collections only",
-        _ => "custom",
-    }
-}
-
 fn short_query(query: &str) -> String {
     truncate_middle(query, 24)
 }
@@ -465,6 +370,7 @@ mod tests {
             title_path: None,
             sort: None,
             time: None,
+            ..SourceEntry::default()
         };
         assert_eq!(source_display_name(&src), "My wallpapers");
     }
@@ -487,32 +393,10 @@ mod tests {
             title_path: None,
             sort: None,
             time: None,
+            ..SourceEntry::default()
         };
 
         assert_eq!(source_display_name(&src), "Wallhaven jupiter");
         assert_eq!(source_display_meta(&src), "query jupiter");
-    }
-
-    #[test]
-    fn wallhaven_meta_is_human_readable() {
-        let summary = WallhavenProviderSummary {
-            enabled: true,
-            internet_enabled: true,
-            api_key_present: true,
-            prefer: "SearchOnly".into(),
-            collections: vec![],
-            query: "space".into(),
-            categories: "111".into(),
-            purity: "100".into(),
-            sorting: "random".into(),
-            order: "desc".into(),
-            atleast: "1920x1080".into(),
-            warnings: vec![],
-        };
-        let meta = wallhaven_display_meta(&summary);
-        assert!(meta.contains("query space"));
-        assert!(meta.contains("search only"));
-        assert!(meta.contains("API key"));
-        assert!(!meta.contains("pref="));
     }
 }

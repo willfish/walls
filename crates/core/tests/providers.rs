@@ -111,7 +111,8 @@ fn configured_providers_include_sources_and_wallhaven_adapter() {
     let config = test_config_with_sources(
         true,
         serde_json::json!([
-            { "enabled": true, "type": "folder", "label": "Local", "path": "/tmp/walls" }
+            { "enabled": true, "type": "folder", "label": "Local", "path": "/tmp/walls" },
+            { "enabled": true, "type": "wallhaven", "query": "space" }
         ]),
     );
     let secrets = serde_json::from_value::<walls_core::config::Secrets>(serde_json::json!({
@@ -147,13 +148,19 @@ fn enabled_local_sources_dispatch_excludes_disabled_and_unsupported_sources() {
 }
 
 #[test]
-fn wallhaven_descriptor_preserves_existing_enablement_rules() {
+fn wallhaven_descriptor_requires_enabled_wallhaven_source() {
     let mut secrets = serde_json::from_value::<walls_core::config::Secrets>(serde_json::json!({
         "wallhaven_api_key": "key"
     }))
     .expect("secrets");
 
-    let provider = wallhaven_provider(&test_config(true), &secrets);
+    let provider = wallhaven_provider(
+        &test_config_with_sources(
+            true,
+            serde_json::json!([{ "enabled": true, "type": "wallhaven", "query": "space" }]),
+        ),
+        &secrets,
+    );
     assert!(provider.enabled);
     assert!(provider
         .capabilities
@@ -164,14 +171,31 @@ fn wallhaven_descriptor_preserves_existing_enablement_rules() {
     assert!(provider
         .capabilities
         .contains(&ProviderCapability::Metadata));
-    assert!(!wallhaven_provider(&test_config(false), &secrets).enabled);
+    assert!(
+        !wallhaven_provider(
+            &test_config_with_sources(
+                false,
+                serde_json::json!([{ "enabled": true, "type": "wallhaven", "query": "space" }])
+            ),
+            &secrets
+        )
+        .enabled
+    );
 
     secrets.wallhaven_api_key.clear();
-    assert!(wallhaven_provider(&test_config(true), &secrets).enabled);
+    assert!(
+        wallhaven_provider(
+            &test_config_with_sources(
+                true,
+                serde_json::json!([{ "enabled": true, "type": "wallhaven", "query": "space" }])
+            ),
+            &secrets
+        )
+        .enabled
+    );
 
     secrets.wallhaven_api_key = "key".into();
-    let mut config = test_config(true);
-    config.wallhaven.enabled = false;
+    let config = test_config(true);
     assert!(!wallhaven_provider(&config, &secrets).enabled);
 }
 
@@ -225,6 +249,7 @@ fn failure_scope_names_provider_and_operation() {
         title_path: None,
         sort: None,
         time: None,
+        ..SourceEntry::default()
     }])
     .remove(0);
 
@@ -510,7 +535,8 @@ fn configured_providers_features_all_new_classified_kinds() {
             { "enabled": true, "type": "folder", "label": "Local", "path": "/tmp/walls" },
             { "enabled": true, "type": "reddit", "query": "wallpapers" },
             { "enabled": true, "type": "bing" },
-            { "enabled": true, "type": "json", "url": "https://ex.com/feed.json", "image_path": "$.u" }
+            { "enabled": true, "type": "json", "url": "https://ex.com/feed.json", "image_path": "$.u" },
+            { "enabled": true, "type": "wallhaven", "query": "space" }
         ]),
     );
     let secrets = serde_json::from_value::<walls_core::config::Secrets>(serde_json::json!({
@@ -521,7 +547,7 @@ fn configured_providers_features_all_new_classified_kinds() {
 
     let providers = configured_providers(&config, &secrets);
 
-    // sources (Local + 3 new) + wallhaven adapter = 5
+    // sources (Local + 4 new) = 5
     assert_eq!(providers.len(), 5);
     assert_eq!(providers[0].kind, ProviderKind::Local);
     assert_eq!(providers[1].kind, ProviderKind::Reddit);
@@ -529,8 +555,8 @@ fn configured_providers_features_all_new_classified_kinds() {
     assert_eq!(providers[3].kind, ProviderKind::Json);
     assert_eq!(providers[4].kind, ProviderKind::Wallhaven);
 
-    // The new ones (1,2,3) have full caps (proves the classification API for extensibility)
-    for p in [&providers[1], &providers[2], &providers[3]] {
+    // The new ones (1,2,3,4) have full caps (proves the classification API for extensibility)
+    for p in [&providers[1], &providers[2], &providers[3], &providers[4]] {
         assert!(p.capabilities.contains(&ProviderCapability::Download));
         assert!(p.capabilities.contains(&ProviderCapability::Metadata));
     }

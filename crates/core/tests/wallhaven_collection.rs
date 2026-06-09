@@ -1,6 +1,6 @@
 use walls_core::config::{
-    ChangeConfig, Config, PathsConfig, SelectionConfig, WallhavenCollection, WallhavenConfig,
-    WallhavenPrefer,
+    default_wallhaven_source, ChangeConfig, Config, PathsConfig, SelectionConfig,
+    WallhavenCollection, WallhavenPrefer,
 };
 use walls_core::state::State;
 use walls_core::wallhaven::{refill_wallhaven_cache, WallhavenClient};
@@ -40,16 +40,15 @@ async fn refill_uses_collection_endpoint_when_configured() {
             refetch_when_cache_below: 5,
             ..SelectionConfig::default()
         },
-        sources: vec![],
-        wallhaven: WallhavenConfig {
+        sources: vec![walls_core::config::SourceEntry {
+            prefer: Some(WallhavenPrefer::CollectionsOnly),
             collections: vec![WallhavenCollection {
                 username: "testuser".into(),
                 id: 42,
                 label: None,
             }],
-            prefer: WallhavenPrefer::CollectionsOnly,
-            ..WallhavenConfig::default()
-        },
+            ..default_wallhaven_source()
+        }],
         tray: Default::default(),
         tui: Default::default(),
     };

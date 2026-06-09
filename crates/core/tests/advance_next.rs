@@ -192,7 +192,6 @@ async fn advance_next_reports_missing_unsplash_credentials() {
             "custom_script": noop.display().to_string(),
         },
         "display": { "mode": "os" },
-        "wallhaven": { "enabled": false },
         "sources": [
             { "enabled": true, "type": "unsplash", "query": "forest" }
         ],
@@ -251,7 +250,6 @@ async fn advance_next_reports_inline_provider_offline_skip() {
             "custom_script": noop.display().to_string(),
         },
         "display": { "mode": "os" },
-        "wallhaven": { "enabled": false },
         "sources": [
             { "enabled": true, "type": "reddit", "subreddit": "EarthPorn" },
             { "enabled": true, "type": "folder", "path": images.display().to_string() }
@@ -275,7 +273,10 @@ async fn advance_next_reports_inline_provider_offline_skip() {
         .find(|attempt| attempt.provider_kind == ProviderKind::Reddit)
         .expect("reddit attempt");
     assert_eq!(reddit.status, ProviderStatus::OfflineDisabled);
-    assert_eq!(reddit.fallback_provider_id.as_deref(), Some("apod"));
+    assert_eq!(
+        reddit.fallback_provider_id.as_deref(),
+        Some("next configured provider")
+    );
     assert_eq!(
         reddit.outcome,
         ProviderAttemptOutcome::Skipped {

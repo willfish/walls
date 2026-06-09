@@ -1,5 +1,5 @@
 use walls_core::config::{
-    ChangeConfig, Config, PathsConfig, SelectionConfig, SourceEntry, WallhavenConfig,
+    default_wallhaven_source, ChangeConfig, Config, PathsConfig, SelectionConfig, SourceEntry,
 };
 use walls_core::state::State;
 use walls_core::wallhaven::{refill_wallhaven_cache, WallhavenClient};
@@ -26,8 +26,7 @@ fn test_config() -> Config {
             refetch_when_cache_below: 5,
             ..SelectionConfig::default()
         },
-        sources: vec![],
-        wallhaven: WallhavenConfig::default(),
+        sources: vec![default_wallhaven_source()],
         tray: Default::default(),
         tui: Default::default(),
     }
@@ -58,7 +57,7 @@ async fn refill_pushes_search_ids_into_cache_queue() {
 }
 
 #[tokio::test]
-async fn refill_uses_wallhaven_source_queries_when_global_wallhaven_is_disabled() {
+async fn refill_uses_wallhaven_source_queries() {
     let server = MockServer::start().await;
     for query in ["jupiter", "neptune"] {
         Mock::given(method("GET"))
@@ -76,41 +75,18 @@ async fn refill_uses_wallhaven_source_queries_when_global_wallhaven_is_disabled(
 
     let client = WallhavenClient::new(server.uri(), "key").unwrap();
     let mut config = test_config();
-    config.wallhaven.enabled = false;
     config.sources = vec![
         SourceEntry {
             enabled: true,
             source_type: "wallhaven".into(),
-            label: None,
-            path: None,
             query: Some("jupiter".into()),
-            url: None,
-            collection: None,
-            user: None,
-            topic: None,
-            orientation: None,
-            api_key: None,
-            image_path: None,
-            title_path: None,
-            sort: None,
-            time: None,
+            ..default_wallhaven_source()
         },
         SourceEntry {
             enabled: true,
             source_type: "wallhaven".into(),
-            label: None,
-            path: None,
             query: Some("neptune".into()),
-            url: None,
-            collection: None,
-            user: None,
-            topic: None,
-            orientation: None,
-            api_key: None,
-            image_path: None,
-            title_path: None,
-            sort: None,
-            time: None,
+            ..default_wallhaven_source()
         },
     ];
     let mut state = State::default();

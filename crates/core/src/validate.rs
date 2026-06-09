@@ -1,7 +1,7 @@
 use crate::config::UnsplashSourceConfig;
 use crate::config::{
-    wallhaven_resolution_choices, wallhaven_resolution_supported, ApplyBackendSetting, Config,
-    Secrets, SourceEntry, SourceKind,
+    source_wallhaven_search, wallhaven_resolution_choices, wallhaven_resolution_supported,
+    ApplyBackendSetting, Config, Secrets, SourceEntry, SourceKind,
 };
 use crate::paths::{expand_home, WallsPaths};
 use serde::Serialize;
@@ -107,7 +107,6 @@ pub fn validate_config_diagnostics(
         validate_source_entry(index, src, config, secrets, paths, &mut errors);
     }
 
-    validate_wallhaven_provider(config, secrets, &mut errors);
     validate_apply_config(config, &mut errors);
     validate_quota_config(config, &mut errors);
     validate_tray_autostart(config, &mut errors);
@@ -146,7 +145,7 @@ pub fn validate_source_edit_diagnostics(
     errors
 }
 
-/// Validate the Wallhaven provider block while editing it in the TUI.
+/// Validate configured Wallhaven sources while editing search-related controls in the TUI.
 pub fn validate_wallhaven_edit(config: &Config, secrets: &Secrets) -> Vec<String> {
     validate_wallhaven_edit_diagnostics(config, secrets)
         .into_iter()
@@ -159,7 +158,11 @@ pub fn validate_wallhaven_edit_diagnostics(
     secrets: &Secrets,
 ) -> Vec<ValidationDiagnostic> {
     let mut errors = Vec::new();
-    validate_wallhaven_provider(config, secrets, &mut errors);
+    for (index, source) in config.sources.iter().enumerate() {
+        if source.enabled && SourceKind::parse(&source.source_type) == SourceKind::Wallhaven {
+            validate_wallhaven_source(index, source, secrets, &mut errors);
+        }
+    }
     errors
 }
 
@@ -290,7 +293,11 @@ fn validate_provider_source(
         }
         SourceKind::Reddit => validate_reddit_source(index, src, errors),
         SourceKind::Bing | SourceKind::Apod => {}
-        SourceKind::Wallhaven | SourceKind::Weighting => {
+        SourceKind::Wallhaven => {
+            validate_required_text(index, src, "query", src.query.as_deref(), errors);
+            validate_wallhaven_source(index, src, secrets, errors);
+        }
+        SourceKind::Weighting => {
             validate_required_text(index, src, "query", src.query.as_deref(), errors);
         }
         SourceKind::Json => validate_json_source(index, src, errors),
@@ -438,23 +445,20 @@ fn source_field(index: usize, field: &str) -> String {
     format!("sources[{index}].{field}")
 }
 
-fn validate_wallhaven_provider(
-    config: &Config,
+fn validate_wallhaven_source(
+    index: usize,
+    source: &SourceEntry,
     secrets: &Secrets,
     errors: &mut Vec<ValidationDiagnostic>,
 ) {
-    if !config.wallhaven.enabled {
-        return;
-    }
-
-    let search = &config.wallhaven.search;
+    let search = source_wallhaven_search(source);
     validate_wallhaven_bitfield(
-        "wallhaven.search.categories",
+        &source_field(index, "categories"),
         &search.categories,
         true,
         errors,
     );
-    validate_wallhaven_bitfield("wallhaven.search.purity", &search.purity, true, errors);
+    validate_wallhaven_bitfield(&source_field(index, "purity"), &search.purity, true, errors);
 
     if secrets.wallhaven_api_key.trim().is_empty()
         && search.purity.as_bytes().get(0..2) == Some(b"00")
@@ -462,7 +466,7 @@ fn validate_wallhaven_provider(
     {
         errors.push(
             ValidationDiagnostic::error(
-                "wallhaven.search.purity",
+                source_field(index, "purity"),
                 "cannot select only NSFW without secrets.wallhaven_api_key",
             )
             .with_hint(
@@ -472,24 +476,24 @@ fn validate_wallhaven_provider(
     }
 
     validate_choice(
-        "wallhaven.search.sorting",
+        &source_field(index, "sorting"),
         &search.sorting,
         WALLHAVEN_SORTING_CHOICES,
         errors,
     );
     validate_choice(
-        "wallhaven.search.order",
+        &source_field(index, "order"),
         &search.order,
         WALLHAVEN_ORDER_CHOICES,
         errors,
     );
-    validate_wallhaven_resolution("wallhaven.search.atleast", &search.atleast, errors);
+    validate_wallhaven_resolution(&source_field(index, "atleast"), &search.atleast, errors);
 
-    for (index, collection) in config.wallhaven.collections.iter().enumerate() {
+    for (collection_index, collection) in source.collections.iter().enumerate() {
         if collection.username.trim().is_empty() {
             errors.push(
                 ValidationDiagnostic::error(
-                    format!("wallhaven.collections[{index}].username"),
+                    format!("sources[{index}].collections[{collection_index}].username"),
                     "must not be empty",
                 )
                 .with_hint("set the Wallhaven collection username or remove this collection"),
@@ -498,7 +502,7 @@ fn validate_wallhaven_provider(
         if collection.id == 0 {
             errors.push(
                 ValidationDiagnostic::error(
-                    format!("wallhaven.collections[{index}].id"),
+                    format!("sources[{index}].collections[{collection_index}].id"),
                     "must be greater than zero",
                 )
                 .with_hint("set the numeric Wallhaven collection id"),

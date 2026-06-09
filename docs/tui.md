@@ -121,7 +121,7 @@ Before closing TUI work, run the checks in [`tui-verification.md`](tui-verificat
 
 Wide (tui-preview): split list-context | form (like Now preview split). Narrow: full form.
 
-Nested providers: "Sources" block shows the configured sources vec, subnav j/k or arrow up/down pick, Home/End jump, PageUp/PageDown page, `a` adds a Wallhaven query source and opens it for editing, and `e` edits the chosen SourceEntry (type-aware fields like path/query/url/image_path/api_key, designed per schema). Extended provider examples live in `config.sources.example.json` instead of the first-run config. Reuses atomic save + Reload + existing validation.
+Nested providers: "Sources" block shows the configured sources vec, subnav j/k or arrow up/down pick, Home/End jump, PageUp/PageDown page, `a` adds a Wallhaven query source and opens it for editing, `x` removes the selected configured source, and `e` edits the chosen SourceEntry (type-aware fields like path/query/url/image_path/api_key, designed per schema). Extended provider examples live in `config.sources.example.json` instead of the first-run config. Reuses atomic save + Reload + existing validation.
 
 ### Config tab field coverage matrix
 
@@ -185,19 +185,18 @@ or deliberately defers it to a later focused slice.
 | `config.sources[].title_path` | Deferred | Legacy schema field; source normalization does not persist it from TUI edits. |
 | `config.sources[].sort` | Editable | Reddit choice field. |
 | `config.sources[].time` | Editable | Reddit choice field when the selected sort uses time. |
+| `config.sources[].categories` | Editable | Wallhaven source category booleans write the bit string. |
+| `config.sources[].purity` | Editable | Wallhaven source purity booleans write the bit string; NSFW depends on API key presence. |
+| `config.sources[].sorting` | Editable | Wallhaven sorting choice field. |
+| `config.sources[].order` | Editable | Wallhaven order choice field. |
+| `config.sources[].atleast` | Editable | Wallhaven minimum resolution choice field. |
+| `config.sources[].prefer` | Editable | Wallhaven collection/search preference choice field. |
+| `config.sources[].collections` | Manual | Wallhaven collection list is persisted on each Wallhaven source. |
+| `config.sources[].collections[].username` | Manual | Wallhaven collection username. |
+| `config.sources[].collections[].id` | Manual | Wallhaven collection id. |
+| `config.sources[].collections[].label` | Manual | Optional Wallhaven collection label. |
 | `config.sources[].source` | Deferred | Attribution metadata schema field; source normalization does not persist it from TUI edits yet. |
 | `config.sources[].author` | Deferred | Attribution metadata schema field; source normalization does not persist it from TUI edits yet. |
-| `config.wallhaven.enabled` | Editable | Wallhaven block boolean. |
-| `config.wallhaven.collections[].username` | Manual | Collection management remains file-based. |
-| `config.wallhaven.collections[].id` | Manual | Collection management remains file-based. |
-| `config.wallhaven.collections[].label` | Manual | Collection management remains file-based. |
-| `config.wallhaven.search.q` | Editable | Wallhaven block text field. |
-| `config.wallhaven.search.categories` | Editable | Wallhaven block category booleans write the bit string. |
-| `config.wallhaven.search.purity` | Editable | Wallhaven block purity booleans write the bit string; NSFW depends on API key presence. |
-| `config.wallhaven.search.sorting` | Editable | Wallhaven block choice field. |
-| `config.wallhaven.search.order` | Editable | Wallhaven block choice field. |
-| `config.wallhaven.search.atleast` | Editable | Wallhaven block resolution choice field. |
-| `config.wallhaven.prefer` | Editable | Wallhaven block choice field. |
 | `secrets.$schema` | Manual | Schema hint for external editors. |
 | `secrets.wallhaven_api_key` | Manual | TUI shows presence/hints only; edit `secrets.json` directly. |
 | `secrets.unsplash_access_key` | Manual | TUI shows presence/hints only; edit `secrets.json` directly. |

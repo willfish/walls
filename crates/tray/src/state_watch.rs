@@ -257,7 +257,6 @@ mod tests {
         for source in &mut config.sources {
             source.enabled = false;
         }
-        config.wallhaven.enabled = false;
         write_config(&watcher.paths.config_file, &config);
         assert!(watcher.poll());
     }

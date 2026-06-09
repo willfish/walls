@@ -262,6 +262,7 @@ mod tests {
             title_path: None,
             sort: None,
             time: None,
+            ..SourceEntry::default()
         }
     }
 

@@ -159,6 +159,7 @@ fn source_entry(source_type: &str, path: Option<String>, enabled: bool) -> Sourc
         title_path: Some("$.title".into()),
         sort: Some("top".into()),
         time: Some("month".into()),
+        ..SourceEntry::default()
     }
 }
 

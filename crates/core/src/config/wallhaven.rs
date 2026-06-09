@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 
+use super::SourceEntry;
+
 pub const WALLHAVEN_RESOLUTION_CHOICES: &[&str] = &[
     "1024x768",
     "1280x720",
@@ -14,18 +16,6 @@ pub const WALLHAVEN_RESOLUTION_CHOICES: &[&str] = &[
 
 pub const WALLHAVEN_FALLBACK_RESOLUTION: &str = "1920x1080";
 pub const WALLHAVEN_DEFAULT_QUERY: &str = "space";
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct WallhavenConfig {
-    #[serde(default = "default_enabled")]
-    pub enabled: bool,
-    #[serde(default)]
-    pub collections: Vec<WallhavenCollection>,
-    #[serde(default)]
-    pub search: WallhavenSearch,
-    #[serde(default = "default_prefer")]
-    pub prefer: WallhavenPrefer,
-}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WallhavenCollection {
@@ -59,18 +49,9 @@ pub enum WallhavenPrefer {
     CollectionsOnly,
 }
 
-fn default_enabled() -> bool {
-    true
-}
-
-impl Default for WallhavenConfig {
+impl Default for WallhavenPrefer {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            collections: Vec::new(),
-            search: WallhavenSearch::default(),
-            prefer: WallhavenPrefer::CollectionsThenSearch,
-        }
+        default_prefer()
     }
 }
 
@@ -134,6 +115,135 @@ pub fn wallhaven_atleast_for_monitor(width: u32, height: u32) -> &'static str {
 
 pub fn detected_wallhaven_atleast() -> Option<&'static str> {
     main_monitor_resolution().map(|(width, height)| wallhaven_atleast_for_monitor(width, height))
+}
+
+pub fn default_wallhaven_source() -> SourceEntry {
+    let search = WallhavenSearch::default();
+    SourceEntry {
+        enabled: true,
+        source_type: "wallhaven".into(),
+        label: None,
+        path: None,
+        query: Some(search.q),
+        url: None,
+        collection: None,
+        user: None,
+        topic: None,
+        orientation: None,
+        api_key: None,
+        image_path: None,
+        title_path: None,
+        sort: None,
+        time: None,
+        categories: Some(search.categories),
+        purity: Some(search.purity),
+        sorting: Some(search.sorting),
+        order: Some(search.order),
+        atleast: Some(search.atleast),
+        prefer: Some(default_prefer()),
+        collections: Vec::new(),
+    }
+}
+
+pub fn populate_wallhaven_source_defaults(source: &mut SourceEntry) {
+    let defaults = WallhavenSearch::default();
+    if source
+        .query
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        source.query = Some(defaults.q);
+    }
+    if source
+        .categories
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        source.categories = Some(defaults.categories);
+    }
+    if source
+        .purity
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        source.purity = Some(defaults.purity);
+    }
+    if source
+        .sorting
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        source.sorting = Some(defaults.sorting);
+    }
+    if source
+        .order
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        source.order = Some(defaults.order);
+    }
+    if source
+        .atleast
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        source.atleast = Some(defaults.atleast);
+    }
+    if source.prefer.is_none() {
+        source.prefer = Some(default_prefer());
+    }
+}
+
+pub fn source_wallhaven_search(source: &SourceEntry) -> WallhavenSearch {
+    let defaults = WallhavenSearch::default();
+    WallhavenSearch {
+        q: source
+            .query
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(&defaults.q)
+            .to_string(),
+        categories: source
+            .categories
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(&defaults.categories)
+            .to_string(),
+        purity: source
+            .purity
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(&defaults.purity)
+            .to_string(),
+        sorting: source
+            .sorting
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(&defaults.sorting)
+            .to_string(),
+        order: source
+            .order
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(&defaults.order)
+            .to_string(),
+        atleast: source
+            .atleast
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(&defaults.atleast)
+            .to_string(),
+    }
+}
+
+pub fn source_wallhaven_prefer(source: &SourceEntry) -> WallhavenPrefer {
+    source.prefer.unwrap_or_else(default_prefer)
 }
 
 pub fn main_monitor_resolution_from_cosmic_randr(stdout: &[u8]) -> Option<(u32, u32)> {

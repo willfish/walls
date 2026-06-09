@@ -13,21 +13,6 @@ pub struct LocalSourceSummary {
     pub candidates: usize,
 }
 
-pub struct WallhavenProviderSummary {
-    pub enabled: bool,
-    pub internet_enabled: bool,
-    pub api_key_present: bool,
-    pub prefer: String,
-    pub collections: Vec<String>,
-    pub query: String,
-    pub categories: String,
-    pub purity: String,
-    pub sorting: String,
-    pub order: String,
-    pub atleast: String,
-    pub warnings: Vec<String>,
-}
-
 pub(super) fn is_local_source(source: &SourceEntry) -> bool {
     matches!(
         source.source_type.as_str(),
@@ -78,52 +63,6 @@ pub(super) fn summarize_local_source(ctx: &WallsCtx, source: &SourceEntry) -> Lo
     }
 }
 
-pub(super) fn summarize_wallhaven_provider(ctx: &WallsCtx) -> WallhavenProviderSummary {
-    let search = &ctx.config.wallhaven.search;
-    let api_key_present = !ctx.secrets.wallhaven_api_key.trim().is_empty();
-    let query = if search.q.trim().is_empty() {
-        "(empty query)".into()
-    } else {
-        search.q.clone()
-    };
-    let collections = ctx
-        .config
-        .wallhaven
-        .collections
-        .iter()
-        .map(|collection| {
-            let label = collection.label.as_deref().unwrap_or("collection");
-            format!("{}: {}/{}", label, collection.username, collection.id)
-        })
-        .collect();
-
-    let mut warnings = Vec::new();
-    if !ctx.config.change.internet_enabled {
-        warnings.push("warning: online sources disabled".into());
-    }
-    if !api_key_present {
-        warnings.push("warning: API key missing; NSFW purity unavailable".into());
-    }
-    if search.purity.chars().nth(2) == Some('1') {
-        warnings.push("warning: NSFW purity requires Wallhaven account access".into());
-    }
-
-    WallhavenProviderSummary {
-        enabled: ctx.config.wallhaven.enabled,
-        internet_enabled: ctx.config.change.internet_enabled,
-        api_key_present,
-        prefer: format!("{:?}", ctx.config.wallhaven.prefer),
-        collections,
-        query,
-        categories: search.categories.clone(),
-        purity: search.purity.clone(),
-        sorting: search.sorting.clone(),
-        order: search.order.clone(),
-        atleast: search.atleast.clone(),
-        warnings,
-    }
-}
-
 pub(super) fn summarize_config_warnings(ctx: &WallsCtx) -> Vec<String> {
     validate_config_diagnostics(&ctx.config, &ctx.secrets, &ctx.paths)
         .into_iter()
@@ -139,8 +78,8 @@ pub(super) fn summarize_config_warnings(ctx: &WallsCtx) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{summarize_local_source, summarize_wallhaven_provider};
-    use walls_core::config::{SourceEntry, WallhavenCollection};
+    use super::summarize_local_source;
+    use walls_core::config::SourceEntry;
     use walls_core::WallsCtx;
 
     #[test]
@@ -163,6 +102,7 @@ mod tests {
             title_path: None,
             sort: None,
             time: None,
+            ..SourceEntry::default()
         };
 
         let summary = summarize_local_source(&ctx, &source);
@@ -173,33 +113,5 @@ mod tests {
         assert_eq!(summary.path, "(not configured)");
         assert_eq!(summary.status, "missing path");
         assert_eq!(summary.candidates, 0);
-    }
-
-    #[test]
-    fn wallhaven_summary_includes_query_collections_and_warnings() {
-        let root = tempfile::tempdir().expect("tempdir");
-        let mut ctx = WallsCtx::load_from(root.path()).expect("ctx");
-        ctx.config.change.internet_enabled = false;
-        ctx.config.wallhaven.search.q.clear();
-        ctx.config.wallhaven.search.purity = "101".into();
-        ctx.config.wallhaven.collections.push(WallhavenCollection {
-            label: Some("space".into()),
-            username: "ada".into(),
-            id: 42,
-        });
-
-        let summary = summarize_wallhaven_provider(&ctx);
-
-        assert_eq!(summary.query, "(empty query)");
-        assert_eq!(summary.collections, ["space: ada/42"]);
-        assert!(summary
-            .warnings
-            .contains(&"warning: online sources disabled".into()));
-        assert!(summary
-            .warnings
-            .contains(&"warning: API key missing; NSFW purity unavailable".into()));
-        assert!(summary
-            .warnings
-            .contains(&"warning: NSFW purity requires Wallhaven account access".into()));
     }
 }
