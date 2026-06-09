@@ -1,3 +1,5 @@
+use std::thread;
+
 use ratatui::prelude::*;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -96,6 +98,42 @@ pub(crate) fn intro_disabled_value(value: Option<&str>) -> bool {
         value.map(str::trim).map(str::to_ascii_lowercase).as_deref(),
         Some("0" | "false" | "no" | "off" | "never" | "none" | "skip" | "disabled")
     )
+}
+
+pub(crate) fn start_intro_preview_prewarm(
+    app: &App,
+    enabled: bool,
+) -> Option<thread::JoinHandle<()>> {
+    const INTRO_PREWARM_LIMIT: usize = 32;
+
+    if !enabled {
+        return None;
+    }
+
+    let state = app.ctx.state.clone();
+    let cache_dir = app.ctx.paths.cache_dir.clone();
+    thread::Builder::new()
+        .name("walls-tui-intro-preview-prewarm".into())
+        .spawn(move || {
+            let sources =
+                walls_core::preview_cache::previewable_paths_from_state(&state, &cache_dir)
+                    .into_iter()
+                    .take(INTRO_PREWARM_LIMIT);
+            let stats = walls_core::preview_cache::prewarm_preview_thumbnails(
+                sources,
+                &cache_dir,
+                walls_core::preview_cache::DEFAULT_PREVIEW_SIZE,
+            );
+            if stats.attempted > 0 {
+                tracing::debug!(
+                    "startup preview prewarm: attempted={} warmed={} failed={}",
+                    stats.attempted,
+                    stats.warmed,
+                    stats.failed
+                );
+            }
+        })
+        .ok()
 }
 
 pub(crate) fn draw_startup_intro(f: &mut Frame, app: &App, intro: &StartupIntro) {

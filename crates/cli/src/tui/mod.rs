@@ -13,8 +13,6 @@ mod sources_view;
 mod startup;
 mod style;
 
-use std::thread;
-
 use crate::tui::app::EditTarget;
 use anyhow::Context;
 use app::{
@@ -26,7 +24,7 @@ use ratatui::prelude::*;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, List, ListItem, Tabs};
 pub(crate) use runtime::{log_len, CaptureWriter, ConsoleWriter, LOG_BUFFER};
-use startup::{draw_startup_intro, StartupIntro};
+use startup::{draw_startup_intro, start_intro_preview_prewarm, StartupIntro};
 use walls_core::apply::{
     backend_setting_label, summarize_apply_environment, ApplyEnvironmentSummary,
 };
@@ -91,39 +89,6 @@ pub fn run(startup_message: Option<String>, tray_owns_rotation: bool) -> anyhow:
     }
 
     Ok(())
-}
-
-fn start_intro_preview_prewarm(app: &App, enabled: bool) -> Option<thread::JoinHandle<()>> {
-    const INTRO_PREWARM_LIMIT: usize = 32;
-
-    if !enabled {
-        return None;
-    }
-
-    let state = app.ctx.state.clone();
-    let cache_dir = app.ctx.paths.cache_dir.clone();
-    thread::Builder::new()
-        .name("walls-tui-intro-preview-prewarm".into())
-        .spawn(move || {
-            let sources =
-                walls_core::preview_cache::previewable_paths_from_state(&state, &cache_dir)
-                    .into_iter()
-                    .take(INTRO_PREWARM_LIMIT);
-            let stats = walls_core::preview_cache::prewarm_preview_thumbnails(
-                sources,
-                &cache_dir,
-                walls_core::preview_cache::DEFAULT_PREVIEW_SIZE,
-            );
-            if stats.attempted > 0 {
-                tracing::debug!(
-                    "startup preview prewarm: attempted={} warmed={} failed={}",
-                    stats.attempted,
-                    stats.warmed,
-                    stats.failed
-                );
-            }
-        })
-        .ok()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
