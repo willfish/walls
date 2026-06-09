@@ -102,8 +102,16 @@ Use `WALLS_TUI_PREVIEW=0`, `false`, `no`, `off`, `never`, or `metadata` for meta
 Before closing TUI work, run the checks in [`tui-verification.md`](tui-verification.md). Layout, colour, key handling, and preview changes require both automated tests and PTY visual/behavioural verification.
 
 ## Config editing (drill-down, non-modal)
-`e` on a Config block or (after `Enter` to subnav on the Sources list) on a provider item enters focused edit: main content replaced by the form for the item (stable layout, no overlay/popup). `j/k` fields, type to edit (live `val|buffer`), `Enter` commit field, `s` save (validates only the item being edited; errors flash red + block save), `Esc` back to list. Run `walls config validate` for a full config check.
+`e` on a Config block or (after `Enter` to subnav on the Sources list) on a provider item enters focused edit: main content replaced by the form for the item (stable layout, no overlay/popup). Arrow up/down move fields, type edits text fields (live `val|buffer`), left/right or Space cycle choice fields, `Enter` commits and saves the current field, and `Esc` returns to the list. Run `walls config validate` for a full config check.
 
 Wide (tui-preview): split list-context | form (like Now preview split). Narrow: full form.
 
-Nested providers: "Sources" block shows full sources vec (all types from config.example), subnav j/k pick, `e` edits chosen SourceEntry (type-aware fields like path/query/url/image_path/api_key, designed per schema). Reuses atomic save + Reload + existing validation.
+Nested providers: "Sources" block shows full sources vec (all types from config.example), subnav j/k or arrow up/down pick, Home/End jump, PageUp/PageDown page, and `e` edits chosen SourceEntry (type-aware fields like path/query/url/image_path/api_key, designed per schema). Reuses atomic save + Reload + existing validation.
+
+Normal mode navigation:
+
+- Left/right switch top-level tabs and leave Config Sources subnav.
+- Number keys `1` through `6` jump directly to visible tabs.
+- `j/k` and arrow up/down move within the active list.
+- Home/End jump to the first/last row for History, Browse, Search, Config blocks, and Config Sources subnav.
+- PageUp/PageDown jump five rows and clamp at list boundaries.
