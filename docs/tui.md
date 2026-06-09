@@ -147,13 +147,13 @@ or deliberately defers it to a later focused slice.
 | `config.paths.compose_dir` | Read-only | Display/apply context; manual path edits avoid moving generated wallpaper files unexpectedly. |
 | `config.quota.enabled` | Editable | Library edit form boolean. |
 | `config.quota.size_mb` | Editable | Library edit form numeric text field with inline validation. |
-| `config.apply.backend` | Read-only | Apply block context; backend switching needs focused validation and dry-run copy. |
-| `config.apply.cosmic.method` | Read-only | Apply block context. |
-| `config.apply.cosmic.config_path` | Read-only | Apply block context and validation warnings. |
-| `config.apply.cosmic.use_original_path` | Read-only | Apply block context. |
+| `config.apply.backend` | Editable | Apply/display edit form choice field with inline validation. |
+| `config.apply.cosmic.method` | Editable | Apply/display edit form choice field. |
+| `config.apply.cosmic.config_path` | Editable | Apply/display edit form text field with inline validation when the COSMIC backend uses it. |
+| `config.apply.cosmic.use_original_path` | Editable | Apply/display edit form boolean. |
 | `config.apply.cosmic.entry.rotation_frequency` | Manual | COSMIC-specific low-level patch field. |
 | `config.apply.cosmic.entry.filter_by_theme` | Manual | COSMIC-specific low-level patch field. |
-| `config.apply.custom_script` | Read-only | Apply block context; manual edit keeps trusted script changes explicit. |
+| `config.apply.custom_script` | Editable | Apply/display edit form text field with existing executable validation for the custom-script backend. |
 | `config.display.mode` | Editable | Apply/display edit form choice field. |
 | `config.display.auto_rotate` | Editable | Apply/display edit form boolean. |
 | `config.display.imagemagick_command` | Editable | Apply/display edit form text field. |
