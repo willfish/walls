@@ -14,6 +14,7 @@ use walls_core::validate::{
 };
 use walls_core::WallsCtx;
 
+use super::command::{self, ParsedCommand};
 use super::style::{self, ColorMode, StateKind, StatusKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,7 +136,6 @@ pub(crate) const WALLHAVEN_BLOCK_FIELDS: &[&str] = &[
 
 pub(crate) const TUI_BLOCK_FIELDS: &[&str] = &["key_profile"];
 pub(crate) const TUI_KEY_PROFILE_CHOICES: &[&str] = &["emacs", "vim"];
-const COMMAND_COMPLETIONS: &[&str] = &["next", "prev", "pause", "favorite", "status", "quit"];
 
 fn wallhaven_bit_at(s: &str, idx: usize, default: bool) -> bool {
     s.chars().nth(idx).map(|c| c == '1').unwrap_or(default)
@@ -771,33 +771,6 @@ pub struct App {
     pub pending_trash_confirm: bool,
     pub show_key_help: bool,
     pub vim_pending_g: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ParsedCommand<'a> {
-    Next,
-    Prev,
-    TogglePause,
-    Favorite,
-    Status,
-    Quit,
-    Empty,
-    Unknown(&'a str),
-}
-
-impl<'a> ParsedCommand<'a> {
-    fn parse(line: &'a str) -> Self {
-        match line.trim() {
-            "next" | "n" => Self::Next,
-            "prev" | "p" => Self::Prev,
-            "pause" | "toggle-pause" => Self::TogglePause,
-            "favorite" | "fav" | "f" => Self::Favorite,
-            "status" => Self::Status,
-            "quit" | "q" => Self::Quit,
-            "" => Self::Empty,
-            other => Self::Unknown(other),
-        }
-    }
 }
 
 impl App {
@@ -2077,24 +2050,10 @@ impl App {
     }
 
     pub(crate) fn complete_command(&mut self, forward: bool) {
-        let prefix = self.cmd_line.trim();
-        let exact_command = COMMAND_COMPLETIONS.contains(&prefix);
-        let candidates: Vec<&str> = COMMAND_COMPLETIONS
-            .iter()
-            .copied()
-            .filter(|command| exact_command || prefix.is_empty() || command.starts_with(prefix))
-            .collect();
-        if candidates.is_empty() {
-            return;
+        if let Some(next) = command::complete(&self.cmd_line, forward) {
+            self.cmd_line.clear();
+            self.cmd_line.push_str(next);
         }
-        let next = match candidates.iter().position(|command| *command == prefix) {
-            Some(index) if forward => candidates[(index + 1) % candidates.len()],
-            Some(index) => candidates[(index + candidates.len() - 1) % candidates.len()],
-            None if forward => candidates[0],
-            None => candidates[candidates.len() - 1],
-        };
-        self.cmd_line.clear();
-        self.cmd_line.push_str(next);
     }
 
     pub fn run_command(
@@ -2379,7 +2338,7 @@ fn crop_lines_around_selection(
 
 #[cfg(test)]
 mod tests {
-    use super::{ParsedCommand, Tab};
+    use super::Tab;
 
     #[test]
     fn tab_indices_round_trip_through_visible_order() {
@@ -2400,30 +2359,5 @@ mod tests {
     #[test]
     fn unknown_tab_index_falls_back_to_config() {
         assert_eq!(Tab::from_index(usize::MAX), Tab::Config);
-    }
-
-    #[test]
-    fn command_parser_trims_and_maps_dispatch_aliases() {
-        assert_eq!(ParsedCommand::parse(" next "), ParsedCommand::Next);
-        assert_eq!(ParsedCommand::parse("n"), ParsedCommand::Next);
-        assert_eq!(ParsedCommand::parse("prev"), ParsedCommand::Prev);
-        assert_eq!(ParsedCommand::parse("p"), ParsedCommand::Prev);
-        assert_eq!(ParsedCommand::parse("pause"), ParsedCommand::TogglePause);
-        assert_eq!(
-            ParsedCommand::parse("toggle-pause"),
-            ParsedCommand::TogglePause
-        );
-        assert_eq!(ParsedCommand::parse("favorite"), ParsedCommand::Favorite);
-        assert_eq!(ParsedCommand::parse("fav"), ParsedCommand::Favorite);
-        assert_eq!(ParsedCommand::parse("f"), ParsedCommand::Favorite);
-        assert_eq!(ParsedCommand::parse("status"), ParsedCommand::Status);
-        assert_eq!(ParsedCommand::parse("quit"), ParsedCommand::Quit);
-        assert_eq!(ParsedCommand::parse("q"), ParsedCommand::Quit);
-    }
-
-    #[test]
-    fn command_parser_distinguishes_empty_and_unknown_commands() {
-        assert_eq!(ParsedCommand::parse("  "), ParsedCommand::Empty);
-        assert_eq!(ParsedCommand::parse("wat"), ParsedCommand::Unknown("wat"));
     }
 }
