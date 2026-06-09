@@ -14,7 +14,7 @@ use walls_core::providers::{
     ProviderNoCandidateReason, ProviderOperation, ProviderRetryReason, ProviderStatus,
     ProviderStatusReport,
 };
-use walls_core::{RefreshLevel, WallsCtx};
+use walls_core::{RefreshLevel, WallsCtx, WallsError};
 
 #[cfg(feature = "tui")]
 mod tui;
@@ -1571,17 +1571,32 @@ fn cmd_undo(json: bool) -> anyhow::Result<()> {
 
 fn cmd_restore_previous(command: &str, status: &str, json: bool) -> anyhow::Result<()> {
     let mut ctx = WallsCtx::load()?;
-    match ctx.advance_prev()? {
-        Some(p) if json => print_json(command_result(command, true, status, Some(p), None))?,
-        Some(p) => println!("{}", p.display()),
-        None if json => print_json(command_result(
+    match ctx.advance_prev() {
+        Ok(Some(p)) if json => print_json(command_result(command, true, status, Some(p), None))?,
+        Ok(Some(p)) => println!("{}", p.display()),
+        Ok(None) if json => print_json(command_result(
             command,
             false,
             "no_previous",
             None,
             Some("no_previous"),
         ))?,
-        None => println!("{}", recovery::no_previous_wallpaper()),
+        Ok(None) => println!("{}", recovery::no_previous_wallpaper()),
+        Err(WallsError::PreviousOriginalMissing { path }) if json => {
+            print_json(command_result(
+                command,
+                false,
+                "missing_previous",
+                Some(path),
+                Some("missing_previous"),
+            ))?;
+            std::process::exit(1);
+        }
+        Err(WallsError::PreviousOriginalMissing { path }) => {
+            eprintln!("{}", recovery::missing_previous_wallpaper(&path));
+            std::process::exit(1);
+        }
+        Err(error) => return Err(error.into()),
     }
     Ok(())
 }
