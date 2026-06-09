@@ -11,6 +11,7 @@ use crate::autostart::{
 };
 use crate::config::{secrets_credential_present, source_secrets_key, SourceKind};
 use crate::ctx::WallsCtx;
+use crate::sources::list_images_with_paths;
 use crate::tray::{decide_tray_action_from_env, TrayAction};
 use crate::validate::{secrets_file_permission_warnings, validate_config_diagnostics};
 
@@ -422,6 +423,20 @@ fn check_providers(ctx: &WallsCtx, checks: &mut Vec<DoctorCheck>) {
         if !source.enabled {
             continue;
         }
+        let source_kind = SourceKind::parse(&source.source_type);
+        if source_kind.is_local() {
+            check_local_source_candidates(ctx, index, checks);
+        } else if ctx.config.change.internet_enabled {
+            checks.push(DoctorCheck::warn(
+                DoctorSection::Providers,
+                format!("providers.source_{index}.candidates"),
+                format!(
+                    "source {} is online-backed and was not live-checked",
+                    source.source_type
+                ),
+                "run `walls next --json` to inspect live provider attempts, or add a local fallback source",
+            ));
+        }
         if let Some(key) = source_secrets_key(&source.source_type) {
             let present = secrets_credential_present(key, &ctx.secrets);
             checks.push(if present || !ctx.config.change.internet_enabled {
@@ -440,6 +455,95 @@ fn check_providers(ctx: &WallsCtx, checks: &mut Vec<DoctorCheck>) {
             });
         }
     }
+
+    let verified_local_candidates = verified_local_candidate_count(ctx, checks);
+    if verified_local_candidates > 0 {
+        checks.push(DoctorCheck::pass(
+            DoctorSection::Providers,
+            "providers.candidate_readiness",
+            format!("{verified_local_candidates} verified local candidate(s) available"),
+        ));
+    } else if ctx.config.change.internet_enabled && has_online_provider(ctx) {
+        checks.push(DoctorCheck::warn(
+            DoctorSection::Providers,
+            "providers.candidate_readiness",
+            "no local candidates were verified; readiness depends on online providers",
+            "run `walls next --json` to verify live provider attempts or add a local fallback source",
+        ));
+    } else {
+        checks.push(DoctorCheck::fail(
+            DoctorSection::Providers,
+            "providers.candidate_readiness",
+            "no configured source can currently produce a verified wallpaper candidate",
+            "add images to a local source, enable a provider, or turn internet providers on",
+        ));
+    }
+}
+
+fn check_local_source_candidates(ctx: &WallsCtx, index: usize, checks: &mut Vec<DoctorCheck>) {
+    let Some(source) = ctx.config.sources.get(index) else {
+        return;
+    };
+    match list_images_with_paths(source, &ctx.paths.favorites_dir, &ctx.paths.fetched_dir) {
+        Ok(images) if images.is_empty() => checks.push(DoctorCheck::warn(
+            DoctorSection::Providers,
+            format!("providers.source_{index}.candidates"),
+            format!(
+                "local source {} has no image candidates",
+                local_source_label(source)
+            ),
+            "add jpg, jpeg, png, webp, avif, bmp, or gif files to this source",
+        )),
+        Ok(images) => checks.push(DoctorCheck::pass(
+            DoctorSection::Providers,
+            format!("providers.source_{index}.candidates"),
+            format!(
+                "local source {} has {} image candidate(s)",
+                local_source_label(source),
+                images.len()
+            ),
+        )),
+        Err(error) => checks.push(DoctorCheck::fail(
+            DoctorSection::Providers,
+            format!("providers.source_{index}.candidates"),
+            format!(
+                "could not inspect local source {}: {error:#}",
+                local_source_label(source)
+            ),
+            "fix the source path or disable this source",
+        )),
+    }
+}
+
+fn verified_local_candidate_count(ctx: &WallsCtx, checks: &mut Vec<DoctorCheck>) -> usize {
+    match ctx.collect_local_candidates() {
+        Ok(candidates) => candidates.len(),
+        Err(error) => {
+            checks.push(DoctorCheck::fail(
+                DoctorSection::Providers,
+                "providers.local_candidate_listing",
+                format!("could not inspect local candidates: {error:#}"),
+                "fix local source paths or disable broken local sources",
+            ));
+            0
+        }
+    }
+}
+
+fn has_online_provider(ctx: &WallsCtx) -> bool {
+    ctx.config.wallhaven.enabled
+        || ctx
+            .config
+            .sources
+            .iter()
+            .any(|source| source.enabled && !SourceKind::parse(&source.source_type).is_local())
+}
+
+fn local_source_label(source: &crate::config::SourceEntry) -> String {
+    source
+        .label
+        .clone()
+        .unwrap_or_else(|| source.source_type.clone())
 }
 
 fn check_storage_cache(ctx: &WallsCtx, checks: &mut Vec<DoctorCheck>) {
@@ -580,6 +684,7 @@ mod tests {
         let mut config = crate::config::default_config().expect("default config");
         config.change.internet_enabled = false;
         let tmp_images = tempfile::tempdir().expect("images");
+        std::fs::write(tmp_images.path().join("a.jpg"), b"x").expect("image");
         let mut source = folder_source();
         source.path = Some(tmp_images.path().display().to_string());
         config.sources = vec![source];
@@ -591,6 +696,9 @@ mod tests {
         assert!(report.checks.iter().any(
             |check| check.id == "providers.local_sources" && check.status == DoctorStatus::Pass
         ));
+        assert!(report.checks.iter().any(|check| {
+            check.id == "providers.candidate_readiness" && check.status == DoctorStatus::Pass
+        }));
     }
 
     #[test]
@@ -612,6 +720,7 @@ mod tests {
         let mut config = crate::config::default_config().expect("default config");
         config.change.internet_enabled = false;
         let tmp_images = tempfile::tempdir().expect("images");
+        std::fs::write(tmp_images.path().join("a.jpg"), b"x").expect("image");
         let mut source = folder_source();
         source.path = Some(tmp_images.path().display().to_string());
         config.sources = vec![source];
@@ -628,5 +737,43 @@ mod tests {
             .checks
             .iter()
             .any(|check| check.id == "tui.preview" && check.status == DoctorStatus::Warn));
+    }
+
+    #[test]
+    fn doctor_fails_when_local_only_sources_have_no_candidates() {
+        let mut config = crate::config::default_config().expect("default config");
+        config.change.internet_enabled = false;
+        let tmp_images = tempfile::tempdir().expect("images");
+        let mut source = folder_source();
+        source.path = Some(tmp_images.path().display().to_string());
+        config.sources = vec![source];
+        let (_tmp, ctx) = ctx_with_config(config);
+
+        let report = run_doctor(&ctx, &DoctorOptions::default());
+
+        assert!(!report.ready);
+        assert!(report.checks.iter().any(|check| {
+            check.id == "providers.source_0.candidates" && check.status == DoctorStatus::Warn
+        }));
+        assert!(report.checks.iter().any(|check| {
+            check.id == "providers.candidate_readiness" && check.status == DoctorStatus::Fail
+        }));
+    }
+
+    #[test]
+    fn doctor_warns_when_candidate_readiness_depends_on_online_providers() {
+        let mut config = crate::config::default_config().expect("default config");
+        config.change.internet_enabled = true;
+        let mut source = folder_source();
+        source.source_type = "bing".into();
+        config.sources = vec![source];
+        let (_tmp, ctx) = ctx_with_config(config);
+
+        let report = run_doctor(&ctx, &DoctorOptions::default());
+
+        assert!(report.ready, "{:#?}", report.checks);
+        assert!(report.checks.iter().any(|check| {
+            check.id == "providers.candidate_readiness" && check.status == DoctorStatus::Warn
+        }));
     }
 }
