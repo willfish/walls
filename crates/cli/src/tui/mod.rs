@@ -2,6 +2,7 @@ mod app;
 mod chrome_view;
 mod command;
 mod history_browse_view;
+mod line_view;
 mod logs_view;
 mod now_view;
 mod open_target;
@@ -22,7 +23,6 @@ use app::{
 };
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
-use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, List, ListItem, Tabs};
 pub(crate) use runtime::{log_len, CaptureWriter, ConsoleWriter, LOG_BUFFER};
@@ -812,7 +812,7 @@ fn render_tab_body(
                 theme,
             );
         } else {
-            render_lines(
+            line_view::render_lines(
                 f,
                 chunks[1],
                 "preview",
@@ -827,7 +827,7 @@ fn render_tab_body(
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
                 .split(area);
-            render_lines(
+            line_view::render_lines(
                 f,
                 chunks[0],
                 "List context",
@@ -885,7 +885,7 @@ fn render_tab_body(
 
 fn render_tab_content(f: &mut Frame, area: Rect, app: &App, theme: style::Theme, width: u16) {
     if app.show_key_help {
-        render_lines(
+        line_view::render_lines(
             f,
             area,
             "Key help",
@@ -902,7 +902,7 @@ fn render_tab_content(f: &mut Frame, area: Rect, app: &App, theme: style::Theme,
         app.tab.title().to_string(),
         tab_lines(app, width, area.height),
     );
-    render_lines(f, area, &title, body, theme);
+    line_view::render_lines(f, area, &title, body, theme);
 }
 
 fn render_config_tab(f: &mut Frame, area: Rect, app: &App, theme: style::Theme) {
@@ -922,24 +922,6 @@ fn tab_lines(app: &App, width: u16, height: u16) -> Vec<String> {
         Tab::Search => app.search_lines(),
         Tab::Logs => app.logs_lines(width, height),
     }
-}
-
-fn render_lines(f: &mut Frame, area: Rect, title: &str, body: Vec<String>, theme: style::Theme) {
-    let items: Vec<ListItem> = body
-        .iter()
-        .map(|line| string_list_item(line, theme))
-        .collect();
-    let list = List::new(items)
-        .block(theme.content_block(title))
-        .style(theme.normal());
-    f.render_widget(list, area);
-}
-
-fn string_list_item(line: &str, theme: style::Theme) -> ListItem<'static> {
-    if let Some((kind, message)) = style::state_parts(line) {
-        return ListItem::new(style::state_line(kind, message.to_string(), theme));
-    }
-    ListItem::new(line.to_string()).style(line_style(line, theme))
 }
 
 struct ConfigBlock<'a> {
@@ -1163,39 +1145,6 @@ fn config_value_style(value: &str, theme: style::Theme) -> Option<Style> {
         value if value.starts_with("unavailable") => Some(theme.unavailable()),
         _ => None,
     }
-}
-
-fn line_style(line: &str, theme: style::Theme) -> Style {
-    let trimmed = line.trim_start();
-    if let Some((kind, _)) = style::state_parts(trimmed) {
-        return theme.state(kind);
-    }
-    if trimmed.starts_with('>') || trimmed.starts_with("▸ ") {
-        return theme.selected();
-    }
-    if trimmed.starts_with("Edit ") {
-        // Edit form titles pop with accent (cyan bold in colour mode) for hierarchy.
-        return theme.accent();
-    }
-    if trimmed.starts_with("┄")
-        || trimmed.starts_with("───")
-        || trimmed.starts_with("─ ")
-        || trimmed.starts_with("===")
-    {
-        // Modern separator/header with box chars: bold muted (calm, legible in no-colour).
-        return theme.muted().add_modifier(Modifier::BOLD);
-    }
-    if trimmed.starts_with("--") {
-        return theme.muted();
-    }
-    if trimmed.starts_with('(') || trimmed.contains("preview unavailable") {
-        return theme.muted();
-    }
-    if trimmed.starts_with("!!") {
-        // Validation errors ... red/bold inline.
-        return theme.status(style::StatusKind::Error);
-    }
-    theme.normal()
 }
 
 fn config_lines(app: &App) -> Vec<String> {
@@ -2026,7 +1975,7 @@ fn build_rich_edit_form_items(app: &App, theme: style::Theme) -> Vec<ListItem<'s
             }
         }
         // Fallback to plain + line_style
-        let st = line_style(&line, theme);
+        let st = line_view::line_style(&line, theme);
         items.push(ListItem::new(line).style(st));
     }
     items
@@ -2063,7 +2012,8 @@ mod tests {
         app::{App, EditFieldKind, SearchHit},
         apply_effect,
         chrome_view::{footer_keys, footer_paragraph},
-        draw_inner, handle_key, line_style,
+        draw_inner, handle_key,
+        line_view::line_style,
         open_target::{open_command, OpenTarget},
         startup::{draw_startup_intro, intro_disabled_value, StartupIntro},
         style, update, EditTarget, InputMode, Tab, TerminalSize, UiAction, UpdateEffect,
