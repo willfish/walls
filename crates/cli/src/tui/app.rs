@@ -83,6 +83,11 @@ pub enum EditTarget {
 
 /// Internal block index for shared Wallhaven field metadata helpers.
 pub(crate) const WALLHAVEN_FIELDS_BLOCK: usize = usize::MAX;
+pub(crate) const CONFIG_BLOCK_SOURCES: usize = 0;
+pub(crate) const CONFIG_BLOCK_ROTATION: usize = 1;
+pub(crate) const CONFIG_BLOCK_LIBRARY: usize = 2;
+pub(crate) const CONFIG_BLOCK_APPLY_DISPLAY: usize = 3;
+pub(crate) const CONFIG_BLOCK_TUI: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EditFieldKind {
@@ -308,7 +313,7 @@ fn parse_wallhaven_prefer(s: &str) -> Option<WallhavenPrefer> {
 
 pub(crate) fn block_field_label(block: usize, key: &str) -> String {
     match block {
-        0 => match key {
+        CONFIG_BLOCK_ROTATION => match key {
             "enabled" => "Enabled".into(),
             "on_start" => "On start".into(),
             "interval" => "Interval (seconds)".into(),
@@ -322,7 +327,7 @@ pub(crate) fn block_field_label(block: usize, key: &str) -> String {
             ),
             other => other.into(),
         },
-        2 => match key {
+        CONFIG_BLOCK_LIBRARY => match key {
             "quota_enabled" => "Quota enabled".into(),
             "quota_size_mb" => "Quota size (MB)".into(),
             other => other.into(),
@@ -342,7 +347,7 @@ pub(crate) fn block_field_label(block: usize, key: &str) -> String {
             "atleast" => "Minimum resolution".into(),
             other => other.into(),
         },
-        4 => match key {
+        CONFIG_BLOCK_TUI => match key {
             "key_profile" => "Key profile".into(),
             other => other.into(),
         },
@@ -352,7 +357,7 @@ pub(crate) fn block_field_label(block: usize, key: &str) -> String {
 
 pub(crate) fn block_field_kind(block: usize, key: &str) -> EditFieldKind {
     match block {
-        0 => match key {
+        CONFIG_BLOCK_ROTATION => match key {
             "enabled" | "on_start" | "internet" | "safe_mode" | "change_lock_screen" => {
                 EditFieldKind::Bool
             }
@@ -368,7 +373,7 @@ pub(crate) fn block_field_kind(block: usize, key: &str) -> EditFieldKind {
             "tray_accent" => EditFieldKind::Choice(walls_core::tray_icon::tray_accent_choices()),
             _ => EditFieldKind::Text,
         },
-        2 => match key {
+        CONFIG_BLOCK_LIBRARY => match key {
             "quota_enabled" => EditFieldKind::Bool,
             _ => EditFieldKind::Text,
         },
@@ -393,7 +398,7 @@ pub(crate) fn block_field_kind(block: usize, key: &str) -> EditFieldKind {
             "atleast" => EditFieldKind::Choice(walls_core::config::wallhaven_resolution_choices()),
             _ => EditFieldKind::Text,
         },
-        4 => match key {
+        CONFIG_BLOCK_TUI => match key {
             "key_profile" => EditFieldKind::Choice(TUI_KEY_PROFILE_CHOICES),
             _ => EditFieldKind::Text,
         },
@@ -501,9 +506,9 @@ fn block_field_value_at(
     idx: usize,
 ) -> String {
     let keys = match block {
-        0 => ROTATION_BLOCK_FIELDS,
-        2 => LIBRARY_BLOCK_FIELDS,
-        4 => TUI_BLOCK_FIELDS,
+        CONFIG_BLOCK_ROTATION => ROTATION_BLOCK_FIELDS,
+        CONFIG_BLOCK_LIBRARY => LIBRARY_BLOCK_FIELDS,
+        CONFIG_BLOCK_TUI => TUI_BLOCK_FIELDS,
         WALLHAVEN_FIELDS_BLOCK => WALLHAVEN_BLOCK_FIELDS,
         _ => return String::new(),
     };
@@ -514,7 +519,7 @@ fn block_field_value_at(
         return v.clone();
     }
     match block {
-        0 => match *key {
+        CONFIG_BLOCK_ROTATION => match *key {
             "enabled" => config.change.enabled.to_string(),
             "on_start" => config.change.on_start.to_string(),
             "interval" => config.change.interval_secs.to_string(),
@@ -537,7 +542,7 @@ fn block_field_value_at(
             }
             _ => String::new(),
         },
-        2 => match *key {
+        CONFIG_BLOCK_LIBRARY => match *key {
             "quota_enabled" => config.quota.enabled.to_string(),
             "quota_size_mb" => config.quota.size_mb.to_string(),
             _ => String::new(),
@@ -567,7 +572,7 @@ fn block_field_value_at(
             "atleast" => config.wallhaven.search.atleast.clone(),
             _ => String::new(),
         },
-        4 => match *key {
+        CONFIG_BLOCK_TUI => match *key {
             "key_profile" => tui_key_profile_label(config.tui.key_profile).into(),
             _ => String::new(),
         },
@@ -608,9 +613,9 @@ fn commit_block_field_buffer(
     draft: &mut std::collections::HashMap<String, String>,
 ) {
     let keys = match block {
-        0 => ROTATION_BLOCK_FIELDS,
-        2 => LIBRARY_BLOCK_FIELDS,
-        4 => TUI_BLOCK_FIELDS,
+        CONFIG_BLOCK_ROTATION => ROTATION_BLOCK_FIELDS,
+        CONFIG_BLOCK_LIBRARY => LIBRARY_BLOCK_FIELDS,
+        CONFIG_BLOCK_TUI => TUI_BLOCK_FIELDS,
         WALLHAVEN_FIELDS_BLOCK => WALLHAVEN_BLOCK_FIELDS,
         _ => return,
     };
@@ -1394,15 +1399,15 @@ impl App {
             }
         }
         let message = match self.config_cursor {
-            0 => {
+            CONFIG_BLOCK_ROTATION => {
                 config.change.enabled = !config.change.enabled;
                 format!("config saved: rotation enabled={}", config.change.enabled)
             }
-            2 => {
+            CONFIG_BLOCK_LIBRARY => {
                 config.quota.enabled = !config.quota.enabled;
                 format!("config saved: quota enabled={}", config.quota.enabled)
             }
-            3 => {
+            CONFIG_BLOCK_APPLY_DISPLAY => {
                 config.display.auto_rotate = !config.display.auto_rotate;
                 format!("config saved: auto rotate={}", config.display.auto_rotate)
             }
@@ -1416,7 +1421,7 @@ impl App {
     pub fn cycle_focused_config_value(&mut self) -> anyhow::Result<Option<String>> {
         let mut config = self.ctx.config.clone();
         let message = match self.config_cursor {
-            2 => {
+            CONFIG_BLOCK_LIBRARY => {
                 config.selection.strategy = match config.selection.strategy {
                     SelectionStrategy::Random => SelectionStrategy::Sequential,
                     SelectionStrategy::Sequential => SelectionStrategy::Random,
@@ -1520,7 +1525,7 @@ impl App {
                     validation_errors: vec![],
                 })
             }
-            EditTarget::Block(0) => Some(EditSession {
+            EditTarget::Block(CONFIG_BLOCK_ROTATION) => Some(EditSession {
                 target: target.clone(),
                 draft_source: None,
                 draft_block_values: rotation_block_draft(&self.ctx.config),
@@ -1528,7 +1533,7 @@ impl App {
                 field_buffer: String::new(),
                 validation_errors: vec![],
             }),
-            EditTarget::Block(2) => Some(EditSession {
+            EditTarget::Block(CONFIG_BLOCK_LIBRARY) => Some(EditSession {
                 target: target.clone(),
                 draft_source: None,
                 draft_block_values: library_block_draft(&self.ctx.config),
@@ -1536,7 +1541,7 @@ impl App {
                 field_buffer: String::new(),
                 validation_errors: vec![],
             }),
-            EditTarget::Block(4) => Some(EditSession {
+            EditTarget::Block(CONFIG_BLOCK_TUI) => Some(EditSession {
                 target: target.clone(),
                 draft_source: None,
                 draft_block_values: tui_block_draft(&self.ctx.config),
@@ -1593,9 +1598,9 @@ impl App {
                     .unwrap_or(&self.ctx.config.sources[*i]);
                 Self::source_editable_fields(src).len()
             }
-            EditTarget::Block(0) => ROTATION_BLOCK_FIELDS.len(),
-            EditTarget::Block(2) => LIBRARY_BLOCK_FIELDS.len(),
-            EditTarget::Block(4) => TUI_BLOCK_FIELDS.len(),
+            EditTarget::Block(CONFIG_BLOCK_ROTATION) => ROTATION_BLOCK_FIELDS.len(),
+            EditTarget::Block(CONFIG_BLOCK_LIBRARY) => LIBRARY_BLOCK_FIELDS.len(),
+            EditTarget::Block(CONFIG_BLOCK_TUI) => TUI_BLOCK_FIELDS.len(),
             EditTarget::Block(_) => 0,
             EditTarget::Wallhaven => WALLHAVEN_BLOCK_FIELDS.len(),
             EditTarget::SearchFilters => SEARCH_FILTER_FIELDS.len(),
@@ -1621,10 +1626,10 @@ impl App {
                 }
             }
             EditTarget::Block(block) => {
-                let keys = match block {
-                    0 => ROTATION_BLOCK_FIELDS,
-                    2 => LIBRARY_BLOCK_FIELDS,
-                    4 => TUI_BLOCK_FIELDS,
+                let keys = match *block {
+                    CONFIG_BLOCK_ROTATION => ROTATION_BLOCK_FIELDS,
+                    CONFIG_BLOCK_LIBRARY => LIBRARY_BLOCK_FIELDS,
+                    CONFIG_BLOCK_TUI => TUI_BLOCK_FIELDS,
                     _ => &[] as &[&str],
                 };
                 if let Some(key) = keys.get(sess.field_cursor) {
@@ -1938,7 +1943,7 @@ impl App {
     }
 
     pub fn is_sources_list_block(&self, block: usize) -> bool {
-        block == 1 // the "Sources" block (was Local sources)
+        block == CONFIG_BLOCK_SOURCES
     }
 
     fn validation_issues_for_edit(
@@ -1952,11 +1957,13 @@ impl App {
             EditTarget::Wallhaven | EditTarget::SearchFilters => {
                 validate_wallhaven_edit(config, secrets)
             }
-            EditTarget::Block(2) => validate_config_diagnostics(config, secrets, paths)
-                .into_iter()
-                .filter(|diagnostic| diagnostic.path.starts_with("quota."))
-                .map(|diagnostic| diagnostic.to_string())
-                .collect(),
+            EditTarget::Block(CONFIG_BLOCK_LIBRARY) => {
+                validate_config_diagnostics(config, secrets, paths)
+                    .into_iter()
+                    .filter(|diagnostic| diagnostic.path.starts_with("quota."))
+                    .map(|diagnostic| diagnostic.to_string())
+                    .collect()
+            }
             EditTarget::Block(_) => Vec::new(),
         }
     }
@@ -1995,13 +2002,13 @@ impl App {
                         temp.sources[*i] = d.clone();
                     }
                 }
-                EditTarget::Block(0) => {
+                EditTarget::Block(CONFIG_BLOCK_ROTATION) => {
                     apply_rotation_block_draft(&mut temp, &sess.draft_block_values);
                 }
-                EditTarget::Block(2) => {
+                EditTarget::Block(CONFIG_BLOCK_LIBRARY) => {
                     apply_library_block_draft(&mut temp, &sess.draft_block_values);
                 }
-                EditTarget::Block(4) => {
+                EditTarget::Block(CONFIG_BLOCK_TUI) => {
                     apply_tui_block_draft(&mut temp, &sess.draft_block_values);
                 }
                 EditTarget::Wallhaven => {
@@ -2129,15 +2136,15 @@ impl App {
                     };
                 }
             }
-            EditTarget::Block(0) => {
+            EditTarget::Block(CONFIG_BLOCK_ROTATION) => {
                 apply_rotation_block_draft(&mut config, &sess.draft_block_values);
                 success_msg = "config saved: rotation".into();
             }
-            EditTarget::Block(2) => {
+            EditTarget::Block(CONFIG_BLOCK_LIBRARY) => {
                 apply_library_block_draft(&mut config, &sess.draft_block_values);
                 success_msg = "config saved: library".into();
             }
-            EditTarget::Block(4) => {
+            EditTarget::Block(CONFIG_BLOCK_TUI) => {
                 apply_tui_block_draft(&mut config, &sess.draft_block_values);
                 success_msg = "config saved: tui preferences".into();
             }

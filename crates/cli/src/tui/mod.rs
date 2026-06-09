@@ -14,7 +14,10 @@ use std::thread;
 
 use crate::tui::app::EditTarget;
 use anyhow::Context;
-use app::{App, InputMode, Tab};
+use app::{
+    App, InputMode, Tab, CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION,
+    CONFIG_BLOCK_SOURCES, CONFIG_BLOCK_TUI,
+};
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::crossterm::terminal::{
@@ -1090,10 +1093,31 @@ const CONFIG_DETAIL_LABEL_WIDTH: usize = 20;
 
 fn config_list_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
     let mut items = Vec::new();
+    let sources = &app.ctx.config.sources;
+    let wallhaven_enabled = app.wallhaven_summary.enabled;
+    let sources_enabled = sources.iter().any(|s| s.enabled) || wallhaven_enabled;
+    let sources_details = if app.config_cursor == CONFIG_BLOCK_SOURCES {
+        sources_view::build_sources_list_items(app, theme, 4)
+    } else {
+        Vec::new()
+    };
     push_config_block_items(
         &mut items,
         ConfigBlock {
-            index: 0,
+            index: CONFIG_BLOCK_SOURCES,
+            cursor: app.config_cursor,
+            title: "Sources",
+            enabled: sources_enabled,
+            summary: sources_view::sources_block_summary(app),
+            details: sources_details,
+            theme,
+        },
+    );
+
+    push_config_block_items(
+        &mut items,
+        ConfigBlock {
+            index: CONFIG_BLOCK_ROTATION,
             cursor: app.config_cursor,
             title: "Rotation",
             enabled: app.ctx.config.change.enabled,
@@ -1112,31 +1136,10 @@ fn config_list_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
         },
     );
 
-    let sources = &app.ctx.config.sources;
-    let wallhaven_enabled = app.wallhaven_summary.enabled;
-    let sources_enabled = sources.iter().any(|s| s.enabled) || wallhaven_enabled;
-    let sources_details = if app.config_cursor == 1 {
-        sources_view::build_sources_list_items(app, theme, 4)
-    } else {
-        Vec::new()
-    };
     push_config_block_items(
         &mut items,
         ConfigBlock {
-            index: 1,
-            cursor: app.config_cursor,
-            title: "Sources",
-            enabled: sources_enabled,
-            summary: sources_view::sources_block_summary(app),
-            details: sources_details,
-            theme,
-        },
-    );
-
-    push_config_block_items(
-        &mut items,
-        ConfigBlock {
-            index: 2,
+            index: CONFIG_BLOCK_LIBRARY,
             cursor: app.config_cursor,
             title: "Library",
             enabled: app.ctx.config.quota.enabled,
@@ -1154,7 +1157,7 @@ fn config_list_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
     push_config_block_items(
         &mut items,
         ConfigBlock {
-            index: 3,
+            index: CONFIG_BLOCK_APPLY_DISPLAY,
             cursor: app.config_cursor,
             title: "Apply/display",
             enabled: true,
@@ -1171,7 +1174,7 @@ fn config_list_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
     push_config_block_items(
         &mut items,
         ConfigBlock {
-            index: 4,
+            index: CONFIG_BLOCK_TUI,
             cursor: app.config_cursor,
             title: "TUI",
             enabled: true,
@@ -1378,9 +1381,22 @@ fn line_style(line: &str, theme: style::Theme) -> Style {
 
 fn config_lines(app: &App) -> Vec<String> {
     let mut lines = Vec::new();
+    // Sources block lists configured providers plus Wallhaven (nested edit with j/k pick + e)
+    let sources = &app.ctx.config.sources;
+    let wallhaven_enabled = app.wallhaven_summary.enabled;
+    let sources_enabled = sources.iter().any(|s| s.enabled) || wallhaven_enabled;
     push_config_block(
         &mut lines,
-        0,
+        CONFIG_BLOCK_SOURCES,
+        app.config_cursor,
+        "Sources",
+        sources_enabled,
+        sources_view::sources_block_summary(app),
+        sources_view::sources_detail_lines(app),
+    );
+    push_config_block(
+        &mut lines,
+        CONFIG_BLOCK_ROTATION,
         app.config_cursor,
         "Rotation",
         app.ctx.config.change.enabled,
@@ -1396,22 +1412,9 @@ fn config_lines(app: &App) -> Vec<String> {
         ),
         rotation_details(app),
     );
-    // Sources block lists configured providers plus Wallhaven (nested edit with j/k pick + e)
-    let sources = &app.ctx.config.sources;
-    let wallhaven_enabled = app.wallhaven_summary.enabled;
-    let sources_enabled = sources.iter().any(|s| s.enabled) || wallhaven_enabled;
     push_config_block(
         &mut lines,
-        1,
-        app.config_cursor,
-        "Sources",
-        sources_enabled,
-        sources_view::sources_block_summary(app),
-        sources_view::sources_detail_lines(app),
-    );
-    push_config_block(
-        &mut lines,
-        2,
+        CONFIG_BLOCK_LIBRARY,
         app.config_cursor,
         "Library",
         app.ctx.config.quota.enabled,
@@ -1425,7 +1428,7 @@ fn config_lines(app: &App) -> Vec<String> {
     );
     push_config_block(
         &mut lines,
-        3,
+        CONFIG_BLOCK_APPLY_DISPLAY,
         app.config_cursor,
         "Apply/display",
         true,
@@ -1439,7 +1442,7 @@ fn config_lines(app: &App) -> Vec<String> {
     );
     push_config_block(
         &mut lines,
-        4,
+        CONFIG_BLOCK_TUI,
         app.config_cursor,
         "TUI",
         true,
@@ -1945,9 +1948,9 @@ fn cosmic_method_label(method: CosmicMethod) -> &'static str {
 fn edit_target_title(app: &App) -> String {
     if let Some(sess) = &app.editing {
         match &sess.target {
-            EditTarget::Block(0) => "Edit Rotation".to_string(),
-            EditTarget::Block(2) => "Edit Library".to_string(),
-            EditTarget::Block(4) => "Edit TUI".to_string(),
+            EditTarget::Block(CONFIG_BLOCK_ROTATION) => "Edit Rotation".to_string(),
+            EditTarget::Block(CONFIG_BLOCK_LIBRARY) => "Edit Library".to_string(),
+            EditTarget::Block(CONFIG_BLOCK_TUI) => "Edit TUI".to_string(),
             EditTarget::Wallhaven => "Edit Wallhaven".to_string(),
             EditTarget::SearchFilters => "Edit Search Filters".to_string(),
             EditTarget::Block(b) => format!("Edit block {}", b),
@@ -2045,10 +2048,10 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
                 ));
             }
         } else if let EditTarget::Block(block) = &sess.target {
-            let keys = match block {
-                0 => app::ROTATION_BLOCK_FIELDS,
-                2 => app::LIBRARY_BLOCK_FIELDS,
-                4 => app::TUI_BLOCK_FIELDS,
+            let keys = match *block {
+                CONFIG_BLOCK_ROTATION => app::ROTATION_BLOCK_FIELDS,
+                CONFIG_BLOCK_LIBRARY => app::LIBRARY_BLOCK_FIELDS,
+                CONFIG_BLOCK_TUI => app::TUI_BLOCK_FIELDS,
                 _ => &[],
             };
             for k in keys {
@@ -2242,6 +2245,8 @@ mod tests {
         apply_effect, draw_inner, footer_keys, footer_paragraph, handle_key, line_style,
         startup::{draw_startup_intro, intro_disabled_value, StartupIntro},
         style, update, EditTarget, InputMode, Tab, TerminalSize, UiAction, UpdateEffect,
+        CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION,
+        CONFIG_BLOCK_SOURCES, CONFIG_BLOCK_TUI,
     };
 
     fn test_app() -> App {
@@ -2469,13 +2474,11 @@ mod tests {
 
         assert!(text.contains("walls"), "{text}");
         assert!(text.contains("Config"), "{text}");
-        assert!(text.contains("> [on] Rotation"), "{text}");
-        assert!(text.contains("  [on] Sources"), "{text}");
+        assert!(text.contains("> [on] Sources"), "{text}");
+        assert!(text.contains("  [on] Rotation"), "{text}");
         assert!(!text.contains("  [off] Wallhaven"), "{text}");
         assert!(text.contains("  [on] Library"), "{text}");
         assert!(text.contains("  [on] Apply/display"), "{text}");
-        assert!(text.contains("─ configured"), "{text}");
-        assert!(text.contains("on start            : false"), "{text}");
         assert!(text.contains("local only"), "{text}");
         assert!(!text.contains("paused:"), "{text}");
         assert!(text.contains("normal"), "{text}");
@@ -2488,7 +2491,7 @@ mod tests {
     #[test]
     fn focused_config_block_expands_concrete_settings() {
         let mut app = test_app();
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
 
         let text = render_text(&app, 80, 24);
 
@@ -2522,7 +2525,7 @@ mod tests {
                 { "enabled": true, "type": "folder", "label": "Missing", "path": missing.display().to_string() }
             ]),
         );
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
 
         let text = render_text(&app, 120, 30);
 
@@ -2563,7 +2566,7 @@ mod tests {
             }),
             serde_json::json!({}),
         );
-        app.config_cursor = 0;
+        app.config_cursor = CONFIG_BLOCK_ROTATION;
 
         let text = render_text(&app, 100, 28);
 
@@ -2602,7 +2605,7 @@ mod tests {
             }),
             serde_json::json!({}),
         );
-        app.config_cursor = 2;
+        app.config_cursor = CONFIG_BLOCK_LIBRARY;
 
         let text = render_text(&app, 120, 32);
 
@@ -2677,7 +2680,7 @@ mod tests {
             }),
             serde_json::json!({}),
         );
-        app.config_cursor = 3;
+        app.config_cursor = CONFIG_BLOCK_APPLY_DISPLAY;
 
         let text = render_text(&app, 120, 34);
 
@@ -2726,7 +2729,7 @@ mod tests {
     #[test]
     fn narrow_config_screen_keeps_focused_block_and_navigation_visible() {
         let mut app = test_app();
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
         app.config_sub_cursor = app.ctx.config.sources.len();
 
@@ -2759,7 +2762,7 @@ mod tests {
             }),
             serde_json::json!({}),
         );
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
         app.config_sub_cursor = app.ctx.config.sources.len();
 
@@ -2795,7 +2798,7 @@ mod tests {
             }),
             serde_json::json!({ "wallhaven_api_key": "super-secret-token" }),
         );
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
         app.config_sub_cursor = app.ctx.config.sources.len();
 
@@ -2838,7 +2841,7 @@ mod tests {
                 }
             ]),
         );
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
         app.config_sub_cursor = 0;
 
@@ -2863,7 +2866,7 @@ mod tests {
             }),
             serde_json::json!({ "wallhaven_api_key": "key" }),
         );
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
         app.config_sub_cursor = app.ctx.config.sources.len();
 
@@ -2896,7 +2899,7 @@ mod tests {
             serde_json::json!({ "wallhaven_api_key": "key" }),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
         app.config_sub_cursor = app.ctx.config.sources.len();
         app.start_edit_for_current();
@@ -2932,7 +2935,7 @@ mod tests {
         );
         let rt = tokio::runtime::Runtime::new().expect("rt");
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
         app.config_sub_cursor = app.ctx.config.sources.len();
         app.start_edit_for_current();
@@ -2979,7 +2982,7 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.config_in_subnav = false;
 
         app.start_edit_for_current();
@@ -3009,7 +3012,7 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
 
         app.start_edit_for_current();
 
@@ -3038,7 +3041,7 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
 
         app.start_edit_for_current();
 
@@ -3066,7 +3069,7 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 0;
+        app.config_cursor = CONFIG_BLOCK_ROTATION;
         app.start_edit_for_current();
         let rt = tokio::runtime::Runtime::new().expect("rt");
 
@@ -3107,7 +3110,7 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
         app.config_sub_cursor = app.ctx.config.sources.len();
         app.start_edit_for_current();
@@ -3144,7 +3147,7 @@ mod tests {
             serde_json::json!({ "wallhaven_api_key": "key" }),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
         app.config_sub_cursor = app.ctx.config.sources.len();
         app.start_edit_for_current();
@@ -3188,7 +3191,7 @@ mod tests {
             serde_json::json!({ "wallhaven_api_key": "key" }),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
         app.config_sub_cursor = app.ctx.config.sources.len();
         app.start_edit_for_current();
@@ -3338,7 +3341,7 @@ mod tests {
 
         for tab in tabs {
             app.tab = tab;
-            app.config_cursor = 0;
+            app.config_cursor = CONFIG_BLOCK_SOURCES;
             app.config_in_subnav = false;
 
             let footer = app.footer_keys();
@@ -3350,7 +3353,7 @@ mod tests {
         }
 
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         let footer = app.footer_keys();
         assert!(footer.contains("e first active"), "{footer}");
 
@@ -3389,7 +3392,7 @@ mod tests {
         }
 
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         let footer = footer_keys(&app, 42);
         assert!(footer.contains("Enter"), "{footer}");
         assert!(footer.contains("e"), "{footer}");
@@ -3641,7 +3644,7 @@ mod tests {
         assert!(footer.contains("applied: /tmp/wall.jpg"), "{footer}");
 
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
         app.config_sub_cursor = 0;
         let config = render_text(&app, 120, 30);
@@ -3759,13 +3762,13 @@ mod tests {
         let mut app = test_app();
         let text = render_text(&app, 80, 24);
 
-        assert!(text.contains("e edit"), "{text}");
+        assert!(text.contains("e first active"), "{text}");
         assert!(
             text.contains("space pa") || text.contains("pause"),
             "{text}"
         );
 
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         let text = render_text(&app, 120, 24);
         assert!(text.contains("e first active"), "{text}");
 
@@ -3947,7 +3950,7 @@ mod tests {
         assert_eq!(app.tab, Tab::Logs);
 
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
         assert!(app.config_in_subnav);
         assert!(
@@ -4119,11 +4122,14 @@ mod tests {
         let mut app = test_app();
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         app.tab = Tab::Config;
-        app.config_cursor = 4;
+        app.config_cursor = CONFIG_BLOCK_TUI;
 
         app.start_edit_for_current();
         let editing = app.editing.as_ref().expect("editing");
-        assert!(matches!(editing.target, EditTarget::Block(4)));
+        assert!(matches!(
+            editing.target,
+            EditTarget::Block(CONFIG_BLOCK_TUI)
+        ));
         assert_eq!(editing.field_buffer, "emacs");
         assert_eq!(
             app.current_edit_field_kind(),
@@ -4154,11 +4160,14 @@ mod tests {
         );
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         app.tab = Tab::Config;
-        app.config_cursor = 2;
+        app.config_cursor = CONFIG_BLOCK_LIBRARY;
 
         app.start_edit_for_current();
         let editing = app.editing.as_ref().expect("editing");
-        assert!(matches!(editing.target, EditTarget::Block(2)));
+        assert!(matches!(
+            editing.target,
+            EditTarget::Block(CONFIG_BLOCK_LIBRARY)
+        ));
         assert_eq!(editing.field_buffer, "true");
         assert_eq!(app.current_edit_field_kind(), EditFieldKind::Bool);
 
@@ -4199,7 +4208,7 @@ mod tests {
         );
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         app.tab = Tab::Config;
-        app.config_cursor = 2;
+        app.config_cursor = CONFIG_BLOCK_LIBRARY;
 
         app.start_edit_for_current();
         update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to size");
@@ -4347,13 +4356,13 @@ mod tests {
         assert_eq!(app.cursor, 0);
 
         app.tab = Tab::Config;
-        app.config_cursor = 0;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         update(&mut app, UiAction::MoveLast, rt.handle()).expect("config end");
         assert_eq!(app.config_cursor, App::config_block_count() - 1);
         update(&mut app, UiAction::MoveFirst, rt.handle()).expect("config home");
-        assert_eq!(app.config_cursor, 0);
+        assert_eq!(app.config_cursor, CONFIG_BLOCK_SOURCES);
 
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
         app.config_sub_cursor = 0;
         update(&mut app, UiAction::MoveLast, rt.handle()).expect("subnav end");
@@ -4388,7 +4397,7 @@ mod tests {
     fn config_toggle_persists_boolean_and_reloads_context() {
         let mut app = test_app();
         let rt = tokio::runtime::Runtime::new().expect("runtime");
-        app.config_cursor = 0;
+        app.config_cursor = CONFIG_BLOCK_ROTATION;
         app.tab = Tab::Config;
 
         assert!(app.ctx.config.change.enabled);
@@ -4408,7 +4417,7 @@ mod tests {
     fn config_cycle_persists_enum_like_value_and_reloads_context() {
         let mut app = test_app();
         let rt = tokio::runtime::Runtime::new().expect("runtime");
-        app.config_cursor = 2;
+        app.config_cursor = CONFIG_BLOCK_LIBRARY;
         app.tab = Tab::Config;
 
         assert_eq!(
@@ -4436,7 +4445,7 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 0; // rotation block (or sources; start_edit will decide)
+        app.config_cursor = CONFIG_BLOCK_ROTATION;
         assert!(app.editing.is_none());
         // direct for RED (will be wired via action later)
         app.start_edit_for_current();
@@ -4460,7 +4469,7 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 0;
+        app.config_cursor = CONFIG_BLOCK_ROTATION;
         // Drive via key path (action_for_key + update) - before wiring 'e' -> EditConfigItem this will not enter edit
         // (test will fail assert until Task 2 wire)
         let key = KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE);
@@ -4474,7 +4483,7 @@ mod tests {
         );
         assert!(matches!(
             app.editing.as_ref().unwrap().target,
-            EditTarget::Block(0)
+            EditTarget::Block(CONFIG_BLOCK_ROTATION)
         ));
     }
 
@@ -4489,7 +4498,7 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 1; // sources-ish
+        app.config_cursor = CONFIG_BLOCK_SOURCES; // sources-ish
         app.start_edit_for_current();
         let text = render_text(&app, 80, 24);
         // Drill-down (non-modal): when editing Config item, main content shows the form fields directly (replaces blocks list in body area). No overlay/Clear popup.
@@ -4520,7 +4529,7 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.start_edit_for_current();
         assert!(app.is_editing());
         // With new UX, focus sets buffer to current value for editing/backspace support
@@ -4567,7 +4576,7 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 1; // sources block -> edits source 0
+        app.config_cursor = CONFIG_BLOCK_SOURCES; // sources block -> edits source 0
         app.start_edit_for_current();
         assert!(app.is_editing());
         let rt = tokio::runtime::Runtime::new().expect("rt");
@@ -4610,7 +4619,7 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
         app.config_sub_cursor = 0;
         app.start_edit_for_current();
@@ -4643,7 +4652,7 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
         app.config_sub_cursor = 0;
 
@@ -4663,7 +4672,7 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
         app.config_sub_cursor = 0;
         app.start_edit_for_current();
@@ -4687,7 +4696,7 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
         app.start_edit_for_current();
         let rt = tokio::runtime::Runtime::new().expect("rt");
@@ -4714,8 +4723,7 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        // Assume block 1 is now the Sources list block (we'll make it so)
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         // RED: no subnav yet, so entering sub + move + e should not target Source(1)
         // (will fail until impl)
         app.enter_config_subnav(); // expect to add
@@ -4755,7 +4763,7 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         let rt = tokio::runtime::Runtime::new().expect("rt");
 
         assert!(!app.config_in_subnav);
@@ -4793,7 +4801,7 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
         // move to second item
         let rt = tokio::runtime::Runtime::new().expect("rt");
@@ -5097,7 +5105,7 @@ mod tests {
             serde_json::json!({}),
         );
         app.tab = Tab::Config;
-        app.config_cursor = 1; // sources block
+        app.config_cursor = CONFIG_BLOCK_SOURCES; // sources block
         app.start_edit_for_current();
         assert!(app.is_editing());
         // First source unsplash: cursor starts at 0 (enabled), buffer prefilled from the *json config* value
@@ -5161,7 +5169,7 @@ mod tests {
             serde_json::json!({}),
         );
         app2.tab = Tab::Config;
-        app2.config_cursor = 1;
+        app2.config_cursor = CONFIG_BLOCK_SOURCES;
         app2.start_edit_for_current();
         let text2 = render_text(&app2, 80, 24);
         // Padded labels (e.g. "Query                                    : cats"), so check distinctive values.
@@ -5197,8 +5205,7 @@ mod tests {
         );
         app.tab = Tab::Config;
 
-        // Drive rotation block edit (cursor 0)
-        app.config_cursor = 0;
+        app.config_cursor = CONFIG_BLOCK_ROTATION;
         app.start_edit_for_current();
         let rot_text = render_text(&app, 80, 30);
         eprintln!(
@@ -5233,8 +5240,8 @@ mod tests {
 
         // Now drive source with label from real user config ("wallhaven space")
         app.cancel_edit();
-        app.config_cursor = 1; // sources block
-                               // ensure subnav targets the first source (wallhaven space)
+        app.config_cursor = CONFIG_BLOCK_SOURCES; // sources block
+                                                  // ensure subnav targets the first source (wallhaven space)
         app.config_in_subnav = true;
         app.config_sub_cursor = 1;
         app.start_edit_for_current();
@@ -5294,7 +5301,7 @@ mod tests {
 
         // Drive a validation error case and ensure it is visible inline at top of form (not just footer status, not buried at bottom)
         app.cancel_edit();
-        app.config_cursor = 1;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.config_in_subnav = true;
         app.config_sub_cursor = 0;
         app.start_edit_for_current();
