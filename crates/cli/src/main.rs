@@ -1808,7 +1808,10 @@ fn cmd_config_sync(dry_run: bool) -> anyhow::Result<()> {
             println!("tray autostart: would remove {}", path.display());
         }
         walls_core::autostart::AutostartSyncOutcome::Skipped { reason } => {
-            println!("tray autostart: skipped ({reason})");
+            println!(
+                "tray autostart: skipped ({})",
+                recovery::tray_skip_with_recovery(&reason)
+            );
         }
     }
     Ok(())
