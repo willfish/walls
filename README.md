@@ -170,7 +170,7 @@ flowchart TD
 
 - **Config** — `config.json`, `secrets.json`, locked `state.json` (history, queue, current).
 - **Cache** — downloaded Wallhaven images and composed outputs.
-- **Triggers** — `walls-tray` polls `change.interval_secs` and calls `advance_next`; tray menu runs manual `prev` / `next`, favorites the current wallpaper, toggles pause, and opens TUI. TUI runs the scheduler only when the tray did not start.
+- **Triggers** — `walls-tray` polls `change.interval_secs` and calls `advance_next`; tray menu runs manual `prev` / `next`, favorites the current wallpaper, toggles pause, and opens TUI. On StatusNotifier tray hosts, wheel down/up over the tray icon runs the same manual next/previous actions. TUI runs the scheduler only when the tray did not start.
 
 ### TUI (`walls tui`)
 
@@ -231,7 +231,7 @@ you already have a symptom.
 | `walls next [--manual] [--refresh <level>] [--verbose] [--json]` / `walls prev [--json]` | Works (auto `next` respects pause/rotation-off; `--manual` for explicit changes; `--verbose` prints provider attempts/skips/retries/fallbacks; refresh levels: `all`, `filters-and-texts`, `texts`, `clock-only`) |
 | `walls tui` | Works — tabs: Config/Now/History/Browse/Search/Logs; `?` key help; `/` or `i` search; `:` commands; `f` favorite; `d` requests trash confirmation |
 | `walls tui` with `--features tui-preview` | Optional Now-tab image preview in terminals supporting Kitty graphics (Ghostty/Kitty) or iTerm2 inline images; metadata-only fallback otherwise; set `WALLS_TUI_PREVIEW=0` to force metadata-only |
-| `walls-tray` | Works (prev/next/favorite/pause, Open TUI, brand tray icon from `assets/icons/walls-tray.svg`) |
+| `walls-tray` | Works (prev/next/favorite/pause, Open TUI, brand tray icon from `assets/icons/walls-tray.svg`; StatusNotifier wheel down/up runs next/previous) |
 
 **Terminal for tray “Open TUI”** (precedence order):
 
@@ -243,6 +243,8 @@ you already have a symptom.
 The **desktop launcher** (`walls.desktop`, installed on Linux via Nix) runs `xdg-terminal-exec --app-id=walls … tui`, so your configured default terminal opens the TUI with a stable app id — same mechanism as tray “Open TUI” when `xdg-terminal-exec` is on `PATH`.
 
 Tray/desktop icon SVGs live under `assets/icons/` (`walls-tray.svg` for launchers and the active tray icon, `walls-tray-paused.svg` when rotation is inactive). Rebuild `walls-tray` after editing. Set `WALLS_TRAY_WALLPAPER_THUMBNAIL=1` to restore the old live-wallpaper thumbnail icon (paused still uses the paused brand icon).
+
+Tray scroll support is backend-specific: StatusNotifier exposes wheel events, so vertical scroll over the icon maps to next/previous wallpaper. The legacy AppIndicator backend used through `tray-icon` on Linux does not expose tray icon wheel events, so its behaviour remains menu-only.
 
 ## Automatic rotation
 
