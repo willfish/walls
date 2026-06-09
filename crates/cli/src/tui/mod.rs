@@ -1920,7 +1920,7 @@ mod tests {
     use ratatui::layout::Rect;
     use ratatui::prelude::{Color, Style};
     use ratatui::Terminal;
-    use walls_core::config::TuiKeyProfile;
+    use walls_core::config::{ApplyBackendSetting, CosmicMethod, TuiKeyProfile};
     use walls_core::state::CurrentWall;
     use walls_core::WallsCtx;
 
@@ -1928,7 +1928,7 @@ mod tests {
 
     use super::{
         action_for_key,
-        app::{App, EditFieldKind, SearchHit, DISPLAY_MODE_CHOICES},
+        app::{App, EditFieldKind, SearchHit, APPLY_BACKEND_CHOICES, DISPLAY_MODE_CHOICES},
         apply_effect,
         chrome_view::{footer_keys, footer_paragraph},
         draw_inner, handle_key,
@@ -2403,6 +2403,16 @@ mod tests {
             editing.target,
             EditTarget::Block(CONFIG_BLOCK_APPLY_DISPLAY)
         ));
+        assert_eq!(editing.field_buffer, "auto");
+        assert_eq!(
+            app.current_edit_field_kind(),
+            EditFieldKind::Choice(APPLY_BACKEND_CHOICES)
+        );
+
+        for _ in 0..5 {
+            update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to display field");
+        }
+        let editing = app.editing.as_ref().expect("editing");
         assert_eq!(editing.field_buffer, "os");
         assert_eq!(
             app.current_edit_field_kind(),
@@ -2476,6 +2486,108 @@ mod tests {
         assert!(text.contains("\"target_width\": 1920"), "{text}");
         assert!(text.contains("\"target_height\": 1080"), "{text}");
         assert!(text.contains("\"command\": \"gm convert\""), "{text}");
+    }
+
+    #[test]
+    fn config_apply_display_block_edits_apply_settings() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let script = tmp.path().join("set-wallpaper");
+        fs::write(&script, "#!/bin/sh\nexit 0\n").expect("script");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&script).expect("metadata").permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&script, perms).expect("chmod");
+        }
+
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "internet_enabled": false },
+                "paths": {
+                    "cache_dir": "/tmp/walls-cache",
+                    "download_dir": "/tmp/walls-downloaded",
+                    "favorites_dir": "/tmp/walls-favorites",
+                    "fetched_dir": "/tmp/walls-fetched",
+                    "compose_dir": "/tmp/walls-compose"
+                },
+                "apply": {
+                    "backend": "auto",
+                    "cosmic": {
+                        "method": "cosmic-config",
+                        "config_path": "~/.config/cosmic/com.system76.CosmicBackground/v1/all",
+                        "use_original_path": false
+                    }
+                },
+                "display": { "mode": "os" },
+                "sources": []
+            }),
+            serde_json::json!({}),
+        );
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        app.tab = Tab::Config;
+        app.config_cursor = CONFIG_BLOCK_APPLY_DISPLAY;
+
+        app.start_edit_for_current();
+        let editing = app.editing.as_ref().expect("editing");
+        assert_eq!(editing.field_buffer, "auto");
+        assert_eq!(
+            app.current_edit_field_kind(),
+            EditFieldKind::Choice(APPLY_BACKEND_CHOICES)
+        );
+
+        app.editing.as_mut().expect("editing").field_buffer = "custom-script".into();
+        update(&mut app, UiAction::EditFieldCommit, rt.handle())
+            .expect("reject missing custom script");
+        assert_eq!(app.ctx.config.apply.backend, ApplyBackendSetting::Auto);
+        assert!(
+            app.message.contains("apply.custom_script: is required"),
+            "{}",
+            app.message
+        );
+
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to custom script");
+        app.editing.as_mut().expect("editing").field_buffer = script.display().to_string();
+        update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save custom script");
+        assert_eq!(
+            app.ctx.config.apply.backend,
+            ApplyBackendSetting::CustomScript
+        );
+        assert_eq!(
+            app.ctx.config.apply.custom_script.as_deref(),
+            Some(script.to_str().expect("script path"))
+        );
+
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to cosmic method");
+        app.editing.as_mut().expect("editing").field_buffer = "cosmic-ext-bg-ctl".into();
+        update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save cosmic method");
+        assert_eq!(
+            app.ctx.config.apply.cosmic.method,
+            CosmicMethod::CosmicExtBgCtl
+        );
+
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to cosmic path");
+        app.editing.as_mut().expect("editing").field_buffer = "/tmp/cosmic-all".into();
+        update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save cosmic path");
+        assert_eq!(app.ctx.config.apply.cosmic.config_path, "/tmp/cosmic-all");
+
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to original toggle");
+        update(
+            &mut app,
+            UiAction::EditFieldCycle { forward: true },
+            rt.handle(),
+        )
+        .expect("toggle original");
+        assert!(app.ctx.config.apply.cosmic.use_original_path);
+
+        let text = std::fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
+        assert!(text.contains("\"backend\": \"custom-script\""), "{text}");
+        assert!(text.contains("\"method\": \"cosmic-ext-bg-ctl\""), "{text}");
+        assert!(
+            text.contains("\"config_path\": \"/tmp/cosmic-all\""),
+            "{text}"
+        );
+        assert!(text.contains("\"use_original_path\": true"), "{text}");
     }
 
     #[test]

@@ -10,8 +10,9 @@ use config_summary::{is_local_source, summarize_config_warnings, summarize_local
 use walls_core::config::{
     default_wallhaven_source, normalize_source_entry, persist_config, reddit_sort_needs_time,
     reddit_sort_value, reddit_time_value, source_editable_fields as core_source_editable_fields,
-    source_wallhaven_prefer, source_wallhaven_search, Config, SelectionStrategy, SourceEntry,
-    TuiKeyProfile, WallhavenPrefer, WallhavenSearch, REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
+    source_wallhaven_prefer, source_wallhaven_search, ApplyBackendSetting, Config, CosmicMethod,
+    SelectionStrategy, SourceEntry, TuiKeyProfile, WallhavenPrefer, WallhavenSearch,
+    REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
 };
 use walls_core::validate::{
     validate_config_diagnostics, validate_source_edit, validate_wallhaven_edit,
@@ -163,6 +164,20 @@ pub(crate) const SEARCH_FILTER_FIELDS: &[&str] = &[
 
 pub(crate) const TUI_BLOCK_FIELDS: &[&str] = &["key_profile"];
 pub(crate) const TUI_KEY_PROFILE_CHOICES: &[&str] = &["emacs", "vim"];
+pub(crate) const APPLY_BACKEND_CHOICES: &[&str] = &[
+    "auto",
+    "cosmic",
+    "cosmic-ext-bg-ctl",
+    "gnome",
+    "kde",
+    "xfce",
+    "sway",
+    "wlroots",
+    "hyprland",
+    "feh",
+    "custom-script",
+];
+pub(crate) const COSMIC_METHOD_CHOICES: &[&str] = &["cosmic-config", "cosmic-ext-bg-ctl"];
 pub(crate) const DISPLAY_MODE_CHOICES: &[&str] = &[
     "os",
     "zoom",
@@ -181,6 +196,11 @@ pub(crate) const LIBRARY_BLOCK_FIELDS: &[&str] = &[
     "refetch_when_cache_below",
 ];
 pub(crate) const APPLY_DISPLAY_BLOCK_FIELDS: &[&str] = &[
+    "apply_backend",
+    "custom_script",
+    "cosmic_method",
+    "cosmic_config_path",
+    "cosmic_use_original_path",
     "display_mode",
     "auto_rotate",
     "imagemagick_command",
@@ -336,6 +356,11 @@ pub(crate) fn block_field_label(block: usize, key: &str) -> String {
             other => other.into(),
         },
         CONFIG_BLOCK_APPLY_DISPLAY => match key {
+            "apply_backend" => "Apply backend".into(),
+            "custom_script" => "Custom script".into(),
+            "cosmic_method" => "COSMIC method".into(),
+            "cosmic_config_path" => "COSMIC config path".into(),
+            "cosmic_use_original_path" => "COSMIC use original".into(),
             "display_mode" => "Display mode".into(),
             "auto_rotate" => "EXIF auto-rotate".into(),
             "imagemagick_command" => "ImageMagick command".into(),
@@ -392,8 +417,10 @@ pub(crate) fn block_field_kind(block: usize, key: &str) -> EditFieldKind {
             _ => EditFieldKind::Text,
         },
         CONFIG_BLOCK_APPLY_DISPLAY => match key {
+            "apply_backend" => EditFieldKind::Choice(APPLY_BACKEND_CHOICES),
+            "cosmic_method" => EditFieldKind::Choice(COSMIC_METHOD_CHOICES),
+            "cosmic_use_original_path" | "auto_rotate" | "filters_enabled" => EditFieldKind::Bool,
             "display_mode" => EditFieldKind::Choice(DISPLAY_MODE_CHOICES),
-            "auto_rotate" | "filters_enabled" => EditFieldKind::Bool,
             _ => EditFieldKind::Text,
         },
         WALLHAVEN_FIELDS_BLOCK => match key {
@@ -615,6 +642,11 @@ fn block_field_value_at(
             _ => String::new(),
         },
         CONFIG_BLOCK_APPLY_DISPLAY => match *key {
+            "apply_backend" => apply_backend_label(config.apply.backend).into(),
+            "custom_script" => config.apply.custom_script.clone().unwrap_or_default(),
+            "cosmic_method" => cosmic_method_label(config.apply.cosmic.method).into(),
+            "cosmic_config_path" => config.apply.cosmic.config_path.clone(),
+            "cosmic_use_original_path" => config.apply.cosmic.use_original_path.to_string(),
             "display_mode" => config.display.mode.clone(),
             "auto_rotate" => config.display.auto_rotate.to_string(),
             "imagemagick_command" => config.display.imagemagick_command.clone(),
@@ -747,6 +779,26 @@ fn library_block_draft(config: &Config) -> std::collections::HashMap<String, Str
 
 fn display_block_draft(config: &Config) -> std::collections::HashMap<String, String> {
     let mut vals = std::collections::HashMap::new();
+    vals.insert(
+        "apply_backend".into(),
+        apply_backend_label(config.apply.backend).into(),
+    );
+    vals.insert(
+        "custom_script".into(),
+        config.apply.custom_script.clone().unwrap_or_default(),
+    );
+    vals.insert(
+        "cosmic_method".into(),
+        cosmic_method_label(config.apply.cosmic.method).into(),
+    );
+    vals.insert(
+        "cosmic_config_path".into(),
+        config.apply.cosmic.config_path.clone(),
+    );
+    vals.insert(
+        "cosmic_use_original_path".into(),
+        config.apply.cosmic.use_original_path.to_string(),
+    );
     vals.insert("display_mode".into(), config.display.mode.clone());
     vals.insert("auto_rotate".into(), config.display.auto_rotate.to_string());
     vals.insert(
@@ -822,6 +874,54 @@ fn parse_tui_key_profile(value: &str) -> Option<TuiKeyProfile> {
     }
 }
 
+fn apply_backend_label(backend: ApplyBackendSetting) -> &'static str {
+    match backend {
+        ApplyBackendSetting::Auto => "auto",
+        ApplyBackendSetting::Cosmic => "cosmic",
+        ApplyBackendSetting::CosmicExtBgCtl => "cosmic-ext-bg-ctl",
+        ApplyBackendSetting::Gnome => "gnome",
+        ApplyBackendSetting::Kde => "kde",
+        ApplyBackendSetting::Xfce => "xfce",
+        ApplyBackendSetting::Sway => "sway",
+        ApplyBackendSetting::Wlroots => "wlroots",
+        ApplyBackendSetting::Hyprland => "hyprland",
+        ApplyBackendSetting::Feh => "feh",
+        ApplyBackendSetting::CustomScript => "custom-script",
+    }
+}
+
+fn parse_apply_backend(value: &str) -> Option<ApplyBackendSetting> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Some(ApplyBackendSetting::Auto),
+        "cosmic" => Some(ApplyBackendSetting::Cosmic),
+        "cosmic-ext-bg-ctl" => Some(ApplyBackendSetting::CosmicExtBgCtl),
+        "gnome" => Some(ApplyBackendSetting::Gnome),
+        "kde" => Some(ApplyBackendSetting::Kde),
+        "xfce" => Some(ApplyBackendSetting::Xfce),
+        "sway" => Some(ApplyBackendSetting::Sway),
+        "wlroots" => Some(ApplyBackendSetting::Wlroots),
+        "hyprland" => Some(ApplyBackendSetting::Hyprland),
+        "feh" => Some(ApplyBackendSetting::Feh),
+        "custom-script" => Some(ApplyBackendSetting::CustomScript),
+        _ => None,
+    }
+}
+
+fn cosmic_method_label(method: CosmicMethod) -> &'static str {
+    match method {
+        CosmicMethod::CosmicConfig => "cosmic-config",
+        CosmicMethod::CosmicExtBgCtl => "cosmic-ext-bg-ctl",
+    }
+}
+
+fn parse_cosmic_method(value: &str) -> Option<CosmicMethod> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "cosmic-config" => Some(CosmicMethod::CosmicConfig),
+        "cosmic-ext-bg-ctl" => Some(CosmicMethod::CosmicExtBgCtl),
+        _ => None,
+    }
+}
+
 fn apply_tui_block_draft(config: &mut Config, draft: &std::collections::HashMap<String, String>) {
     if let Some(profile) = draft
         .get("key_profile")
@@ -867,6 +967,33 @@ fn apply_display_block_draft(
     config: &mut Config,
     draft: &std::collections::HashMap<String, String>,
 ) {
+    if let Some(backend) = draft
+        .get("apply_backend")
+        .and_then(|v| parse_apply_backend(v))
+    {
+        config.apply.backend = backend;
+    }
+    if let Some(v) = draft.get("custom_script") {
+        let trimmed = v.trim();
+        config.apply.custom_script = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        };
+    }
+    if let Some(method) = draft
+        .get("cosmic_method")
+        .and_then(|v| parse_cosmic_method(v))
+    {
+        config.apply.cosmic.method = method;
+    }
+    if let Some(v) = draft.get("cosmic_config_path") {
+        config.apply.cosmic.config_path = v.trim().to_string();
+    }
+    if let Some(v) = draft.get("cosmic_use_original_path") {
+        config.apply.cosmic.use_original_path =
+            App::parse_bool_like(v).unwrap_or(config.apply.cosmic.use_original_path);
+    }
     if let Some(v) = draft.get("display_mode") {
         let trimmed = v.trim();
         if !trimmed.is_empty() {
@@ -2350,14 +2477,18 @@ impl App {
                     .collect()
             }
             EditTarget::Block(CONFIG_BLOCK_APPLY_DISPLAY) => {
+                let mut issues: Vec<String> = validate_config_diagnostics(config, secrets, paths)
+                    .into_iter()
+                    .filter(|diagnostic| diagnostic.path.starts_with("apply."))
+                    .map(|diagnostic| diagnostic.to_string())
+                    .collect();
                 if config.display.target_width.is_some() ^ config.display.target_height.is_some() {
-                    vec![
+                    issues.push(
                         "display target: set both target_width and target_height, or clear both"
                             .into(),
-                    ]
-                } else {
-                    Vec::new()
+                    );
                 }
+                issues
             }
             EditTarget::Block(_) => Vec::new(),
         }
