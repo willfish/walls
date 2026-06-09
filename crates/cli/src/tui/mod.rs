@@ -24,7 +24,7 @@ use startup::{draw_startup_intro, StartupIntro};
 use walls_core::apply::{
     backend_setting_label, summarize_apply_environment, ApplyEnvironmentSummary,
 };
-use walls_core::config::{ApplyBackendSetting, CosmicMethod};
+use walls_core::config::{ApplyBackendSetting, CosmicMethod, TuiKeyProfile};
 use walls_core::WallsCtx;
 
 use std::io;
@@ -191,6 +191,9 @@ enum UiAction {
     SubmitCommand,
     CommandBackspace,
     CommandChar(char),
+    CommandComplete {
+        forward: bool,
+    },
     SubmitSearch,
     SearchBackspace,
     SearchChar(char),
@@ -230,6 +233,7 @@ enum UiAction {
     MoveUp,
     MoveFirst,
     MoveLast,
+    VimPrefixG,
     PageDown,
     PageUp,
     Enter,
@@ -304,6 +308,12 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
                 KeyCode::Esc => UiAction::CancelInput,
                 KeyCode::Enter => UiAction::SubmitCommand,
                 KeyCode::Backspace => UiAction::CommandBackspace,
+                KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    UiAction::CommandComplete { forward: true }
+                }
+                KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    UiAction::CommandComplete { forward: false }
+                }
                 KeyCode::Char(c) => UiAction::CommandChar(c),
                 _ => UiAction::Ignore,
             };
@@ -338,6 +348,19 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
             KeyCode::Char(c) => UiAction::EditFieldChar(c),
             _ => UiAction::Ignore,
         };
+    }
+
+    if app.ctx.config.tui.key_profile == TuiKeyProfile::Vim {
+        if app.vim_pending_g && key.code == KeyCode::Char('g') {
+            return UiAction::MoveFirst;
+        }
+        match key.code {
+            KeyCode::Char('h') => return UiAction::SwitchTabPrev,
+            KeyCode::Char('l') => return UiAction::SwitchTabNext,
+            KeyCode::Char('g') => return UiAction::VimPrefixG,
+            KeyCode::Char('G') => return UiAction::MoveLast,
+            _ => {}
+        }
     }
 
     match key.code {
@@ -386,6 +409,9 @@ fn update(
     action: UiAction,
     rt: &tokio::runtime::Handle,
 ) -> anyhow::Result<UpdateEffect> {
+    if !matches!(action, UiAction::VimPrefixG) {
+        app.vim_pending_g = false;
+    }
     match action {
         UiAction::Quit => return Ok(UpdateEffect::Quit),
         UiAction::EnterCommandMode => {
@@ -409,6 +435,7 @@ fn update(
             app.cmd_line.pop();
         }
         UiAction::CommandChar(c) => app.cmd_line.push(c),
+        UiAction::CommandComplete { forward } => app.complete_command(forward),
         UiAction::SubmitSearch => {
             app.input_mode = InputMode::Normal;
             match tokio::task::block_in_place(|| rt.block_on(app.run_search())) {
@@ -650,6 +677,9 @@ fn update(
         UiAction::MoveUp => app.move_up(),
         UiAction::MoveFirst => app.move_first(),
         UiAction::MoveLast => app.move_last(),
+        UiAction::VimPrefixG => {
+            app.vim_pending_g = true;
+        }
         UiAction::PageDown => app.page_down(),
         UiAction::PageUp => app.page_up(),
         UiAction::Enter => return handle_enter(app, rt),
@@ -913,13 +943,14 @@ fn key_help_lines(app: &App, width: u16) -> Vec<String> {
         "  ? help   q quit   n/p next/prev   Space pause".into(),
         "  f favorite current   d request trash current   Shift+X nuke downloads".into(),
         "Tabs and lists".into(),
-        "  1-6 jump tabs   ←/→ switch tabs   j/k or ↑/↓ move".into(),
+        "  Emacs: 1-6 or ←/→ tabs   j/k or ↑/↓ move".into(),
+        "  Vim: 1-6 or h/l tabs   j/k move   gg/G first/last".into(),
         "  Home/End first/last   PageUp/PageDown jump   Enter apply/open".into(),
         "Search".into(),
         "  / opens Search input from normal mode; i edits from Search tab".into(),
         "  Search input: type, Backspace, Enter search, Esc cancel".into(),
         "Command mode".into(),
-        "  : opens commands; Enter runs; Esc cancels".into(),
+        "  : opens commands; Ctrl+n/Ctrl+p completes; Enter runs; Esc cancels".into(),
         "  :next :prev :pause :favorite :status :quit".into(),
         "Config".into(),
         "  Sources: e edits first active; Enter picks a source; Esc leaves subnav".into(),
@@ -1072,6 +1103,21 @@ fn config_list_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
                 display_target_summary(app)
             ),
             details: apply_display_detail_items(app, theme),
+            theme,
+        },
+    );
+    push_config_block_items(
+        &mut items,
+        ConfigBlock {
+            index: 4,
+            cursor: app.config_cursor,
+            title: "TUI",
+            enabled: true,
+            summary: format!(
+                "{} keys",
+                tui_key_profile_label(app.ctx.config.tui.key_profile)
+            ),
+            details: tui_detail_items(app, theme),
             theme,
         },
     );
@@ -1353,6 +1399,18 @@ fn config_lines(app: &App) -> Vec<String> {
         ),
         apply_display_details(app),
     );
+    push_config_block(
+        &mut lines,
+        4,
+        app.config_cursor,
+        "TUI",
+        true,
+        format!(
+            "{} keys",
+            tui_key_profile_label(app.ctx.config.tui.key_profile)
+        ),
+        tui_details(app),
+    );
     lines
 }
 
@@ -1596,6 +1654,63 @@ fn library_detail_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>
     items
 }
 
+fn tui_key_profile_label(profile: TuiKeyProfile) -> &'static str {
+    match profile {
+        TuiKeyProfile::Emacs => "emacs",
+        TuiKeyProfile::Vim => "vim",
+    }
+}
+
+fn tui_details(app: &App) -> Vec<String> {
+    match app.ctx.config.tui.key_profile {
+        TuiKeyProfile::Emacs => vec![
+            "key profile: emacs".into(),
+            "tabs: ←/→ or 1-6".into(),
+            "rows: j/k, arrows, Pg, Home/End".into(),
+            "commands: : then Ctrl+n/Ctrl+p completes".into(),
+        ],
+        TuiKeyProfile::Vim => vec![
+            "key profile: vim".into(),
+            "tabs: h/l or 1-6".into(),
+            "rows: j/k, Pg, gg/G".into(),
+            "commands: : then Ctrl+n/Ctrl+p completes".into(),
+        ],
+    }
+}
+
+fn tui_detail_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
+    let mut items = vec![
+        section_detail_item("configured", theme),
+        key_value_detail_item(
+            "key profile",
+            tui_key_profile_label(app.ctx.config.tui.key_profile),
+            theme,
+        ),
+        spacer_detail_item(),
+        section_detail_item("navigation", theme),
+    ];
+    match app.ctx.config.tui.key_profile {
+        TuiKeyProfile::Emacs => {
+            items.push(key_value_detail_item("tabs", "←/→ or 1-6", theme));
+            items.push(key_value_detail_item(
+                "rows",
+                "j/k, arrows, Pg, Home/End",
+                theme,
+            ));
+        }
+        TuiKeyProfile::Vim => {
+            items.push(key_value_detail_item("tabs", "h/l or 1-6", theme));
+            items.push(key_value_detail_item("rows", "j/k, Pg, gg/G", theme));
+        }
+    }
+    items.push(key_value_detail_item(
+        "commands",
+        ": then Ctrl+n/Ctrl+p completes",
+        theme,
+    ));
+    items
+}
+
 fn apply_environment_summary(app: &App) -> ApplyEnvironmentSummary {
     summarize_apply_environment(&app.ctx.config.apply)
 }
@@ -1793,6 +1908,7 @@ fn edit_target_title(app: &App) -> String {
     if let Some(sess) = &app.editing {
         match &sess.target {
             EditTarget::Block(0) => "Edit Rotation".to_string(),
+            EditTarget::Block(4) => "Edit TUI".to_string(),
             EditTarget::Wallhaven => "Edit Wallhaven".to_string(),
             EditTarget::Block(b) => format!("Edit block {}", b),
             EditTarget::Source(i) => {
@@ -1881,6 +1997,7 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
         } else if let EditTarget::Block(block) = &sess.target {
             let keys = match block {
                 0 => app::ROTATION_BLOCK_FIELDS,
+                4 => app::TUI_BLOCK_FIELDS,
                 _ => &[],
             };
             for k in keys {
@@ -2091,10 +2208,11 @@ mod tests {
     use std::{fs, sync::Mutex};
 
     use ratatui::backend::TestBackend;
-    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::layout::Rect;
     use ratatui::prelude::{Color, Style};
     use ratatui::Terminal;
+    use walls_core::config::TuiKeyProfile;
     use walls_core::state::CurrentWall;
     use walls_core::WallsCtx;
 
@@ -2102,10 +2220,10 @@ mod tests {
 
     use super::{
         action_for_key,
-        app::{App, SearchHit},
+        app::{App, EditFieldKind, SearchHit},
         apply_effect, draw_inner, footer_paragraph, handle_key, line_style,
         startup::{draw_startup_intro, intro_disabled_value, StartupIntro},
-        style, update, InputMode, Tab, TerminalSize, UiAction, UpdateEffect,
+        style, update, EditTarget, InputMode, Tab, TerminalSize, UiAction, UpdateEffect,
     };
 
     fn test_app() -> App {
@@ -3679,6 +3797,121 @@ mod tests {
             action_for_key(&app, KeyEvent::from(KeyCode::Enter)),
             UiAction::SubmitSearch
         );
+    }
+
+    #[test]
+    fn command_mode_ctrl_n_and_ctrl_p_complete_commands() {
+        let mut app = test_app();
+        app.input_mode = InputMode::Command;
+
+        assert_eq!(
+            action_for_key(
+                &app,
+                KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL)
+            ),
+            UiAction::CommandComplete { forward: true }
+        );
+        update(
+            &mut app,
+            UiAction::CommandComplete { forward: true },
+            tokio::runtime::Runtime::new().expect("rt").handle(),
+        )
+        .expect("complete command");
+        assert_eq!(app.cmd_line, "next");
+
+        update(
+            &mut app,
+            UiAction::CommandComplete { forward: false },
+            tokio::runtime::Runtime::new().expect("rt").handle(),
+        )
+        .expect("complete previous command");
+        assert_eq!(app.cmd_line, "quit");
+
+        app.cmd_line = "p".into();
+        update(
+            &mut app,
+            UiAction::CommandComplete { forward: true },
+            tokio::runtime::Runtime::new().expect("rt").handle(),
+        )
+        .expect("complete prefix");
+        assert_eq!(app.cmd_line, "prev");
+    }
+
+    #[test]
+    fn vim_profile_adds_h_l_and_gg_navigation_without_affecting_inputs() {
+        let mut app = test_app();
+        app.ctx.config.tui.key_profile = TuiKeyProfile::Vim;
+        app.tab = Tab::Now;
+
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('h'))),
+            UiAction::SwitchTabPrev
+        );
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('l'))),
+            UiAction::SwitchTabNext
+        );
+
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('g'))),
+            UiAction::VimPrefixG
+        );
+        app.vim_pending_g = true;
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('g'))),
+            UiAction::MoveFirst
+        );
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('G'))),
+            UiAction::MoveLast
+        );
+
+        app.input_mode = InputMode::Command;
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('h'))),
+            UiAction::CommandChar('h')
+        );
+
+        app.input_mode = InputMode::SearchInput;
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('l'))),
+            UiAction::SearchChar('l')
+        );
+
+        app.input_mode = InputMode::Normal;
+        app.tab = Tab::Config;
+        app.start_edit_for_current();
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('g'))),
+            UiAction::EditFieldChar('g')
+        );
+    }
+
+    #[test]
+    fn config_tui_block_edits_key_profile() {
+        let mut app = test_app();
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        app.tab = Tab::Config;
+        app.config_cursor = 4;
+
+        app.start_edit_for_current();
+        let editing = app.editing.as_ref().expect("editing");
+        assert!(matches!(editing.target, EditTarget::Block(4)));
+        assert_eq!(editing.field_buffer, "emacs");
+        assert_eq!(
+            app.current_edit_field_kind(),
+            EditFieldKind::Choice(&["emacs", "vim"])
+        );
+
+        update(
+            &mut app,
+            UiAction::EditFieldCycle { forward: true },
+            rt.handle(),
+        )
+        .expect("cycle key profile");
+
+        assert_eq!(app.ctx.config.tui.key_profile, TuiKeyProfile::Vim);
+        assert!(app.message.contains("config saved"), "{}", app.message);
     }
 
     #[test]

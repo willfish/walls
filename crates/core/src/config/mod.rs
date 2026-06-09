@@ -68,7 +68,8 @@ pub struct TuiConfig {
 #[serde(rename_all = "snake_case")]
 pub enum TuiKeyProfile {
     #[default]
-    Default,
+    #[serde(alias = "default")]
+    Emacs,
     Vim,
 }
 
@@ -380,7 +381,7 @@ mod tests {
     #[test]
     fn tui_key_profile_defaults_and_round_trips() {
         let mut config = test_config();
-        assert_eq!(config.tui.key_profile, TuiKeyProfile::Default);
+        assert_eq!(config.tui.key_profile, TuiKeyProfile::Emacs);
         config.tui.key_profile = TuiKeyProfile::Vim;
 
         let value = serde_json::to_value(&config).expect("serialize config");
@@ -388,6 +389,21 @@ mod tests {
 
         let loaded: Config = serde_json::from_value(value).expect("deserialize config");
         assert_eq!(loaded.tui.key_profile, TuiKeyProfile::Vim);
+
+        let legacy: Config = serde_json::from_str(
+            r#"{
+                "paths": {
+                    "cache_dir": "/tmp/cache",
+                    "download_dir": "/tmp/downloads",
+                    "favorites_dir": "/tmp/favorites",
+                    "fetched_dir": "/tmp/fetched",
+                    "compose_dir": "/tmp/compose"
+                },
+                "tui": { "key_profile": "default" }
+            }"#,
+        )
+        .expect("deserialize legacy default key profile");
+        assert_eq!(legacy.tui.key_profile, TuiKeyProfile::Emacs);
     }
 
     #[test]

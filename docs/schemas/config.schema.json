@@ -159,7 +159,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "key_profile": { "type": "string", "enum": ["default", "vim"] }
+        "key_profile": { "type": "string", "enum": ["emacs", "vim"] }
       }
     },
     "source": {

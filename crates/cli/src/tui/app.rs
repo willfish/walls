@@ -4,7 +4,8 @@ use walls_core::apply::ApplyTrigger;
 use walls_core::config::{
     normalize_source_entry, persist_config, reddit_sort_needs_time, reddit_sort_value,
     reddit_time_value, source_editable_fields as core_source_editable_fields, Config,
-    SelectionStrategy, SourceEntry, WallhavenPrefer, REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
+    SelectionStrategy, SourceEntry, TuiKeyProfile, WallhavenPrefer, REDDIT_SORT_CHOICES,
+    REDDIT_TIME_CHOICES,
 };
 use walls_core::expand_home;
 use walls_core::sources::list_images_with_paths;
@@ -131,6 +132,10 @@ pub(crate) const WALLHAVEN_BLOCK_FIELDS: &[&str] = &[
     "order",
     "atleast",
 ];
+
+pub(crate) const TUI_BLOCK_FIELDS: &[&str] = &["key_profile"];
+pub(crate) const TUI_KEY_PROFILE_CHOICES: &[&str] = &["emacs", "vim"];
+const COMMAND_COMPLETIONS: &[&str] = &["next", "prev", "pause", "favorite", "status", "quit"];
 
 fn wallhaven_bit_at(s: &str, idx: usize, default: bool) -> bool {
     s.chars().nth(idx).map(|c| c == '1').unwrap_or(default)
@@ -307,6 +312,10 @@ pub(crate) fn block_field_label(block: usize, key: &str) -> String {
             "atleast" => "Minimum resolution".into(),
             other => other.into(),
         },
+        4 => match key {
+            "key_profile" => "Key profile".into(),
+            other => other.into(),
+        },
         _ => key.into(),
     }
 }
@@ -348,6 +357,10 @@ pub(crate) fn block_field_kind(block: usize, key: &str) -> EditFieldKind {
             ]),
             "order" => EditFieldKind::Choice(&["desc", "asc"]),
             "atleast" => EditFieldKind::Choice(walls_core::config::wallhaven_resolution_choices()),
+            _ => EditFieldKind::Text,
+        },
+        4 => match key {
+            "key_profile" => EditFieldKind::Choice(TUI_KEY_PROFILE_CHOICES),
             _ => EditFieldKind::Text,
         },
         _ => EditFieldKind::Text,
@@ -456,6 +469,7 @@ fn block_field_value_at(
     let keys = match block {
         0 => ROTATION_BLOCK_FIELDS,
         2 => WALLHAVEN_BLOCK_FIELDS,
+        4 => TUI_BLOCK_FIELDS,
         _ => return String::new(),
     };
     let Some(key) = keys.get(idx) else {
@@ -513,6 +527,10 @@ fn block_field_value_at(
             "atleast" => config.wallhaven.search.atleast.clone(),
             _ => String::new(),
         },
+        4 => match *key {
+            "key_profile" => tui_key_profile_label(config.tui.key_profile).into(),
+            _ => String::new(),
+        },
         _ => String::new(),
     }
 }
@@ -526,12 +544,46 @@ fn commit_block_field_buffer(
     let keys = match block {
         0 => ROTATION_BLOCK_FIELDS,
         2 => WALLHAVEN_BLOCK_FIELDS,
+        4 => TUI_BLOCK_FIELDS,
         _ => return,
     };
     let Some(key) = keys.get(field_idx) else {
         return;
     };
     draft.insert((*key).into(), buf.trim().to_string());
+}
+
+fn tui_block_draft(config: &Config) -> std::collections::HashMap<String, String> {
+    let mut vals = std::collections::HashMap::new();
+    vals.insert(
+        "key_profile".into(),
+        tui_key_profile_label(config.tui.key_profile).into(),
+    );
+    vals
+}
+
+fn tui_key_profile_label(profile: TuiKeyProfile) -> &'static str {
+    match profile {
+        TuiKeyProfile::Emacs => "emacs",
+        TuiKeyProfile::Vim => "vim",
+    }
+}
+
+fn parse_tui_key_profile(value: &str) -> Option<TuiKeyProfile> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "emacs" | "default" => Some(TuiKeyProfile::Emacs),
+        "vim" => Some(TuiKeyProfile::Vim),
+        _ => None,
+    }
+}
+
+fn apply_tui_block_draft(config: &mut Config, draft: &std::collections::HashMap<String, String>) {
+    if let Some(profile) = draft
+        .get("key_profile")
+        .and_then(|v| parse_tui_key_profile(v))
+    {
+        config.tui.key_profile = profile;
+    }
 }
 
 fn apply_rotation_block_draft(
@@ -718,6 +770,7 @@ pub struct App {
     pub pending_nuke_confirm: bool,
     pub pending_trash_confirm: bool,
     pub show_key_help: bool,
+    pub vim_pending_g: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -776,6 +829,7 @@ impl App {
             pending_nuke_confirm: false,
             pending_trash_confirm: false,
             show_key_help: false,
+            vim_pending_g: false,
         };
         app.refresh_local_candidates()?;
         Ok(app)
@@ -987,7 +1041,7 @@ impl App {
     }
 
     pub fn config_block_count() -> usize {
-        4
+        5
     }
 
     fn active_cursor_mut(&mut self) -> &mut usize {
@@ -1447,6 +1501,14 @@ impl App {
                 field_buffer: String::new(),
                 validation_errors: vec![],
             }),
+            EditTarget::Block(4) => Some(EditSession {
+                target: target.clone(),
+                draft_source: None,
+                draft_block_values: tui_block_draft(&self.ctx.config),
+                field_cursor: 0,
+                field_buffer: String::new(),
+                validation_errors: vec![],
+            }),
             EditTarget::Wallhaven => Some(EditSession {
                 target: target.clone(),
                 draft_source: None,
@@ -1486,6 +1548,7 @@ impl App {
                 Self::source_editable_fields(src).len()
             }
             EditTarget::Block(0) => ROTATION_BLOCK_FIELDS.len(),
+            EditTarget::Block(4) => TUI_BLOCK_FIELDS.len(),
             EditTarget::Block(_) => 0,
             EditTarget::Wallhaven => WALLHAVEN_BLOCK_FIELDS.len(),
             _ => 0,
@@ -1512,6 +1575,7 @@ impl App {
             EditTarget::Block(block) => {
                 let keys = match block {
                     0 => ROTATION_BLOCK_FIELDS,
+                    4 => TUI_BLOCK_FIELDS,
                     _ => &[] as &[&str],
                 };
                 if let Some(key) = keys.get(sess.field_cursor) {
@@ -1853,6 +1917,9 @@ impl App {
                 EditTarget::Block(0) => {
                     apply_rotation_block_draft(&mut temp, &sess.draft_block_values);
                 }
+                EditTarget::Block(4) => {
+                    apply_tui_block_draft(&mut temp, &sess.draft_block_values);
+                }
                 EditTarget::Wallhaven => {
                     apply_wallhaven_block_draft(
                         &mut temp,
@@ -1969,6 +2036,10 @@ impl App {
                 apply_rotation_block_draft(&mut config, &sess.draft_block_values);
                 success_msg = "config saved: rotation".into();
             }
+            EditTarget::Block(4) => {
+                apply_tui_block_draft(&mut config, &sess.draft_block_values);
+                success_msg = "config saved: tui preferences".into();
+            }
             EditTarget::Wallhaven => {
                 apply_wallhaven_block_draft(
                     &mut config,
@@ -2003,6 +2074,27 @@ impl App {
             self.editing = None;
         }
         Ok(())
+    }
+
+    pub(crate) fn complete_command(&mut self, forward: bool) {
+        let prefix = self.cmd_line.trim();
+        let exact_command = COMMAND_COMPLETIONS.contains(&prefix);
+        let candidates: Vec<&str> = COMMAND_COMPLETIONS
+            .iter()
+            .copied()
+            .filter(|command| exact_command || prefix.is_empty() || command.starts_with(prefix))
+            .collect();
+        if candidates.is_empty() {
+            return;
+        }
+        let next = match candidates.iter().position(|command| *command == prefix) {
+            Some(index) if forward => candidates[(index + 1) % candidates.len()],
+            Some(index) => candidates[(index + candidates.len() - 1) % candidates.len()],
+            None if forward => candidates[0],
+            None => candidates[candidates.len() - 1],
+        };
+        self.cmd_line.clear();
+        self.cmd_line.push_str(next);
     }
 
     pub fn run_command(
@@ -2086,7 +2178,9 @@ impl App {
             return "Shift+X confirm nuke downloads | Esc cancel".into();
         }
         let keys = match self.input_mode {
-            InputMode::Command => format!(":{}_ | Enter run Esc cancel", self.cmd_line),
+            InputMode::Command => {
+                format!(":{}_ | Ctrl+n/p complete | Enter run Esc cancel", self.cmd_line)
+            }
             InputMode::SearchInput => "Search: type query | Enter search Esc cancel".to_string(),
             InputMode::Normal => match self.tab {
                 Tab::Search => {
