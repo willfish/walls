@@ -31,6 +31,8 @@ pub use xfce::{
 use std::path::Path;
 use std::process::Command;
 
+use anyhow::Context;
+
 use crate::config::{ApplyBackendSetting, ApplyConfig, CosmicMethod};
 use crate::paths::expand_home;
 
@@ -81,10 +83,12 @@ impl Applier for CustomScriptApplier {
 pub fn build_applier(apply: &ApplyConfig) -> anyhow::Result<Box<dyn Applier>> {
     match resolve_backend(apply) {
         ApplyBackendSetting::CustomScript => {
-            let script = apply
-                .custom_script
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("apply.custom_script is not set"))?;
+            let script = apply.custom_script.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "apply.custom_script is not set; {}",
+                    apply_backend_recovery_hint(ApplyBackendSetting::CustomScript)
+                )
+            })?;
             Ok(Box::new(CustomScriptApplier::new(script)))
         }
         ApplyBackendSetting::Gnome => Ok(Box::new(GnomeApplier)),
@@ -140,11 +144,55 @@ pub fn apply_wallpaper(
     fill: FillMode,
     trigger: ApplyTrigger,
 ) -> anyhow::Result<()> {
+    let backend = resolve_backend(apply);
     let display = if apply.cosmic.use_original_path {
         original
     } else {
         composed
     };
     let applier = build_applier(apply)?;
-    applier.set_wallpaper(display, original, fill, trigger)
+    applier
+        .set_wallpaper(display, original, fill, trigger)
+        .with_context(|| {
+            format!(
+                "{} apply backend failed; {}",
+                backend_setting_label(backend),
+                apply_backend_recovery_hint(backend)
+            )
+        })
+}
+
+fn apply_backend_recovery_hint(backend: ApplyBackendSetting) -> &'static str {
+    match backend {
+        ApplyBackendSetting::CustomScript => {
+            "run `walls config validate`; set apply.custom_script to an existing executable script or choose another apply.backend"
+        }
+        ApplyBackendSetting::Cosmic => {
+            "run `walls doctor`; verify the COSMIC config path or set apply.backend to cosmic-ext-bg-ctl/auto"
+        }
+        ApplyBackendSetting::CosmicExtBgCtl => {
+            "install cosmic-ext-bg-ctl, verify it works in this graphical session, or set apply.backend to cosmic/auto"
+        }
+        ApplyBackendSetting::Gnome => {
+            "run `walls doctor`; verify gsettings works in this graphical session or set apply.backend explicitly"
+        }
+        ApplyBackendSetting::Kde => {
+            "run `walls doctor`; verify dbus-send can reach Plasma or set apply.backend explicitly"
+        }
+        ApplyBackendSetting::Xfce => {
+            "run `walls doctor`; verify xfconf-query can reach XFCE or set apply.backend explicitly"
+        }
+        ApplyBackendSetting::Sway => {
+            "run `walls doctor`; verify swaymsg and swaybg are installed and available in this Sway session"
+        }
+        ApplyBackendSetting::Wlroots => {
+            "run `walls doctor`; install swaybg or choose the compositor-specific apply.backend"
+        }
+        ApplyBackendSetting::Hyprland => {
+            "run `walls doctor`; verify hyprctl and swaybg are installed and available in this Hyprland session"
+        }
+        ApplyBackendSetting::Feh | ApplyBackendSetting::Auto => {
+            "install feh or nitrogen, or set apply.backend to the desktop-specific backend for this session"
+        }
+    }
 }

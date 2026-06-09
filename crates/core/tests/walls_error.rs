@@ -87,6 +87,12 @@ fn apply_file_records_backend_failures_in_event_journal() {
         .apply_file(&wall, ApplyTrigger::Manual)
         .expect_err("backend failure should fail apply");
     assert!(matches!(err, WallsError::ApplyFile { .. }));
+    let message = err.to_string();
+    assert!(
+        message.contains("custom-script apply backend failed"),
+        "{message}"
+    );
+    assert!(message.contains("walls config validate"), "{message}");
 
     let events = read_events(&ctx.paths.event_journal_file).unwrap();
     assert!(matches!(
@@ -101,6 +107,30 @@ fn apply_file_records_backend_failures_in_event_journal() {
     ));
     let raw = fs::read_to_string(&ctx.paths.event_journal_file).unwrap();
     assert!(!raw.contains("backend-token-secret"), "{raw}");
+}
+
+#[test]
+fn apply_file_reports_missing_custom_script_with_recovery_hint() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    fs::create_dir_all(&images).unwrap();
+    let wall = images.join("wall.jpg");
+    fs::write(&wall, b"x").unwrap();
+    let noop = common::write_noop_script(root.path());
+    common::write_minimal_config(root.path(), &images, &noop);
+
+    let mut ctx = WallsCtx::load_from(root.path()).unwrap();
+    ctx.config.apply.custom_script = None;
+    let err = ctx
+        .apply_file(&wall, ApplyTrigger::Manual)
+        .expect_err("missing custom script should fail apply");
+
+    let message = err.to_string();
+    assert!(
+        message.contains("apply.custom_script is not set"),
+        "{message}"
+    );
+    assert!(message.contains("existing executable script"), "{message}");
 }
 
 #[test]
