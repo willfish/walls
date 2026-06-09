@@ -9,7 +9,9 @@ use crate::autostart::{
     autostart_desktop_file_path, autostart_out_of_sync, tray_autostart_available,
     tray_autostart_enabled_for_desktop, AutostartSyncOpts,
 };
-use crate::config::{secrets_credential_present, source_secrets_key, SourceKind};
+use crate::config::{
+    secrets_credential_present, source_secrets_key, ApplyBackendSetting, SourceKind,
+};
 use crate::ctx::WallsCtx;
 use crate::sources::list_images_with_paths;
 use crate::tray::{decide_tray_action_from_env, TrayAction};
@@ -158,6 +160,15 @@ pub fn run_doctor(ctx: &WallsCtx, options: &DoctorOptions) -> DoctorReport {
 }
 
 fn check_config(ctx: &WallsCtx, checks: &mut Vec<DoctorCheck>) {
+    check_required_file(
+        checks,
+        DoctorSection::Config,
+        "config.config_dir",
+        &ctx.paths.config_dir,
+        "config directory",
+        "run `walls` once to create the config directory, or fix XDG_CONFIG_HOME",
+    );
+
     if ctx.paths.config_file.is_file() {
         checks.push(DoctorCheck::pass(
             DoctorSection::Config,
@@ -190,6 +201,15 @@ fn check_config(ctx: &WallsCtx, checks: &mut Vec<DoctorCheck>) {
             "create secrets.json when enabling providers that need credentials",
         ));
     }
+
+    check_parent_writable(
+        checks,
+        DoctorSection::Config,
+        "config.state_file",
+        &ctx.paths.state_file,
+        "state file",
+        "create the state directory and ensure the current user can write to it",
+    );
 
     let validation = validate_config_diagnostics(&ctx.config, &ctx.secrets, &ctx.paths);
     if validation.is_empty() {
@@ -258,6 +278,8 @@ fn check_desktop_apply(ctx: &WallsCtx, options: &DoctorOptions, checks: &mut Vec
         ));
     }
 
+    check_apply_backend_commands(ctx, summary.resolved_backend, checks);
+
     if summary.cosmic_config_exists == Some(false) {
         checks.push(DoctorCheck::fail(
             DoctorSection::DesktopApply,
@@ -268,6 +290,108 @@ fn check_desktop_apply(ctx: &WallsCtx, options: &DoctorOptions, checks: &mut Vec
             ),
             "correct apply.cosmic.config_path or switch apply.backend",
         ));
+    }
+}
+
+fn check_apply_backend_commands(
+    ctx: &WallsCtx,
+    backend: ApplyBackendSetting,
+    checks: &mut Vec<DoctorCheck>,
+) {
+    match backend {
+        ApplyBackendSetting::Auto => {
+            check_any_command_warn(
+                checks,
+                DoctorSection::DesktopApply,
+                "desktop.apply_command",
+                &["feh", "nitrogen"],
+                "feh/nitrogen fallback command is available",
+                "install feh or nitrogen, or set apply.backend for your desktop",
+            );
+        }
+        ApplyBackendSetting::CustomScript => {
+            let Some(script) = &ctx.config.apply.custom_script else {
+                return;
+            };
+            let script = crate::paths::expand_home(script);
+            if script.is_file() {
+                checks.push(DoctorCheck::pass(
+                    DoctorSection::DesktopApply,
+                    "desktop.apply_command",
+                    format!("custom apply script found at {}", script.display()),
+                ));
+            }
+        }
+        ApplyBackendSetting::Gnome => check_command(
+            checks,
+            DoctorSection::DesktopApply,
+            "desktop.apply_command",
+            "gsettings",
+            "gsettings is available for GNOME wallpaper apply",
+            "install gsettings, or choose a different apply.backend",
+        ),
+        ApplyBackendSetting::Kde => check_command(
+            checks,
+            DoctorSection::DesktopApply,
+            "desktop.apply_command",
+            "dbus-send",
+            "dbus-send is available for KDE wallpaper apply",
+            "install dbus-send, or choose a different apply.backend",
+        ),
+        ApplyBackendSetting::Xfce => check_command(
+            checks,
+            DoctorSection::DesktopApply,
+            "desktop.apply_command",
+            "xfconf-query",
+            "xfconf-query is available for XFCE wallpaper apply",
+            "install xfconf-query, or choose a different apply.backend",
+        ),
+        ApplyBackendSetting::Sway => check_command(
+            checks,
+            DoctorSection::DesktopApply,
+            "desktop.apply_command",
+            "swaymsg",
+            "swaymsg is available for Sway wallpaper apply",
+            "install swaymsg, or choose a different apply.backend",
+        ),
+        ApplyBackendSetting::Wlroots => check_command(
+            checks,
+            DoctorSection::DesktopApply,
+            "desktop.apply_command",
+            "swaybg",
+            "swaybg is available for wlroots wallpaper apply",
+            "install swaybg, or choose a different apply.backend",
+        ),
+        ApplyBackendSetting::Hyprland => check_all_commands(
+            checks,
+            DoctorSection::DesktopApply,
+            "desktop.apply_command",
+            &["swaybg", "hyprctl"],
+            "Hyprland apply helper commands are available",
+            "install swaybg and hyprctl, or choose a different apply.backend",
+        ),
+        ApplyBackendSetting::Feh => check_any_command(
+            checks,
+            DoctorSection::DesktopApply,
+            "desktop.apply_command",
+            &["feh", "nitrogen"],
+            "feh or nitrogen is available for wallpaper apply",
+            "install feh or nitrogen, or choose a different apply.backend",
+        ),
+        ApplyBackendSetting::Cosmic | ApplyBackendSetting::CosmicExtBgCtl => {
+            if ctx.config.apply.cosmic.method == crate::config::CosmicMethod::CosmicExtBgCtl
+                || backend == ApplyBackendSetting::CosmicExtBgCtl
+            {
+                check_command(
+                    checks,
+                    DoctorSection::DesktopApply,
+                    "desktop.apply_command",
+                    "cosmic-ext-bg-ctl",
+                    "cosmic-ext-bg-ctl is available for COSMIC wallpaper apply",
+                    "install cosmic-ext-bg-ctl, switch COSMIC method, or choose a different apply.backend",
+                );
+            }
+        }
     }
 }
 
@@ -570,6 +694,16 @@ fn check_storage_cache(ctx: &WallsCtx, checks: &mut Vec<DoctorCheck>) {
         }
     }
 
+    let inspection = ctx.inspect_cache();
+    checks.push(DoctorCheck::pass(
+        DoctorSection::StorageCache,
+        "storage.download_usage",
+        format!(
+            "download storage has {} file(s), {} bytes used",
+            inspection.downloads.files, inspection.downloads.bytes
+        ),
+    ));
+
     if ctx.config.quota.enabled && ctx.config.quota.size_mb == 0 {
         checks.push(DoctorCheck::warn(
             DoctorSection::StorageCache,
@@ -577,6 +711,28 @@ fn check_storage_cache(ctx: &WallsCtx, checks: &mut Vec<DoctorCheck>) {
             "download quota is enabled with a zero MiB limit",
             "set quota.size_mb above zero or disable quota",
         ));
+    } else if ctx.config.quota.enabled {
+        let quota_bytes = ctx.config.quota.size_mb.saturating_mul(1024 * 1024);
+        if inspection.downloads.bytes > quota_bytes {
+            checks.push(DoctorCheck::warn(
+                DoctorSection::StorageCache,
+                "storage.quota",
+                format!(
+                    "download storage is {} bytes over the configured quota",
+                    inspection.downloads.bytes - quota_bytes
+                ),
+                "run `walls cache status` and `walls cache prune --dry-run` before pruning with --force",
+            ));
+        } else {
+            checks.push(DoctorCheck::pass(
+                DoctorSection::StorageCache,
+                "storage.quota",
+                format!(
+                    "download quota is enabled with {} bytes remaining",
+                    quota_bytes - inspection.downloads.bytes
+                ),
+            ));
+        }
     } else {
         checks.push(DoctorCheck::pass(
             DoctorSection::StorageCache,
@@ -590,6 +746,187 @@ fn check_storage_cache(ctx: &WallsCtx, checks: &mut Vec<DoctorCheck>) {
                 }
             ),
         ));
+    }
+}
+
+fn check_required_file(
+    checks: &mut Vec<DoctorCheck>,
+    section: DoctorSection,
+    id: &'static str,
+    path: &Path,
+    label: &'static str,
+    remediation: &'static str,
+) {
+    if path.is_dir() {
+        checks.push(DoctorCheck::pass(
+            section,
+            id,
+            format!("{label} found at {}", path.display()),
+        ));
+    } else {
+        checks.push(DoctorCheck::fail(
+            section,
+            id,
+            format!("{label} missing at {}", path.display()),
+            remediation,
+        ));
+    }
+}
+
+fn check_parent_writable(
+    checks: &mut Vec<DoctorCheck>,
+    section: DoctorSection,
+    id: &'static str,
+    path: &Path,
+    label: &'static str,
+    remediation: &'static str,
+) {
+    let Some(parent) = path.parent() else {
+        checks.push(DoctorCheck::fail(
+            section,
+            id,
+            format!("{label} has no parent directory: {}", path.display()),
+            remediation,
+        ));
+        return;
+    };
+    if dir_is_writable(parent) {
+        checks.push(DoctorCheck::pass(
+            section,
+            id,
+            format!("{label} can be written at {}", path.display()),
+        ));
+    } else {
+        checks.push(DoctorCheck::fail(
+            section,
+            id,
+            format!(
+                "{label} parent directory is not writable: {}",
+                parent.display()
+            ),
+            remediation,
+        ));
+    }
+}
+
+fn check_command(
+    checks: &mut Vec<DoctorCheck>,
+    section: DoctorSection,
+    id: &'static str,
+    command: &'static str,
+    message: &'static str,
+    remediation: &'static str,
+) {
+    if command_exists(command) {
+        checks.push(DoctorCheck::pass(section, id, message));
+    } else {
+        checks.push(DoctorCheck::fail(
+            section,
+            id,
+            format!("required command `{command}` was not found on PATH"),
+            remediation,
+        ));
+    }
+}
+
+fn check_any_command(
+    checks: &mut Vec<DoctorCheck>,
+    section: DoctorSection,
+    id: &'static str,
+    commands: &[&'static str],
+    message: &'static str,
+    remediation: &'static str,
+) {
+    if commands.iter().any(|command| command_exists(command)) {
+        checks.push(DoctorCheck::pass(section, id, message));
+    } else {
+        checks.push(DoctorCheck::fail(
+            section,
+            id,
+            format!(
+                "none of the required commands were found on PATH: {}",
+                commands.join(", ")
+            ),
+            remediation,
+        ));
+    }
+}
+
+fn check_any_command_warn(
+    checks: &mut Vec<DoctorCheck>,
+    section: DoctorSection,
+    id: &'static str,
+    commands: &[&'static str],
+    message: &'static str,
+    remediation: &'static str,
+) {
+    if commands.iter().any(|command| command_exists(command)) {
+        checks.push(DoctorCheck::pass(section, id, message));
+    } else {
+        checks.push(DoctorCheck::warn(
+            section,
+            id,
+            format!(
+                "none of the fallback commands were found on PATH: {}",
+                commands.join(", ")
+            ),
+            remediation,
+        ));
+    }
+}
+
+fn check_all_commands(
+    checks: &mut Vec<DoctorCheck>,
+    section: DoctorSection,
+    id: &'static str,
+    commands: &[&'static str],
+    message: &'static str,
+    remediation: &'static str,
+) {
+    let missing = commands
+        .iter()
+        .copied()
+        .filter(|command| !command_exists(command))
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        checks.push(DoctorCheck::pass(section, id, message));
+    } else {
+        checks.push(DoctorCheck::fail(
+            section,
+            id,
+            format!(
+                "required command(s) were not found on PATH: {}",
+                missing.join(", ")
+            ),
+            remediation,
+        ));
+    }
+}
+
+fn command_exists(command: &str) -> bool {
+    let path = Path::new(command);
+    if path.components().count() > 1 {
+        return is_executable_file(path);
+    }
+    std::env::var_os("PATH").is_some_and(|paths| {
+        std::env::split_paths(&paths).any(|dir| is_executable_file(&dir.join(command)))
+    })
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        path.metadata()
+            .is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        true
     }
 }
 
@@ -775,5 +1112,55 @@ mod tests {
         assert!(report.checks.iter().any(|check| {
             check.id == "providers.candidate_readiness" && check.status == DoctorStatus::Warn
         }));
+    }
+
+    #[test]
+    fn doctor_warns_when_download_storage_exceeds_quota() {
+        let mut config = crate::config::default_config().expect("default config");
+        config.change.internet_enabled = false;
+        config.quota.enabled = true;
+        config.quota.size_mb = 1;
+        let tmp_images = tempfile::tempdir().expect("images");
+        std::fs::write(tmp_images.path().join("a.jpg"), b"x").expect("image");
+        let mut source = folder_source();
+        source.path = Some(tmp_images.path().display().to_string());
+        config.sources = vec![source];
+        let (_tmp, ctx) = ctx_with_config(config);
+        std::fs::write(
+            ctx.paths.download_dir.join("large.jpg"),
+            vec![0_u8; 2 * 1024 * 1024],
+        )
+        .expect("downloaded file");
+
+        let report = run_doctor(&ctx, &DoctorOptions::default());
+
+        assert!(report.ready, "{:#?}", report.checks);
+        assert!(report.checks.iter().any(|check| {
+            check.id == "storage.quota"
+                && check.status == DoctorStatus::Warn
+                && check
+                    .remediation
+                    .as_deref()
+                    .is_some_and(|fix| fix.contains("walls cache prune --dry-run"))
+        }));
+    }
+
+    #[test]
+    fn command_exists_accepts_absolute_paths_without_using_path() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let command = tmp.path().join("helper");
+        std::fs::write(&command, b"").expect("helper");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            std::fs::set_permissions(&command, std::fs::Permissions::from_mode(0o755))
+                .expect("helper permissions");
+        }
+
+        assert!(command_exists(command.to_str().expect("utf8 path")));
+        assert!(!command_exists(
+            tmp.path().join("missing").to_str().expect("utf8 path")
+        ));
     }
 }
