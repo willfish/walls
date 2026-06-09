@@ -2833,7 +2833,7 @@ mod tests {
 
     #[test]
     fn standard_layout_keeps_full_key_row_visible() {
-        let app = test_app();
+        let mut app = test_app();
         let text = render_text(&app, 80, 24);
 
         assert!(text.contains("e edit"), "{text}");
@@ -2841,6 +2841,10 @@ mod tests {
             text.contains("space pa") || text.contains("pause"),
             "{text}"
         );
+
+        app.tab = Tab::Now;
+        let text = render_text(&app, 80, 24);
+        assert!(text.contains("1-6 tabs"), "{text}");
     }
 
     #[cfg(feature = "tui-preview")]

@@ -126,14 +126,15 @@ Terminal screen regions (not a second runtime — same `walls` binary as the CLI
 
 ```
 ┌ walls ────────────────────────────────────────────────┐
-│ [Status][Now][History][Browse][Search]     1-5 tabs   │
+│ [Config][Now][History][Browse][Search][Logs] 1-6 tabs │
 ├───────────────────────────────────────────────────────┤
 │ > list (tab-specific)                                 │
-│   Status   paused, paths, queue count                 │
+│   Config   sources, paths, apply, rotation            │
 │   Now      current wallpaper paths                    │
 │   History  j/k · Enter apply                          │
 │   Browse   queue · locals · history · Enter apply     │
 │   Search   / i query · Enter search/apply (API)       │
+│   Logs     recent TUI and command status              │
 ├ keys ─────────────────────────────────────────────────┤
 │ n/p  f/d  space  :  q                                 │
 └───────────────────────────────────────────────────────┘
@@ -192,7 +193,7 @@ walls-tray         # tray menu → walls prev/next/toggle-pause
 | `walls config sync` | Reconcile tray autostart desktop entry with `config.json` |
 | `walls pause` / `walls resume` / `walls toggle-pause` | Works |
 | `walls next [--manual] [--refresh <level>] [--json]` / `walls prev [--json]` | Works (auto `next` respects pause/rotation-off; `--manual` for explicit changes; refresh levels: `all`, `filters-and-texts`, `texts`, `clock-only`) |
-| `walls tui` | Works — tabs: Status/Now/History/Browse/Search; `/` or `i` search; `:` commands; `f`/`d` favorite/trash |
+| `walls tui` | Works — tabs: Config/Now/History/Browse/Search/Logs; `/` or `i` search; `:` commands; `f`/`d` favorite/trash |
 | `walls tui` with `--features tui-preview` | Optional Now-tab image preview in terminals supporting Kitty graphics (Ghostty/Kitty) or iTerm2 inline images; metadata-only fallback otherwise; set `WALLS_TUI_PREVIEW=0` to force metadata-only |
 | `walls-tray` | Works (prev/next/pause, Open TUI, brand tray icon from `assets/icons/walls-tray.svg`) |
 
