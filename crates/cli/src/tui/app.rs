@@ -1,10 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use walls_core::apply::ApplyTrigger;
 use walls_core::config::{
     normalize_source_entry, persist_config, reddit_sort_needs_time, reddit_sort_value,
     reddit_time_value, source_editable_fields as core_source_editable_fields, Config,
-    SelectionStrategy, SourceEntry, SourceKind, TuiKeyProfile, WallhavenPrefer, WallhavenSearch,
+    SelectionStrategy, SourceEntry, TuiKeyProfile, WallhavenPrefer, WallhavenSearch,
     REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
 };
 use walls_core::expand_home;
@@ -17,6 +17,7 @@ use walls_core::WallsCtx;
 use super::command::{self, ParsedCommand};
 use super::history_browse_view;
 use super::logs_view;
+use super::open_target::{self, OpenTarget};
 use super::style::{self, ColorMode, StateKind, StatusKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,21 +80,6 @@ pub enum EditTarget {
     Source(usize),
     Wallhaven,
     SearchFilters,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum OpenTarget {
-    Path(PathBuf),
-    Url(String),
-}
-
-impl OpenTarget {
-    pub(crate) fn display_value(&self) -> String {
-        match self {
-            Self::Path(path) => path.display().to_string(),
-            Self::Url(url) => url.clone(),
-        }
-    }
 }
 
 /// Internal block index for shared Wallhaven field metadata helpers.
@@ -179,87 +165,6 @@ fn wallhaven_bit_at(s: &str, idx: usize, default: bool) -> bool {
 
 fn wallhaven_bits_from_bools(a: bool, b: bool, c: bool) -> String {
     format!("{}{}{}", u8::from(a), u8::from(b), u8::from(c))
-}
-
-fn path_target(path: impl AsRef<Path>) -> OpenTarget {
-    OpenTarget::Path(expand_home(path.as_ref()))
-}
-
-fn url_target(url: impl Into<String>) -> Option<OpenTarget> {
-    let url = url.into();
-    (!url.trim().is_empty()).then_some(OpenTarget::Url(url))
-}
-
-fn url_component(value: &str) -> String {
-    value
-        .bytes()
-        .flat_map(|byte| match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                vec![byte as char]
-            }
-            b' ' => vec!['+'],
-            _ => format!("%{byte:02X}").chars().collect(),
-        })
-        .collect()
-}
-
-fn wallhaven_wallpaper_url(id: &str) -> String {
-    format!("https://wallhaven.cc/w/{id}")
-}
-
-fn wallhaven_search_url(search: &WallhavenSearch) -> String {
-    format!(
-        "https://wallhaven.cc/search?q={}&categories={}&purity={}&sorting={}&order={}&atleast={}",
-        url_component(&search.q),
-        search.categories,
-        search.purity,
-        search.sorting,
-        search.order,
-        url_component(&search.atleast)
-    )
-}
-
-fn source_url_target(source: &SourceEntry) -> Option<OpenTarget> {
-    if let Some(url) = source.url.as_deref().and_then(url_target) {
-        return Some(url);
-    }
-
-    match SourceKind::parse(&source.source_type) {
-        SourceKind::Reddit => walls_core::config::reddit_listing_url(source).map(OpenTarget::Url),
-        SourceKind::Unsplash => source
-            .collection
-            .as_deref()
-            .map(|collection| format!("https://unsplash.com/collections/{collection}"))
-            .or_else(|| {
-                source
-                    .user
-                    .as_deref()
-                    .map(|user| format!("https://unsplash.com/@{user}"))
-            })
-            .or_else(|| {
-                source
-                    .topic
-                    .as_deref()
-                    .map(|topic| format!("https://unsplash.com/t/{topic}"))
-            })
-            .or_else(|| {
-                source
-                    .query
-                    .as_deref()
-                    .map(|query| format!("https://unsplash.com/s/photos/{}", url_component(query)))
-            })
-            .map(OpenTarget::Url),
-        SourceKind::Pixabay => source.query.as_deref().map(|query| {
-            OpenTarget::Url(format!(
-                "https://pixabay.com/images/search/{}/",
-                url_component(query)
-            ))
-        }),
-        SourceKind::Apod => Some(OpenTarget::Url(
-            "https://apod.nasa.gov/apod/astropix.html".into(),
-        )),
-        _ => None,
-    }
 }
 
 pub(crate) fn format_wallhaven_categories(s: &str) -> String {
@@ -1314,26 +1219,11 @@ impl App {
                 .config
                 .sources
                 .get(*index)
-                .and_then(|source| self.source_open_target(source)),
-            EditTarget::Wallhaven => Some(OpenTarget::Url(wallhaven_search_url(
+                .and_then(|source| open_target::source(&self.ctx, source)),
+            EditTarget::Wallhaven => Some(open_target::wallhaven_search(
                 &self.ctx.config.wallhaven.search,
-            ))),
+            )),
             _ => None,
-        }
-    }
-
-    fn source_open_target(&self, source: &SourceEntry) -> Option<OpenTarget> {
-        if source.source_type == "wallhaven" {
-            return Some(OpenTarget::Url(wallhaven_search_url(
-                &self.ctx.config.wallhaven.search,
-            )));
-        }
-
-        match SourceKind::parse(&source.source_type) {
-            SourceKind::Folder | SourceKind::Image => source.path.as_deref().map(path_target),
-            SourceKind::Favorites => Some(OpenTarget::Path(self.ctx.paths.favorites_dir.clone())),
-            SourceKind::Fetched => Some(OpenTarget::Path(self.ctx.paths.fetched_dir.clone())),
-            _ => source_url_target(source),
         }
     }
 
@@ -1361,27 +1251,11 @@ impl App {
 
     fn selected_search_open_target(&self) -> Option<OpenTarget> {
         let hit = self.search_results.get(self.cursor)?;
-        Some(OpenTarget::Url(wallhaven_wallpaper_url(&hit.id)))
+        Some(open_target::wallhaven_wallpaper(&hit.id))
     }
 
     fn open_target_for_cache_queue_id(&self, id: &str) -> Option<OpenTarget> {
-        if let Some(photo_id) = walls_core::unsplash::queue_photo_id(id) {
-            if let Some(path) =
-                walls_core::unsplash::cached_photo_path(&self.ctx.paths.cache_dir, photo_id)
-            {
-                return Some(OpenTarget::Path(path));
-            }
-            return Some(OpenTarget::Url(format!(
-                "https://unsplash.com/photos/{photo_id}"
-            )));
-        }
-
-        if let Some(path) =
-            walls_core::wallhaven::cached_wallpaper_path(&self.ctx.paths.cache_dir, id)
-        {
-            return Some(OpenTarget::Path(path));
-        }
-        Some(OpenTarget::Url(wallhaven_wallpaper_url(id)))
+        Some(open_target::cache_queue_id(&self.ctx.paths.cache_dir, id))
     }
 
     pub fn apply_history_selection(&mut self) -> Option<PathBuf> {
