@@ -117,3 +117,4 @@ Normal mode navigation:
 - `j/k` and arrow up/down move within the active list.
 - Home/End jump to the first/last row for History, Browse, Search, Config blocks, and Config Sources subnav.
 - PageUp/PageDown jump five rows and clamp at list boundaries.
+- Destructive actions are two-step: `d` requests trash for the current wallpaper, then `d` confirms or Esc cancels; Shift+X requests nuke downloads, then Shift+X confirms or Esc cancels. Other keys are ignored while a destructive confirmation is pending.

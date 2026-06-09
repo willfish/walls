@@ -185,6 +185,8 @@ enum UiAction {
     Prev,
     Favorite,
     Trash,
+    TrashConfirm,
+    CancelTrash,
     NukeDownloadsRequest,
     NukeDownloadsConfirm,
     CancelNuke,
@@ -263,6 +265,14 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
     if app.show_key_help {
         return match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => UiAction::CloseHelp,
+            _ => UiAction::Ignore,
+        };
+    }
+
+    if app.pending_trash_confirm {
+        return match key.code {
+            KeyCode::Esc => UiAction::CancelTrash,
+            KeyCode::Char('d') => UiAction::TrashConfirm,
             _ => UiAction::Ignore,
         };
     }
@@ -427,17 +437,36 @@ fn update(
             }
             Err(e) => app.set_message(style::StatusKind::Error, format!("favorite error: {e}")),
         },
-        UiAction::Trash => match app.trash_current() {
+        UiAction::Trash => {
+            let prompt = app.trash_current_prompt();
+            if prompt.contains("d confirm") {
+                app.pending_trash_confirm = true;
+                app.pending_nuke_confirm = false;
+                app.set_message(style::StatusKind::Warning, prompt);
+            } else {
+                app.set_message(style::StatusKind::Error, prompt);
+            }
+        }
+        UiAction::TrashConfirm => match app.trash_current() {
             Ok(msg) => {
+                app.pending_trash_confirm = false;
                 app.set_message(style::StatusKind::Success, msg);
                 return Ok(UpdateEffect::Reload);
             }
-            Err(e) => app.set_message(style::StatusKind::Error, format!("trash error: {e}")),
+            Err(e) => {
+                app.pending_trash_confirm = false;
+                app.set_message(style::StatusKind::Error, format!("trash error: {e}"));
+            }
         },
+        UiAction::CancelTrash => {
+            app.pending_trash_confirm = false;
+            app.set_message(style::StatusKind::Neutral, "trash cancelled");
+        }
         UiAction::NukeDownloadsRequest => {
             let prompt = app.nuke_downloads_prompt();
             if prompt.contains("Shift+X confirm") {
                 app.pending_nuke_confirm = true;
+                app.pending_trash_confirm = false;
             }
             app.set_message(style::StatusKind::Warning, prompt);
         }
@@ -843,7 +872,7 @@ fn key_help_lines(app: &App, width: u16) -> Vec<String> {
         "Global".into(),
         "  Esc/q close help".into(),
         "  ? help   q quit   n/p next/prev   Space pause".into(),
-        "  f favorite current   d trash current   Shift+X nuke downloads".into(),
+        "  f favorite current   d request trash current   Shift+X nuke downloads".into(),
         "Tabs and lists".into(),
         "  1-6 jump tabs   ←/→ switch tabs   j/k or ↑/↓ move".into(),
         "  Home/End first/last   PageUp/PageDown jump   Enter apply/open".into(),
@@ -859,6 +888,7 @@ fn key_help_lines(app: &App, width: u16) -> Vec<String> {
         "  ↑/↓ fields   text keys type   Backspace deletes".into(),
         "  Space or ←/→ cycle bool/choice fields   Enter save   Esc cancel".into(),
         "Destructive confirmations".into(),
+        "  Trash prompt: d confirm   Esc cancel".into(),
         "  Nuke prompt: Shift+X confirm   Esc cancel".into(),
         format!("Current mode: {}", key_help_mode_label(app)),
     ];
@@ -868,6 +898,7 @@ fn key_help_lines(app: &App, width: u16) -> Vec<String> {
             !line.contains("Home/End")
                 && !line.contains(":next")
                 && !line.contains("Backspace deletes")
+                && !line.contains("Trash prompt")
                 && !line.contains("Nuke prompt")
         });
     }
@@ -876,7 +907,9 @@ fn key_help_lines(app: &App, width: u16) -> Vec<String> {
 }
 
 fn key_help_mode_label(app: &App) -> &'static str {
-    if app.pending_nuke_confirm {
+    if app.pending_trash_confirm {
+        "trash confirmation"
+    } else if app.pending_nuke_confirm {
         "nuke confirmation"
     } else if app.is_editing() {
         "config edit"
@@ -1177,7 +1210,7 @@ fn footer_keys(app: &App, width: u16) -> String {
                     "←/→ tabs | Esc | j/k Pg | e | t | n/p | sp | : | ? | q".into()
                 }
                 Tab::Config => "←/→ tabs | j/k Pg | Enter | e | t | n/p | sp | : | ? | q".into(),
-                _ => "←/→ tabs | j/k Pg | n/p | f/d | Shift+X | sp | : | ? | q".into(),
+                _ => "←/→ tabs | j/k Pg | n/p | f/d? | Shift+X | sp | : | ? | q".into(),
             },
         };
     }
@@ -2002,6 +2035,7 @@ mod tests {
     use ratatui::layout::Rect;
     use ratatui::prelude::{Color, Style};
     use ratatui::Terminal;
+    use walls_core::state::CurrentWall;
     use walls_core::WallsCtx;
 
     use super::{
@@ -2021,6 +2055,26 @@ mod tests {
             tmp,
             serde_json::json!([{ "enabled": true, "type": "folder", "path": image_dir.display().to_string() }]),
         )
+    }
+
+    fn set_current_wall(app: &mut App, original: &std::path::Path, composed: &std::path::Path) {
+        if let Some(parent) = app.ctx.paths.state_file.parent() {
+            fs::create_dir_all(parent).expect("state parent");
+        }
+        app.ctx.state.current = Some(CurrentWall {
+            source_id: "test".into(),
+            wallhaven_id: Some("wh-current".into()),
+            provider: Some("test".into()),
+            source_url: None,
+            author: None,
+            description: None,
+            original_path: original.display().to_string(),
+            composed_path: composed.display().to_string(),
+            post_filter_path: None,
+        });
+        app.ctx.state.history = vec![original.display().to_string()];
+        app.ctx.state.cache_queue = vec!["wh-current".into()];
+        app.ctx.save_state().expect("save current state");
     }
 
     fn test_app_with_sources(tmp: tempfile::TempDir, sources: serde_json::Value) -> App {
@@ -3734,12 +3788,65 @@ mod tests {
         update(&mut app, request, rt.handle()).expect("request nuke");
         assert!(app.pending_nuke_confirm);
         assert!(app.message.contains("clear 2 queued provider items"));
+        assert!(!app.footer_keys().contains("q quit"));
+
+        let unrelated = action_for_key(&app, KeyEvent::from(KeyCode::Char('q')));
+        assert_eq!(unrelated, UiAction::Ignore);
+        update(&mut app, unrelated, rt.handle()).expect("ignore unrelated key");
+        assert!(app.pending_nuke_confirm);
 
         let confirm = action_for_key(&app, shift_x);
         assert_eq!(confirm, UiAction::NukeDownloadsConfirm);
         update(&mut app, confirm, rt.handle()).expect("confirm nuke");
         assert!(!app.pending_nuke_confirm);
         assert!(app.message.contains("cleared 2 queued provider items"));
+        assert!(app.ctx.state.cache_queue.is_empty());
+    }
+
+    #[test]
+    fn d_trash_requires_confirmation_and_can_cancel_or_confirm() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let original = tmp.path().join("original.jpg");
+        let composed = tmp.path().join("composed.jpg");
+        fs::write(&original, b"original").expect("original");
+        fs::write(&composed, b"composed").expect("composed");
+
+        let mut app = test_app();
+        set_current_wall(&mut app, &original, &composed);
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+
+        let request = action_for_key(&app, KeyEvent::from(KeyCode::Char('d')));
+        assert_eq!(request, UiAction::Trash);
+        update(&mut app, request, rt.handle()).expect("request trash");
+        assert!(app.pending_trash_confirm);
+        assert!(app.message.contains("trash: current wallpaper original"));
+        assert!(app.message.contains("d confirm"));
+        assert!(original.exists());
+        assert!(composed.exists());
+
+        let unrelated = action_for_key(&app, KeyEvent::from(KeyCode::Char('q')));
+        assert_eq!(unrelated, UiAction::Ignore);
+        update(&mut app, unrelated, rt.handle()).expect("ignore unrelated key");
+        assert!(app.pending_trash_confirm);
+
+        let cancel = action_for_key(&app, KeyEvent::from(KeyCode::Esc));
+        assert_eq!(cancel, UiAction::CancelTrash);
+        update(&mut app, cancel, rt.handle()).expect("cancel trash");
+        assert!(!app.pending_trash_confirm);
+        assert_eq!(app.message, "trash cancelled");
+        assert!(original.exists());
+        assert!(composed.exists());
+
+        let request = action_for_key(&app, KeyEvent::from(KeyCode::Char('d')));
+        update(&mut app, request, rt.handle()).expect("request trash again");
+        let confirm = action_for_key(&app, KeyEvent::from(KeyCode::Char('d')));
+        assert_eq!(confirm, UiAction::TrashConfirm);
+        update(&mut app, confirm, rt.handle()).expect("confirm trash");
+        assert!(!app.pending_trash_confirm);
+        assert!(app.message.contains("trashed current wallpaper"));
+        assert!(!original.exists());
+        assert!(!composed.exists());
+        assert!(app.ctx.state.current.is_none());
         assert!(app.ctx.state.cache_queue.is_empty());
     }
 
