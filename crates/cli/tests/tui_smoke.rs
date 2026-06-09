@@ -154,6 +154,7 @@ fn tui_with_pty_exits_cleanly_on_quit() {
     cmd.env("XDG_STATE_HOME", state_home);
     cmd.env("RUST_BACKTRACE", "0");
     cmd.env("WALLS_TUI_PREVIEW", "0");
+    cmd.env("WALLS_TUI_INTRO", "0");
 
     let mut child = pair
         .slave

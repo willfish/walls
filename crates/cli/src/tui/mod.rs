@@ -18,7 +18,7 @@ use ratatui::crossterm::ExecutableCommand;
 use ratatui::prelude::*;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, List, ListItem, Paragraph, Tabs};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Tabs};
 use walls_core::apply::{
     backend_setting_label, summarize_apply_environment, ApplyEnvironmentSummary,
 };
@@ -110,6 +110,7 @@ pub fn run(startup_message: Option<String>, tray_owns_rotation: bool) -> anyhow:
     if let Some(message) = startup_message {
         app.set_message(style::StatusKind::Neutral, message);
     }
+    let mut startup_intro = StartupIntro::from_env();
     IN_TUI.store(true, Ordering::Relaxed);
     #[cfg(feature = "tui-preview")]
     let mut preview = preview::ImagePreview::detect();
@@ -121,32 +122,153 @@ pub fn run(startup_message: Option<String>, tray_owns_rotation: bool) -> anyhow:
 
     loop {
         terminal.draw(|f| {
-            #[cfg(feature = "tui-preview")]
-            draw(f, &app, &mut preview);
-            #[cfg(not(feature = "tui-preview"))]
-            draw(f, &app);
+            if startup_intro.is_active() {
+                draw_startup_intro(f, &app, &startup_intro);
+            } else {
+                #[cfg(feature = "tui-preview")]
+                draw(f, &app, &mut preview);
+                #[cfg(not(feature = "tui-preview"))]
+                draw(f, &app);
+            }
         })?;
-        if let Some(rotator) = &mut auto_rotator {
-            let outcome = tokio::task::block_in_place(|| {
-                rt.block_on(async {
-                    let mut ctx = walls_core::WallsCtx::load()?;
-                    Ok::<_, anyhow::Error>(rotator.tick(&mut ctx).await)
-                })
-            });
-            if matches!(outcome, Ok(walls_core::rotation::TickOutcome::Rotated)) {
-                app.reload_ctx()?;
+        if !startup_intro.is_active() {
+            if let Some(rotator) = &mut auto_rotator {
+                let outcome = tokio::task::block_in_place(|| {
+                    rt.block_on(async {
+                        let mut ctx = walls_core::WallsCtx::load()?;
+                        Ok::<_, anyhow::Error>(rotator.tick(&mut ctx).await)
+                    })
+                });
+                if matches!(outcome, Ok(walls_core::rotation::TickOutcome::Rotated)) {
+                    app.reload_ctx()?;
+                }
             }
         }
-        if event::poll(std::time::Duration::from_millis(200))? {
+        if event::poll(startup_intro.poll_interval())? {
             if let Event::Key(key) = event::read()? {
+                startup_intro.skip();
                 if handle_key(&mut app, key, &rt)? {
                     break;
                 }
             }
+        } else {
+            startup_intro.tick();
         }
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StartupIntro {
+    frame: usize,
+    remaining_ticks: u8,
+}
+
+impl StartupIntro {
+    const TOTAL_TICKS: u8 = 3;
+    const SPINNER: [&'static str; 4] = ["|", "/", "-", "\\"];
+
+    fn from_env() -> Self {
+        if cfg!(test)
+            || std::env::var_os("CI").is_some()
+            || intro_disabled_value(std::env::var("WALLS_TUI_INTRO").ok().as_deref())
+        {
+            Self::disabled()
+        } else {
+            Self::enabled()
+        }
+    }
+
+    fn enabled() -> Self {
+        Self {
+            frame: 0,
+            remaining_ticks: Self::TOTAL_TICKS,
+        }
+    }
+
+    fn disabled() -> Self {
+        Self {
+            frame: 0,
+            remaining_ticks: 0,
+        }
+    }
+
+    fn is_active(self) -> bool {
+        self.remaining_ticks > 0
+    }
+
+    fn tick(&mut self) {
+        if self.is_active() {
+            self.frame += 1;
+            self.remaining_ticks = self.remaining_ticks.saturating_sub(1);
+        }
+    }
+
+    fn skip(&mut self) {
+        self.remaining_ticks = 0;
+    }
+
+    fn poll_interval(self) -> std::time::Duration {
+        if self.is_active() {
+            std::time::Duration::from_millis(80)
+        } else {
+            std::time::Duration::from_millis(200)
+        }
+    }
+
+    fn spinner(self) -> &'static str {
+        Self::SPINNER[self.frame % Self::SPINNER.len()]
+    }
+}
+
+fn intro_disabled_value(value: Option<&str>) -> bool {
+    matches!(
+        value.map(str::trim).map(str::to_ascii_lowercase).as_deref(),
+        Some("0" | "false" | "no" | "off" | "never" | "none" | "skip" | "disabled")
+    )
+}
+
+fn draw_startup_intro(f: &mut Frame, app: &App, intro: &StartupIntro) {
+    let area = f.area();
+    if terminal_size(area) == TerminalSize::Tiny {
+        return;
+    }
+
+    let theme = style::Theme::new(app.color_mode);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("walls")
+        .border_style(theme.border())
+        .title_style(theme.accent());
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let intro_area = centered_rect(inner, 36, 5);
+    let paragraph = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled("walls", theme.accent()),
+            Span::raw(" "),
+            Span::styled(intro.spinner(), theme.key_hint()),
+        ]),
+        Line::from(Span::styled(
+            "preparing your wallpaper console",
+            theme.muted(),
+        )),
+    ])
+    .alignment(Alignment::Center);
+    f.render_widget(paragraph, intro_area);
+}
+
+fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
+    let width = width.min(area.width);
+    let height = height.min(area.height);
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    }
 }
 
 fn require_tty() -> anyhow::Result<()> {
@@ -2050,8 +2172,9 @@ mod tests {
     use super::{
         action_for_key,
         app::{App, SearchHit},
-        apply_effect, draw_inner, footer_paragraph, handle_key, line_style, style, update,
-        InputMode, Tab, TerminalSize, UiAction, UpdateEffect,
+        apply_effect, draw_inner, draw_startup_intro, footer_paragraph, handle_key,
+        intro_disabled_value, line_style, style, update, InputMode, StartupIntro, Tab,
+        TerminalSize, UiAction, UpdateEffect,
     };
 
     fn test_app() -> App {
@@ -2197,6 +2320,24 @@ mod tests {
                 draw_inner(frame, app);
             })
             .expect("draw");
+
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                text.push_str(buffer[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        text
+    }
+
+    fn render_intro_text(app: &App, intro: &StartupIntro, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| draw_startup_intro(frame, app, intro))
+            .expect("draw intro");
 
         let buffer = terminal.backend().buffer();
         let mut text = String::new();
@@ -2970,6 +3111,65 @@ mod tests {
             super::terminal_size(Rect::new(0, 0, 120, 32)),
             TerminalSize::Wide
         );
+    }
+
+    #[test]
+    fn startup_intro_renders_compact_loading_screen_without_main_tabs() {
+        let app = test_app();
+        let intro = StartupIntro::enabled();
+        let text = render_intro_text(&app, &intro, 80, 24);
+
+        assert!(text.contains("walls"), "{text}");
+        assert!(text.contains("preparing your wallpaper console"), "{text}");
+        assert!(text.contains("|"), "{text}");
+        assert!(!text.contains("Config Now History"), "{text}");
+    }
+
+    #[test]
+    fn startup_intro_ticks_deterministically_and_finishes_without_clock_sleep() {
+        let mut intro = StartupIntro::enabled();
+
+        assert!(intro.is_active());
+        assert_eq!(intro.spinner(), "|");
+
+        intro.tick();
+        assert!(intro.is_active());
+        assert_eq!(intro.spinner(), "/");
+
+        intro.tick();
+        assert!(intro.is_active());
+        assert_eq!(intro.spinner(), "-");
+
+        intro.tick();
+        assert!(!intro.is_active());
+        assert_eq!(intro.poll_interval(), std::time::Duration::from_millis(200));
+    }
+
+    #[test]
+    fn startup_intro_can_be_skipped_immediately() {
+        let mut intro = StartupIntro::enabled();
+
+        intro.skip();
+
+        assert!(!intro.is_active());
+        intro.tick();
+        assert!(!intro.is_active());
+    }
+
+    #[test]
+    fn startup_intro_env_gate_accepts_disabled_values() {
+        for value in [
+            "0", "false", "no", "off", "never", "none", "skip", "disabled",
+        ] {
+            assert!(
+                intro_disabled_value(Some(value)),
+                "{value} should disable startup intro"
+            );
+        }
+
+        assert!(!intro_disabled_value(None));
+        assert!(!intro_disabled_value(Some("1")));
+        assert!(!intro_disabled_value(Some("true")));
     }
 
     #[test]
