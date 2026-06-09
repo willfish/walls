@@ -164,8 +164,8 @@ or deliberately defers it to a later focused slice.
 | `config.display.filters.filters[].name` | Manual | Multi-row ImageMagick filter editing remains file-based. |
 | `config.display.filters.filters[].args` | Manual | Multi-row ImageMagick filter editing remains file-based. |
 | `config.selection.use_landscape_enabled` | Read-only | Selection block context; editable selection controls are deferred. |
-| `config.selection.avoid_recent` | Read-only | Selection block context. |
-| `config.selection.refetch_when_cache_below` | Read-only | Selection block context. |
+| `config.selection.avoid_recent` | Editable | Library edit form numeric text field. |
+| `config.selection.refetch_when_cache_below` | Editable | Library edit form numeric text field. |
 | `config.selection.strategy` | Editable | Config block cycle action persists random/sequential. |
 | `config.tray.accent` | Editable | Rotation edit form choice field. |
 | `config.tray.autostart.desktops.*` | Editable | Rotation edit form toggles the current desktop entry when supported. |
