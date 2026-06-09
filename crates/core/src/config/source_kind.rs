@@ -15,6 +15,7 @@ pub enum SourceKind {
     Immich,
     Spotlight,
     Weighting,
+    Wallhaven,
     Unknown,
 }
 
@@ -36,6 +37,7 @@ impl SourceKind {
             "immich" => Self::Immich,
             "spotlight" => Self::Spotlight,
             "weighting" => Self::Weighting,
+            "wallhaven" => Self::Wallhaven,
             _ => Self::Unknown,
         }
     }
@@ -57,6 +59,7 @@ impl SourceKind {
             Self::Immich => Some("immich"),
             Self::Spotlight => Some("spotlight"),
             Self::Weighting => Some("weighting"),
+            Self::Wallhaven => Some("wallhaven"),
             Self::Unknown => None,
         }
     }
@@ -95,6 +98,7 @@ mod tests {
         assert_eq!(SourceKind::parse("immich"), SourceKind::Immich);
         assert_eq!(SourceKind::parse("spotlight"), SourceKind::Spotlight);
         assert_eq!(SourceKind::parse("weighting"), SourceKind::Weighting);
+        assert_eq!(SourceKind::parse("wallhaven"), SourceKind::Wallhaven);
         assert!(!SourceKind::parse("unsplash").is_local());
     }
 

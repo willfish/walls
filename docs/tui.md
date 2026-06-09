@@ -121,7 +121,7 @@ Before closing TUI work, run the checks in [`tui-verification.md`](tui-verificat
 
 Wide (tui-preview): split list-context | form (like Now preview split). Narrow: full form.
 
-Nested providers: "Sources" block shows the configured sources vec, subnav j/k or arrow up/down pick, Home/End jump, PageUp/PageDown page, and `e` edits chosen SourceEntry (type-aware fields like path/query/url/image_path/api_key, designed per schema). Extended provider examples live in `config.sources.example.json` instead of the first-run config. Reuses atomic save + Reload + existing validation.
+Nested providers: "Sources" block shows the configured sources vec, subnav j/k or arrow up/down pick, Home/End jump, PageUp/PageDown page, `a` adds a Wallhaven query source and opens it for editing, and `e` edits the chosen SourceEntry (type-aware fields like path/query/url/image_path/api_key, designed per schema). Extended provider examples live in `config.sources.example.json` instead of the first-run config. Reuses atomic save + Reload + existing validation.
 
 ### Config tab field coverage matrix
 
@@ -174,7 +174,7 @@ or deliberately defers it to a later focused slice.
 | `config.sources[].type` | Editable | Source edit form choice field for source kinds. |
 | `config.sources[].label` | Editable | Source edit form text field when the source kind persists labels. |
 | `config.sources[].path` | Editable | Folder/image source text field. |
-| `config.sources[].query` | Editable | Reddit, Unsplash, Weighting, and Pixabay text field. |
+| `config.sources[].query` | Editable | Reddit, Unsplash, Weighting, Wallhaven, and Pixabay text field. |
 | `config.sources[].url` | Editable | JSON, Media RSS, Attribution, Unsplash, and Immich text field. |
 | `config.sources[].collection` | Editable | Unsplash text field. |
 | `config.sources[].user` | Editable | Unsplash text field. |
