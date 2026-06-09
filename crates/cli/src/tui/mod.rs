@@ -268,6 +268,7 @@ enum UiAction {
     SwitchTabNext,
     SwitchTabPrev,
     EditSearch,
+    EditSearchFilters,
     MoveDown,
     MoveUp,
     MoveFirst,
@@ -421,6 +422,7 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
         KeyCode::Char(' ') => UiAction::TogglePause,
         KeyCode::Char('t') if app.tab == Tab::Config => UiAction::ToggleConfigValue,
         KeyCode::Char('e') if app.tab == Tab::Config => UiAction::EditConfigItem,
+        KeyCode::Char('e') if app.tab == Tab::Search => UiAction::EditSearchFilters,
         KeyCode::Char(c @ '1'..='6') => {
             let index = c
                 .to_digit(10)
@@ -494,8 +496,12 @@ fn update(
         }
         UiAction::SearchBackspace => {
             app.search_query.pop();
+            app.search_filters.q = app.search_query.clone();
         }
-        UiAction::SearchChar(c) => app.search_query.push(c),
+        UiAction::SearchChar(c) => {
+            app.search_query.push(c);
+            app.search_filters.q = app.search_query.clone();
+        }
         UiAction::Next => {
             match tokio::task::block_in_place(|| rt.block_on(app.ctx.advance_next_manual())) {
                 Ok(Some(p)) => {
@@ -614,6 +620,9 @@ fn update(
         },
         UiAction::EditConfigItem => {
             app.start_edit_for_current();
+        }
+        UiAction::EditSearchFilters => {
+            app.start_search_filter_edit();
         }
         UiAction::CancelEdit => {
             app.cancel_edit();
@@ -1000,6 +1009,7 @@ fn key_help_lines(app: &App, width: u16) -> Vec<String> {
         "  Home/End first/last   PageUp/PageDown jump   Enter apply/open".into(),
         "Search".into(),
         "  / opens Search input from normal mode; i edits from Search tab".into(),
+        "  Search filters: e edits query, categories, purity, sorting, order, minimum resolution locally".into(),
         "  Search input: type, Backspace, Enter search, Esc cancel".into(),
         "Command mode".into(),
         "  : opens commands; Ctrl+n/Ctrl+p completes; Enter runs; Esc cancels".into(),
@@ -1939,6 +1949,7 @@ fn edit_target_title(app: &App) -> String {
             EditTarget::Block(2) => "Edit Library".to_string(),
             EditTarget::Block(4) => "Edit TUI".to_string(),
             EditTarget::Wallhaven => "Edit Wallhaven".to_string(),
+            EditTarget::SearchFilters => "Edit Search Filters".to_string(),
             EditTarget::Block(b) => format!("Edit block {}", b),
             EditTarget::Source(i) => {
                 if let Some(ref src) = sess.draft_source {
@@ -1998,8 +2009,16 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
                     app::EditFieldKind::Text,
                 ));
             }
-        } else if let EditTarget::Wallhaven = &sess.target {
-            for k in app::WALLHAVEN_BLOCK_FIELDS {
+        } else if matches!(
+            &sess.target,
+            EditTarget::Wallhaven | EditTarget::SearchFilters
+        ) {
+            let keys = if matches!(&sess.target, EditTarget::SearchFilters) {
+                app::SEARCH_FILTER_FIELDS
+            } else {
+                app::WALLHAVEN_BLOCK_FIELDS
+            };
+            for k in keys {
                 if let Some(v) = sess.draft_block_values.get(*k) {
                     let label = if *k == "purity_nsfw" && !app.wallhaven_block_field_locked(k) {
                         "Purity: NSFW".to_string()
@@ -2013,16 +2032,18 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
                     ));
                 }
             }
-            fields.push((
-                "API key".into(),
-                walls_core::config::SECRETS_EDIT_HINT.into(),
-                app::EditFieldKind::Text,
-            ));
-            fields.push((
-                "Collections".into(),
-                "(edit config.json for now)".into(),
-                app::EditFieldKind::Text,
-            ));
+            if matches!(&sess.target, EditTarget::Wallhaven) {
+                fields.push((
+                    "API key".into(),
+                    walls_core::config::SECRETS_EDIT_HINT.into(),
+                    app::EditFieldKind::Text,
+                ));
+                fields.push((
+                    "Collections".into(),
+                    "(edit config.json for now)".into(),
+                    app::EditFieldKind::Text,
+                ));
+            }
         } else if let EditTarget::Block(block) = &sess.target {
             let keys = match block {
                 0 => app::ROTATION_BLOCK_FIELDS,
@@ -2046,6 +2067,8 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
         let pad = std::cmp::min(max_label, 28);
         let wallhaven_keys = if matches!(&sess.target, EditTarget::Wallhaven) {
             app::WALLHAVEN_BLOCK_FIELDS
+        } else if matches!(&sess.target, EditTarget::SearchFilters) {
+            app::SEARCH_FILTER_FIELDS
         } else {
             &[] as &[&str]
         };
@@ -3255,6 +3278,53 @@ mod tests {
     }
 
     #[test]
+    fn search_filter_editor_updates_local_filters_without_persisting_config() {
+        let mut app = test_app();
+        app.tab = Tab::Search;
+        let original_config = app.ctx.config.clone();
+        assert!(!app.ctx.paths.config_file.exists());
+
+        app.start_search_filter_edit();
+        assert!(matches!(
+            app.editing.as_ref().map(|session| &session.target),
+            Some(EditTarget::SearchFilters)
+        ));
+        assert_eq!(app.current_edit_field_value(), app.search_query);
+
+        app.editing.as_mut().unwrap().field_buffer = "city night".into();
+        app.commit_edit_field_buffer();
+        app.save_edit_item(false)
+            .expect("save search query locally");
+        assert_eq!(app.search_query, "city night");
+        assert_eq!(app.search_filters.q, "city night");
+
+        {
+            let session = app.editing.as_mut().unwrap();
+            session.field_cursor = 7;
+            session.field_buffer = "random".into();
+        }
+        assert_eq!(app.current_edit_field_value(), "random");
+        app.cycle_current_edit_field(true);
+        assert_eq!(app.search_filters.sorting, "views");
+
+        assert!(!app.ctx.paths.config_file.exists());
+        assert_eq!(app.ctx.config.wallhaven.search.q, "space");
+        assert_eq!(app.ctx.config.wallhaven.search.sorting, "random");
+        assert_eq!(
+            app.ctx.config.wallhaven.search.q,
+            original_config.wallhaven.search.q
+        );
+        assert_eq!(
+            app.ctx.config.wallhaven.search.sorting,
+            original_config.wallhaven.search.sorting
+        );
+
+        let text = render_text(&app, 90, 18);
+        assert!(text.contains("query: city night"), "{text}");
+        assert!(text.contains("sorting views desc"), "{text}");
+    }
+
+    #[test]
     fn normal_footer_uses_shared_tab_navigation_vocabulary() {
         let mut app = test_app();
         let tabs = [
@@ -3287,7 +3357,8 @@ mod tests {
         app.tab = Tab::Search;
         app.search_results.clear();
         let footer = app.footer_keys();
-        assert!(footer.contains("/ or i edit query"), "{footer}");
+        assert!(footer.contains("/ or i query"), "{footer}");
+        assert!(footer.contains("e filters"), "{footer}");
         assert!(footer.contains("Enter search"), "{footer}");
 
         app.search_results.push(SearchHit {
