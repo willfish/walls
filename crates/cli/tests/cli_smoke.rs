@@ -155,10 +155,22 @@ fn cli_doctor_json_reports_ready_checks() {
         .any(|check| { check["id"] == "config.validation" && check["status"] == "pass" }));
     assert!(checks
         .iter()
+        .any(|check| { check["id"] == "config.config_dir" && check["section"] == "config" }));
+    assert!(checks.iter().any(|check| {
+        check["id"] == "desktop.apply_command" && check["section"] == "desktop_apply"
+    }));
+    assert!(checks
+        .iter()
         .any(|check| { check["id"] == "providers.local_sources" && check["status"] == "pass" }));
+    assert!(checks.iter().any(|check| {
+        check["id"] == "storage.download_usage" && check["section"] == "storage_cache"
+    }));
     assert!(checks
         .iter()
         .all(|check| check["id"].as_str().is_some_and(|id| !id.is_empty())));
+    assert!(checks.iter().all(|check| {
+        check["message"].is_string() && check["severity"].is_string() && check["status"].is_string()
+    }));
 }
 
 #[test]
