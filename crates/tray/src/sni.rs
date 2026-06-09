@@ -12,6 +12,7 @@ use ksni::{MenuItem, Orientation, Tray};
 
 use crate::actions::{dispatch, menu_actions, tooltip_with_feedback, ActionFeedback, MenuAction};
 use crate::icon;
+use crate::preview_prewarm::PreviewPrewarmer;
 use crate::resolve_walls_bin;
 use crate::rotation::RotationLoop;
 use crate::state_watch::StateWatcher;
@@ -144,9 +145,13 @@ pub fn run() -> anyhow::Result<()> {
 
     let poll_handle = handle.clone();
     let mut watcher = StateWatcher::new().ok();
+    let mut preview_prewarm = PreviewPrewarmer::new().ok();
     let mut rotation = RotationLoop::new();
     while !quit.load(Ordering::Relaxed) {
         rotation.poll();
+        if let Some(prewarm) = preview_prewarm.as_mut() {
+            prewarm.poll();
+        }
         if watcher.as_mut().is_some_and(|watcher| watcher.poll()) {
             let _ = poll_handle.update(|tray: &mut WallsSniTray| tray.refresh_state());
         }
