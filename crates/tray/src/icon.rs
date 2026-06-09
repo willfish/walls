@@ -19,13 +19,13 @@ struct TrayIconContext {
 }
 
 pub fn default_appindicator_icon() -> anyhow::Result<tray_icon::Icon> {
-    brand_appindicator_icon(false, &TrayAccentPalette::blue())
+    brand_appindicator_icon(false, &TrayAccentPalette::white())
 }
 
 pub fn appindicator_icon_from_state() -> anyhow::Result<tray_icon::Icon> {
     let ctx = load_tray_icon_context().unwrap_or(TrayIconContext {
         inactive: false,
-        palette: TrayAccentPalette::blue(),
+        palette: TrayAccentPalette::white(),
     });
     if wallpaper_thumbnail_enabled() && !ctx.inactive {
         wallpaper_appindicator_icon(&ctx.palette)
@@ -50,12 +50,12 @@ pub(crate) fn tooltip_for_rotation_inactive(inactive: bool) -> &'static str {
 }
 
 pub fn default_ksni_icons() -> Vec<ksni::Icon> {
-    brand_ksni_icons(false, &TrayAccentPalette::blue())
+    brand_ksni_icons(false, &TrayAccentPalette::white())
 }
 
 pub fn ksni_icons_from_state() -> Vec<ksni::Icon> {
     ksni_icons_from_state_result()
-        .unwrap_or_else(|_| brand_ksni_icons(false, &TrayAccentPalette::blue()))
+        .unwrap_or_else(|_| brand_ksni_icons(false, &TrayAccentPalette::white()))
 }
 
 fn ksni_icons_from_state_result() -> anyhow::Result<Vec<ksni::Icon>> {
