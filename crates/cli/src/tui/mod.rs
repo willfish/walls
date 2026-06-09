@@ -809,6 +809,8 @@ struct ConfigBlock<'a> {
     theme: style::Theme,
 }
 
+const CONFIG_DETAIL_LABEL_WIDTH: usize = 20;
+
 fn config_list_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
     let mut items = Vec::new();
     push_config_block_items(
@@ -828,10 +830,7 @@ fn config_list_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
                 },
                 app.ctx.config.change.download_preference_ratio * 100.0
             ),
-            details: rotation_details(app)
-                .into_iter()
-                .map(|line| string_list_item(&line, theme))
-                .collect(),
+            details: rotation_detail_items(app, theme),
             theme,
         },
     );
@@ -870,10 +869,7 @@ fn config_list_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
                 app.ctx.state.history.len(),
                 quota_summary(app)
             ),
-            details: library_details(app)
-                .into_iter()
-                .map(|line| string_list_item(&line, theme))
-                .collect(),
+            details: library_detail_items(app, theme),
             theme,
         },
     );
@@ -891,10 +887,7 @@ fn config_list_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
                 app.ctx.config.display.mode,
                 display_target_summary(app)
             ),
-            details: apply_display_details(app)
-                .into_iter()
-                .map(|line| string_list_item(&line, theme))
-                .collect(),
+            details: apply_display_detail_items(app, theme),
             theme,
         },
     );
@@ -908,10 +901,109 @@ fn push_config_block_items(items: &mut Vec<ListItem<'static>>, block: ConfigBloc
         " "
     };
     let state = if block.enabled { "on" } else { "off" };
-    let header = format!("{marker} [{state}] {} - {}", block.title, block.summary);
-    items.push(string_list_item(&header, block.theme));
+    let selected = block.cursor == block.index;
+    let marker_style = if selected {
+        block.theme.selected()
+    } else {
+        block.theme.normal()
+    };
+    let title_style = if selected {
+        block.theme.selected()
+    } else if block.enabled {
+        block.theme.heading()
+    } else {
+        block.theme.muted()
+    };
+    let state_style = if block.enabled {
+        block.theme.active_state()
+    } else {
+        block.theme.inactive_state()
+    };
+    items.push(ListItem::new(Line::from(vec![
+        Span::styled(marker.to_string(), marker_style),
+        Span::raw(" ["),
+        Span::styled(state.to_string(), state_style),
+        Span::raw("] "),
+        Span::styled(block.title.to_string(), title_style),
+        Span::styled(" - ", block.theme.muted()),
+        Span::styled(block.summary, block.theme.muted()),
+    ])));
     if block.cursor == block.index {
         items.extend(block.details);
+    }
+}
+
+fn section_detail_item(title: impl Into<String>, theme: style::Theme) -> ListItem<'static> {
+    ListItem::new(Line::from(vec![
+        Span::raw("    "),
+        Span::styled(format!("─ {}", title.into()), theme.accent()),
+    ]))
+}
+
+fn key_value_detail_item(
+    label: impl Into<String>,
+    value: impl Into<String>,
+    theme: style::Theme,
+) -> ListItem<'static> {
+    config_detail_item("    ", label, value, theme, theme.normal())
+}
+
+fn detected_detail_item(
+    label: impl Into<String>,
+    value: impl Into<String>,
+    theme: style::Theme,
+) -> ListItem<'static> {
+    config_detail_item("    · ", label, value, theme, theme.normal())
+}
+
+fn path_detail_item(
+    label: impl Into<String>,
+    value: impl Into<String>,
+    theme: style::Theme,
+) -> ListItem<'static> {
+    config_detail_item("    ", label, value, theme, theme.muted())
+}
+
+fn config_detail_item(
+    prefix: &'static str,
+    label: impl Into<String>,
+    value: impl Into<String>,
+    theme: style::Theme,
+    fallback_value_style: Style,
+) -> ListItem<'static> {
+    let label = label.into();
+    let value = value.into();
+    let value_style = config_value_style(&value, theme).unwrap_or(fallback_value_style);
+    ListItem::new(Line::from(vec![
+        Span::raw(prefix),
+        Span::styled(
+            format!("{label:<CONFIG_DETAIL_LABEL_WIDTH$}: "),
+            theme.muted(),
+        ),
+        Span::styled(value, value_style),
+    ]))
+}
+
+fn warning_detail_item(warning: impl Into<String>, theme: style::Theme) -> ListItem<'static> {
+    let warning = warning.into();
+    let text = warning.strip_prefix("warning: ").unwrap_or(&warning);
+    ListItem::new(Line::from(vec![
+        Span::raw("    "),
+        Span::styled("! ", theme.unavailable()),
+        Span::styled(text.to_string(), theme.unavailable()),
+    ]))
+}
+
+fn spacer_detail_item() -> ListItem<'static> {
+    ListItem::new("")
+}
+
+fn config_value_style(value: &str, theme: style::Theme) -> Option<Style> {
+    match value {
+        "true" | "on" => Some(theme.boolean_true()),
+        "false" | "off" | "disabled" => Some(theme.boolean_false()),
+        value if value.starts_with("unavailable") => Some(theme.unavailable()),
+        _ => None,
     }
 }
 
@@ -1152,6 +1244,69 @@ fn rotation_details(app: &App) -> Vec<String> {
     ]
 }
 
+fn rotation_detail_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
+    let mut items = vec![
+        section_detail_item("configured", theme),
+        key_value_detail_item("enabled", app.ctx.config.change.enabled.to_string(), theme),
+        key_value_detail_item(
+            "on start",
+            app.ctx.config.change.on_start.to_string(),
+            theme,
+        ),
+        key_value_detail_item(
+            "interval",
+            format!("{}s", app.ctx.config.change.interval_secs),
+            theme,
+        ),
+        key_value_detail_item(
+            "internet",
+            app.ctx.config.change.internet_enabled.to_string(),
+            theme,
+        ),
+        key_value_detail_item(
+            "safe mode",
+            app.ctx.config.change.safe_mode.to_string(),
+            theme,
+        ),
+        key_value_detail_item(
+            "lock screen",
+            app.ctx.config.change.change_lock_screen.to_string(),
+            theme,
+        ),
+        key_value_detail_item(
+            "download preference",
+            format!(
+                "{:.0}% online",
+                app.ctx.config.change.download_preference_ratio * 100.0
+            ),
+            theme,
+        ),
+        key_value_detail_item(
+            "tray icon",
+            walls_core::tray_icon::tray_accent_label(walls_core::tray_icon::effective_tray_accent(
+                app.ctx.config.tray.accent,
+            )),
+            theme,
+        ),
+    ];
+    let desktop = walls_core::autostart::current_autostart_desktop();
+    let tray_autostart = if walls_core::autostart::tray_autostart_available(desktop) {
+        walls_core::autostart::tray_autostart_enabled_for_desktop(&app.ctx.config, desktop)
+            .to_string()
+    } else {
+        format!(
+            "unavailable on {}",
+            walls_core::tray::desktop_display_name(desktop)
+        )
+    };
+    items.push(key_value_detail_item(
+        "tray autostart",
+        tray_autostart,
+        theme,
+    ));
+    items
+}
+
 fn library_details(app: &App) -> Vec<String> {
     let mut details = vec![
         format!("cache: {}", app.ctx.paths.cache_dir.display()),
@@ -1171,6 +1326,76 @@ fn library_details(app: &App) -> Vec<String> {
     ];
     details.extend(config_warning_lines(app, &["quota."]));
     details
+}
+
+fn library_detail_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
+    let mut items = vec![
+        section_detail_item("paths", theme),
+        path_detail_item(
+            "cache",
+            app.ctx.paths.cache_dir.display().to_string(),
+            theme,
+        ),
+        path_detail_item(
+            "downloaded",
+            app.ctx.paths.download_dir.display().to_string(),
+            theme,
+        ),
+        path_detail_item(
+            "favorites",
+            app.ctx.paths.favorites_dir.display().to_string(),
+            theme,
+        ),
+        path_detail_item(
+            "fetched",
+            app.ctx.paths.fetched_dir.display().to_string(),
+            theme,
+        ),
+        path_detail_item(
+            "compose",
+            app.ctx.paths.compose_dir.display().to_string(),
+            theme,
+        ),
+        spacer_detail_item(),
+        section_detail_item("cache state", theme),
+        key_value_detail_item("quota", quota_summary(app), theme),
+        key_value_detail_item(
+            "queue",
+            format!("{} items", app.ctx.state.cache_queue.len()),
+            theme,
+        ),
+        key_value_detail_item(
+            "history",
+            format!("{} entries", app.ctx.state.history.len()),
+            theme,
+        ),
+        spacer_detail_item(),
+        section_detail_item("selection", theme),
+        key_value_detail_item(
+            "strategy",
+            format!("{:?}", app.ctx.config.selection.strategy),
+            theme,
+        ),
+        key_value_detail_item(
+            "avoid recent",
+            app.ctx.config.selection.avoid_recent.to_string(),
+            theme,
+        ),
+        key_value_detail_item(
+            "refetch below",
+            format!(
+                "{} cached",
+                app.ctx.config.selection.refetch_when_cache_below
+            ),
+            theme,
+        ),
+    ];
+    items.extend(
+        config_warning_lines(app, &["quota."])
+            .into_iter()
+            .map(|warning| warning_detail_item(warning, theme)),
+    );
+    items
 }
 
 fn apply_environment_summary(app: &App) -> ApplyEnvironmentSummary {
@@ -1240,6 +1465,90 @@ fn apply_display_details(app: &App) -> Vec<String> {
     }
     details.extend(config_warning_lines(app, &["apply."]));
     details
+}
+
+fn apply_display_detail_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
+    let detection = apply_environment_summary(app);
+    let custom_script = app
+        .ctx
+        .config
+        .apply
+        .custom_script
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())
+        .unwrap_or("(not set)");
+    let mut items = vec![
+        section_detail_item("configured", theme),
+        key_value_detail_item(
+            "backend",
+            backend_setting_label(app.ctx.config.apply.backend),
+            theme,
+        ),
+        path_detail_item("custom script", custom_script, theme),
+        key_value_detail_item(
+            "cosmic method",
+            cosmic_method_label(app.ctx.config.apply.cosmic.method),
+            theme,
+        ),
+        path_detail_item(
+            "cosmic config",
+            app.ctx.config.apply.cosmic.config_path.clone(),
+            theme,
+        ),
+        key_value_detail_item(
+            "cosmic original",
+            app.ctx.config.apply.cosmic.use_original_path.to_string(),
+            theme,
+        ),
+        key_value_detail_item(
+            "display mode",
+            app.ctx.config.display.mode.to_string(),
+            theme,
+        ),
+        key_value_detail_item(
+            "EXIF auto-rotate",
+            app.ctx.config.display.auto_rotate.to_string(),
+            theme,
+        ),
+        key_value_detail_item("target", display_target_summary(app), theme),
+        key_value_detail_item(
+            "imagemagick",
+            app.ctx.config.display.imagemagick_command.clone(),
+            theme,
+        ),
+        key_value_detail_item(
+            "filters",
+            format!(
+                "{} configured, enabled={}",
+                app.ctx.config.display.filters.filters.len(),
+                app.ctx.config.display.filters.enabled
+            ),
+            theme,
+        ),
+        key_value_detail_item(
+            "filter command",
+            app.ctx.config.display.filters.command.clone(),
+            theme,
+        ),
+        spacer_detail_item(),
+        section_detail_item("detected this session", theme),
+    ];
+    for line in detection.detection_detail_lines(app.ctx.config.apply.cosmic.method) {
+        if let Some((label, value)) = line.split_once(": ") {
+            items.push(detected_detail_item(label, value, theme));
+        } else {
+            items.push(ListItem::new(Line::from(vec![
+                Span::raw("    · "),
+                Span::styled(line, theme.muted()),
+            ])));
+        }
+    }
+    items.extend(
+        config_warning_lines(app, &["apply."])
+            .into_iter()
+            .map(|warning| warning_detail_item(warning, theme)),
+    );
+    items
 }
 
 fn quota_summary(app: &App) -> String {
@@ -1745,7 +2054,8 @@ mod tests {
         assert!(!text.contains("  [off] Wallhaven"), "{text}");
         assert!(text.contains("  [on] Library"), "{text}");
         assert!(text.contains("  [on] Apply/display"), "{text}");
-        assert!(text.contains("on start: false"), "{text}");
+        assert!(text.contains("─ configured"), "{text}");
+        assert!(text.contains("on start            : false"), "{text}");
         assert!(text.contains("local only"), "{text}");
         assert!(!text.contains("paused:"), "{text}");
         assert!(text.contains("normal"), "{text}");
@@ -1841,14 +2151,15 @@ mod tests {
             text.contains("> [on] Rotation - every 42s, online, 35% online"),
             "{text}"
         );
-        assert!(text.contains("enabled: true"), "{text}");
-        assert!(text.contains("on start: true"), "{text}");
-        assert!(text.contains("interval: 42s"), "{text}");
-        assert!(text.contains("internet: true"), "{text}");
-        assert!(text.contains("safe mode: true"), "{text}");
-        assert!(text.contains("lock screen: true"), "{text}");
-        assert!(text.contains("download preference: 35% online"), "{text}");
-        assert!(text.contains("tray icon: blue"), "{text}");
+        assert!(text.contains("─ configured"), "{text}");
+        assert!(text.contains("enabled             : true"), "{text}");
+        assert!(text.contains("on start            : true"), "{text}");
+        assert!(text.contains("interval            : 42s"), "{text}");
+        assert!(text.contains("internet            : true"), "{text}");
+        assert!(text.contains("safe mode           : true"), "{text}");
+        assert!(text.contains("lock screen         : true"), "{text}");
+        assert!(text.contains("download preference : 35% online"), "{text}");
+        assert!(text.contains("tray icon           : blue"), "{text}");
         assert!(!text.contains("paused:"), "{text}");
     }
 
@@ -1879,15 +2190,33 @@ mod tests {
             text.contains("> [on] Library - 0 queued, 0 history, quota 0 MB"),
             "{text}"
         );
-        assert!(text.contains("cache: /tmp/walls-cache"), "{text}");
-        assert!(text.contains("downloaded: /tmp/walls-downloaded"), "{text}");
-        assert!(text.contains("favorites: /tmp/walls-favorites"), "{text}");
-        assert!(text.contains("fetched: /tmp/walls-fetched"), "{text}");
-        assert!(text.contains("compose: /tmp/walls-compose"), "{text}");
-        assert!(text.contains("selection: Random"), "{text}");
-        assert!(text.contains("avoid recent: 50"), "{text}");
+        assert!(text.contains("─ paths"), "{text}");
         assert!(
-            text.contains("warning: quota.size_mb: must be greater than zero"),
+            text.contains("cache               : /tmp/walls-cache"),
+            "{text}"
+        );
+        assert!(
+            text.contains("downloaded          : /tmp/walls-downloaded"),
+            "{text}"
+        );
+        assert!(
+            text.contains("favorites           : /tmp/walls-favorites"),
+            "{text}"
+        );
+        assert!(
+            text.contains("fetched             : /tmp/walls-fetched"),
+            "{text}"
+        );
+        assert!(
+            text.contains("compose             : /tmp/walls-compose"),
+            "{text}"
+        );
+        assert!(text.contains("─ cache state"), "{text}");
+        assert!(text.contains("─ selection"), "{text}");
+        assert!(text.contains("strategy            : Random"), "{text}");
+        assert!(text.contains("avoid recent        : 50"), "{text}");
+        assert!(
+            text.contains("! quota.size_mb: must be greater than zero"),
             "{text}"
         );
     }
@@ -1938,28 +2267,38 @@ mod tests {
             ),
             "{text}"
         );
-        assert!(text.contains("configured (config.json):"), "{text}");
-        assert!(text.contains("detected (this session):"), "{text}");
-        assert!(text.contains("backend: custom-script"), "{text}");
-        assert!(text.contains("custom script: (not set)"), "{text}");
-        assert!(text.contains("cosmic method: cosmic-ext-bg-ctl"), "{text}");
+        assert!(text.contains("─ configured"), "{text}");
+        assert!(text.contains("─ detected this session"), "{text}");
         assert!(
-            text.contains("cosmic config path: /tmp/missing-cosmic-config"),
+            text.contains("backend             : custom-script"),
             "{text}"
         );
-        assert!(text.contains("cosmic uses original: true"), "{text}");
-        assert!(text.contains("display mode: fill"), "{text}");
-        assert!(text.contains("EXIF auto-rotate: true"), "{text}");
-        assert!(text.contains("target: 3840x2160 target"), "{text}");
-        assert!(text.contains("resolved backend: custom-script"), "{text}");
+        assert!(text.contains("custom script       : (not set)"), "{text}");
         assert!(
-            text.contains("filters: 1 configured, enabled=true"),
+            text.contains("cosmic method       : cosmic-ext-bg-ctl"),
             "{text}"
         );
         assert!(
-            text.contains(
-                "warning: apply.custom_script: is required when apply.backend is custom-script"
-            ),
+            text.contains("cosmic config       : /tmp/missing-cosmic-config"),
+            "{text}"
+        );
+        assert!(text.contains("cosmic original     : true"), "{text}");
+        assert!(text.contains("display mode        : fill"), "{text}");
+        assert!(text.contains("EXIF auto-rotate    : true"), "{text}");
+        assert!(
+            text.contains("target              : 3840x2160 target"),
+            "{text}"
+        );
+        assert!(
+            text.contains("resolved backend    : custom-script"),
+            "{text}"
+        );
+        assert!(
+            text.contains("filters             : 1 configured, enabled=true"),
+            "{text}"
+        );
+        assert!(
+            text.contains("! apply.custom_script: is required"),
             "{text}"
         );
     }
@@ -2525,7 +2864,7 @@ mod tests {
         assert!(app.message.contains("config saved: selection=Sequential"));
         let text = std::fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
         assert!(text.contains("\"strategy\": \"sequential\""), "{text}");
-        assert!(render_text(&app, 120, 32).contains("selection: Sequential"));
+        assert!(render_text(&app, 120, 32).contains("strategy            : Sequential"));
     }
 
     #[test]
