@@ -1806,7 +1806,8 @@ fn trash_plan_details_json(plan: &walls_core::ctx::TrashPlan) -> serde_json::Val
 
 fn cmd_fetch(paths: Vec<PathBuf>, move_files: bool) -> anyhow::Result<()> {
     if paths.is_empty() {
-        anyhow::bail!("fetch requires at least one path");
+        eprintln!("{}", recovery::fetch_requires_path());
+        std::process::exit(1);
     }
     let ctx = WallsCtx::load()?;
     for dest in ctx.fetch_files(&paths, move_files)? {
