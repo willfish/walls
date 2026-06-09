@@ -85,6 +85,7 @@ impl WallhavenClient {
                     ("sorting", params.sorting.as_str()),
                     ("order", params.order.as_str()),
                     ("atleast", params.atleast.as_str()),
+                    ("ratios", params.ratios.as_str()),
                     ("page", page.as_str()),
                 ])
         })

@@ -189,6 +189,7 @@ or deliberately defers it to a later focused slice.
 | `config.sources[].purity` | Editable | Wallhaven source purity booleans write the bit string; NSFW depends on API key presence. |
 | `config.sources[].sorting` | Editable | Wallhaven sorting choice field. |
 | `config.sources[].order` | Editable | Wallhaven order choice field. |
+| `config.sources[].ratios` | Editable | Wallhaven aspect ratio choice field. |
 | `config.sources[].atleast` | Editable | Wallhaven minimum resolution choice field. |
 | `config.sources[].prefer` | Editable | Wallhaven collection/search preference choice field. |
 | `config.sources[].collections` | Manual | Wallhaven collection list is persisted on each Wallhaven source. |

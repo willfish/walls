@@ -193,6 +193,11 @@
           "enum": ["1024x768", "1280x720", "1366x768", "1600x900", "1920x1080", "2560x1440", "3440x1440", "3840x2160"],
           "default": "1920x1080"
         },
+        "ratios": {
+          "type": "string",
+          "enum": ["16x9", "16x10", "21x9", "32x9", "48x9", "9x16", "10x16", "9x18", "1x1", "3x2", "4x3", "5x4"],
+          "default": "16x9"
+        },
         "prefer": { "type": "string", "enum": ["collections_then_search", "search_only", "collections_only"] },
         "collections": {
           "type": "array",
