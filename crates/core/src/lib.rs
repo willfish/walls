@@ -19,6 +19,7 @@ pub mod bin_resolve;
 pub mod config;
 pub mod cosmic_theme;
 pub mod ctx;
+pub mod doctor;
 pub mod downloads;
 pub mod error;
 pub(crate) mod feeds;

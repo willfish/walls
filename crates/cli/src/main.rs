@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use tracing_subscriber::{prelude::*, EnvFilter, Layer};
 use walls_core::apply::ApplyTrigger;
 use walls_core::apply::{backend_setting_label, desktop_display_name, summarize_apply_environment};
+use walls_core::doctor::{DoctorOptions, DoctorReport, DoctorSection, DoctorStatus};
 use walls_core::providers::ProviderStatusReport;
 use walls_core::{RefreshLevel, WallsCtx};
 
@@ -45,6 +46,12 @@ enum Command {
     },
     /// Print status
     Status {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check whether walls is ready for this machine
+    Doctor {
+        /// Emit stable machine-readable diagnostic checks as JSON
         #[arg(long)]
         json: bool,
     },
@@ -142,6 +149,7 @@ async fn main() -> anyhow::Result<()> {
         }) => cmd_next(manual, refresh, json).await?,
         Some(Command::Prev { json }) => cmd_prev(json)?,
         Some(Command::Status { json }) => cmd_status(json)?,
+        Some(Command::Doctor { json }) => cmd_doctor(json)?,
         Some(Command::Pause) => cmd_pause(true)?,
         Some(Command::Resume) => cmd_pause(false)?,
         Some(Command::TogglePause) => cmd_toggle_pause()?,
@@ -210,6 +218,24 @@ fn config_home_for_autostart(ctx: &WallsCtx) -> &std::path::Path {
         .config_dir
         .parent()
         .unwrap_or(ctx.paths.config_dir.as_path())
+}
+
+fn doctor_options(ctx: &WallsCtx) -> DoctorOptions {
+    let tray_runtime = bin_utils::tray_runtime_status();
+    DoctorOptions {
+        xdg_current_desktop: env_var("XDG_CURRENT_DESKTOP"),
+        xdg_session_desktop: env_var("XDG_SESSION_DESKTOP"),
+        desktop_startup_id: env_var("DESKTOP_STARTUP_ID"),
+        xdg_session_type: env_var("XDG_SESSION_TYPE"),
+        wayland_display: env_var("WAYLAND_DISPLAY"),
+        display: env_var("DISPLAY"),
+        walls_tray: env_var("WALLS_TRAY"),
+        walls_tui_preview: env_var("WALLS_TUI_PREVIEW"),
+        config_home: Some(config_home_for_autostart(ctx).to_path_buf()),
+        tray_bin: Some(tray_runtime.resolved_bin),
+        tray_bin_exists: Some(tray_runtime.resolved_bin_exists),
+        tray_running: Some(tray_runtime.running),
+    }
 }
 
 fn desktop_status_json(ctx: &WallsCtx) -> serde_json::Value {
@@ -288,6 +314,62 @@ fn desktop_status_json(ctx: &WallsCtx) -> serde_json::Value {
             },
         },
     })
+}
+
+fn print_doctor_human(report: &DoctorReport) {
+    println!(
+        "walls doctor: {}",
+        if report.ready {
+            "ready"
+        } else {
+            "needs attention"
+        }
+    );
+    for section in [
+        DoctorSection::Config,
+        DoctorSection::DesktopApply,
+        DoctorSection::Tray,
+        DoctorSection::Providers,
+        DoctorSection::StorageCache,
+        DoctorSection::Tui,
+    ] {
+        let checks: Vec<_> = report
+            .checks
+            .iter()
+            .filter(|check| check.section == section)
+            .collect();
+        if checks.is_empty() {
+            continue;
+        }
+        println!();
+        println!("{}", section.title());
+        for check in checks {
+            let marker = match check.status {
+                DoctorStatus::Pass => "ok",
+                DoctorStatus::Warn => "warn",
+                DoctorStatus::Fail => "fail",
+            };
+            println!("- [{marker}] {}: {}", check.id, check.message);
+            if let Some(remediation) = &check.remediation {
+                println!("  fix: {remediation}");
+            }
+        }
+    }
+}
+
+fn cmd_doctor(json: bool) -> anyhow::Result<()> {
+    let ctx = WallsCtx::load()?;
+    let report = walls_core::doctor::run_doctor(&ctx, &doctor_options(&ctx));
+    let failed = report.has_failures();
+    if json {
+        print_json(serde_json::to_value(&report)?)?;
+    } else {
+        print_doctor_human(&report);
+    }
+    if failed {
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 fn print_json(value: serde_json::Value) -> anyhow::Result<()> {
