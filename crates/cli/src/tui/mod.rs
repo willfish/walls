@@ -3,6 +3,7 @@ mod command;
 mod history_browse_view;
 mod logs_view;
 mod now_view;
+mod open_target;
 #[cfg(feature = "tui-preview")]
 mod preview;
 mod sources_view;
@@ -10,10 +11,9 @@ mod startup;
 mod style;
 
 use std::io::{stdout, IsTerminal};
-use std::process::Command;
 use std::thread;
 
-use crate::tui::app::{EditTarget, OpenTarget};
+use crate::tui::app::EditTarget;
 use anyhow::Context;
 use app::{
     App, InputMode, Tab, CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION,
@@ -764,47 +764,8 @@ fn open_selected(app: &App) -> anyhow::Result<Option<String>> {
     let Some(target) = app.selected_open_target() else {
         return Ok(None);
     };
-    spawn_open_target(&target)?;
+    open_target::spawn(&target)?;
     Ok(Some(format!("opened: {}", target.display_value())))
-}
-
-fn spawn_open_target(target: &OpenTarget) -> anyhow::Result<()> {
-    let command = open_command(target);
-    Command::new(&command.program).args(&command.args).spawn()?;
-    Ok(())
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct OpenCommand {
-    program: String,
-    args: Vec<String>,
-}
-
-fn open_command(target: &OpenTarget) -> OpenCommand {
-    let value = target.display_value();
-    #[cfg(target_os = "macos")]
-    {
-        OpenCommand {
-            program: "open".into(),
-            args: vec![value],
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        OpenCommand {
-            program: "cmd".into(),
-            args: vec!["/C".into(), "start".into(), "".into(), value],
-        }
-    }
-
-    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-    {
-        OpenCommand {
-            program: "xdg-open".into(),
-            args: vec![value],
-        }
-    }
 }
 
 fn apply_effect(app: &mut App, effect: UpdateEffect) -> anyhow::Result<()> {
@@ -2299,9 +2260,9 @@ mod tests {
 
     use super::{
         action_for_key,
-        app::{App, EditFieldKind, OpenTarget, SearchHit},
+        app::{App, EditFieldKind, SearchHit},
         apply_effect, draw_inner, footer_keys, footer_paragraph, handle_key, line_style,
-        open_command,
+        open_target::{open_command, OpenTarget},
         startup::{draw_startup_intro, intro_disabled_value, StartupIntro},
         style, update, EditTarget, InputMode, Tab, TerminalSize, UiAction, UpdateEffect,
         CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION,
