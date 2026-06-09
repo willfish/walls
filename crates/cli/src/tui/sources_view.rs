@@ -5,7 +5,7 @@ use ratatui::widgets::ListItem;
 use walls_core::config::{reddit_summary, source_secrets_detail_lines, SourceEntry};
 
 use super::app::{App, WallhavenProviderSummary};
-use super::style::Theme;
+use super::style::{self, StateKind, Theme};
 
 const SOURCE_LABEL_WIDTH: usize = 26;
 
@@ -35,19 +35,51 @@ pub fn build_sources_list_items(app: &App, theme: Theme, indent: usize) -> Vec<L
     for row in source_rows(app) {
         items.push(ListItem::new(prefixed_line(&pad, row_spans(&row, theme))));
         for detail in row.detail_lines {
-            items.push(ListItem::new(Line::from(vec![
-                Span::raw(pad.clone()),
-                Span::styled(format!("      {detail}"), theme.muted()),
-            ])));
+            items.push(source_detail_item(&pad, &detail, theme));
         }
     }
     if let Some(hint) = disabled_hint(app) {
         items.push(ListItem::new(Line::from(vec![
             Span::raw(pad),
-            Span::styled(hint, theme.muted()),
+            Span::styled(
+                style::state_text(StateKind::Disabled, hint.trim()),
+                theme.state(StateKind::Disabled),
+            ),
         ])));
     }
     items
+}
+
+fn source_detail_item(pad: &str, detail: &str, theme: Theme) -> ListItem<'static> {
+    if let Some(text) = detail.strip_prefix("warning: ") {
+        return ListItem::new(prefixed_line(
+            pad,
+            style::state_line(StateKind::ValidationWarning, text.to_string(), theme),
+        ));
+    }
+    if let Some((label, value)) = detail.split_once(": ") {
+        if value == "missing" {
+            return ListItem::new(Line::from(vec![
+                Span::raw(pad.to_string()),
+                Span::raw("      "),
+                Span::styled(format!("{label}: "), theme.muted()),
+                Span::styled("[missing]", theme.state(StateKind::MissingConfig)),
+            ]));
+        }
+        if let Some((kind, message)) = style::state_parts(value) {
+            return ListItem::new(Line::from(vec![
+                Span::raw(pad.to_string()),
+                Span::raw("      "),
+                Span::styled(format!("{label}: "), theme.muted()),
+                Span::styled(format!("[{}] ", kind.label()), theme.state(kind)),
+                Span::styled(message.to_string(), theme.state(kind)),
+            ]));
+        }
+    }
+    ListItem::new(Line::from(vec![
+        Span::raw(pad.to_string()),
+        Span::styled(format!("      {detail}"), theme.muted()),
+    ]))
 }
 
 fn prefixed_line(pad: &str, line: Line<'static>) -> Line<'static> {
@@ -141,9 +173,7 @@ fn disabled_hint(app: &App) -> Option<String> {
         return None;
     }
     let noun = if disabled == 1 { "source" } else { "sources" };
-    Some(format!(
-        "    ─ {disabled} disabled {noun} · Enter to browse all"
-    ))
+    Some(format!("{disabled} disabled {noun}; Enter to browse all"))
 }
 
 fn format_source_row(selected: bool, enabled: bool, label: &str, meta: &str) -> String {
@@ -189,15 +219,29 @@ fn row_spans(row: &SourceRow, theme: Theme) -> Line<'static> {
     } else {
         theme.inactive_state()
     };
-    Line::from(vec![
-        Span::raw("  "),
-        Span::styled(marker.to_string(), marker_style),
-        Span::styled(padded, label_style),
-        Span::raw(" "),
-        Span::styled(if row.enabled { "on" } else { "off" }, state_style),
-        Span::styled(" · ", theme.muted()),
-        Span::styled(row.meta.clone(), theme.muted()),
-    ])
+    Line::from(
+        vec![
+            Span::raw("  "),
+            Span::styled(marker.to_string(), marker_style),
+            Span::styled(padded, label_style),
+            Span::raw(" "),
+            Span::styled(if row.enabled { "on" } else { "off" }, state_style),
+            Span::styled(" · ", theme.muted()),
+        ]
+        .into_iter()
+        .chain(source_meta_spans(&row.meta, theme))
+        .collect::<Vec<_>>(),
+    )
+}
+
+fn source_meta_spans(meta: &str, theme: Theme) -> Vec<Span<'static>> {
+    if let Some((kind, rest)) = style::state_parts(meta) {
+        return vec![
+            Span::styled(format!("[{}] ", kind.label()), theme.state(kind)),
+            Span::styled(rest.to_string(), theme.state(kind)),
+        ];
+    }
+    vec![Span::styled(meta.to_string(), theme.muted())]
 }
 
 pub fn source_display_name(src: &SourceEntry) -> String {
@@ -239,7 +283,11 @@ pub fn source_display_meta(src: &SourceEntry) -> String {
     match src.source_type.as_str() {
         "reddit" => reddit_summary(src),
         "favorites" | "fetched" => "local library".into(),
-        "folder" | "image" => truncate_middle(src.path.as_deref().unwrap_or("path not set"), 36),
+        "folder" | "image" => src
+            .path
+            .as_deref()
+            .map(|path| truncate_middle(path, 36))
+            .unwrap_or_else(|| style::state_text(StateKind::MissingConfig, "path not set")),
         "unsplash" => {
             let query = src.query.as_deref().unwrap_or("any query");
             let orientation = src.orientation.as_deref().unwrap_or("any");
@@ -247,14 +295,26 @@ pub fn source_display_meta(src: &SourceEntry) -> String {
         }
         "bing" => "image of the day".into(),
         "apod" => "NASA feed".into(),
-        "json" => truncate_middle(src.url.as_deref().unwrap_or("URL not set"), 36),
-        "mediarss" => truncate_middle(src.url.as_deref().unwrap_or("feed URL not set"), 36),
+        "json" => src
+            .url
+            .as_deref()
+            .map(|url| truncate_middle(url, 36))
+            .unwrap_or_else(|| style::state_text(StateKind::MissingConfig, "URL not set")),
+        "mediarss" => src
+            .url
+            .as_deref()
+            .map(|url| truncate_middle(url, 36))
+            .unwrap_or_else(|| style::state_text(StateKind::MissingConfig, "feed URL not set")),
         "pixabay" => src
             .query
             .as_deref()
             .map(|q| format!("{q} images"))
             .unwrap_or_else(|| "images".into()),
-        "immich" => truncate_middle(src.url.as_deref().unwrap_or("server not set"), 36),
+        "immich" => src
+            .url
+            .as_deref()
+            .map(|url| truncate_middle(url, 36))
+            .unwrap_or_else(|| style::state_text(StateKind::MissingConfig, "server not set")),
         "spotlight" => "Windows Spotlight".into(),
         "weighting" => src
             .query
@@ -268,7 +328,7 @@ pub fn source_display_meta(src: &SourceEntry) -> String {
             .or(src.query.as_deref())
             .or(src.path.as_deref())
             .map(|v| truncate_middle(v, 36))
-            .unwrap_or_else(|| "not configured".into()),
+            .unwrap_or_else(|| style::state_text(StateKind::MissingConfig, "not configured")),
     }
 }
 
@@ -316,7 +376,10 @@ fn wallhaven_detail_lines(provider: &WallhavenProviderSummary) -> Vec<String> {
         ),
     ];
     if provider.collections.is_empty() {
-        lines.push("collections: none".into());
+        lines.push(format!(
+            "collections: {}",
+            style::state_text(StateKind::Empty, "none")
+        ));
     } else {
         lines.push(format!("collections: {}", provider.collections.len()));
         lines.extend(

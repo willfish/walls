@@ -796,6 +796,9 @@ fn render_lines(f: &mut Frame, area: Rect, title: &str, body: Vec<String>, theme
 }
 
 fn string_list_item(line: &str, theme: style::Theme) -> ListItem<'static> {
+    if let Some((kind, message)) = style::state_parts(line) {
+        return ListItem::new(style::state_line(kind, message.to_string(), theme));
+    }
     ListItem::new(line.to_string()).style(line_style(line, theme))
 }
 
@@ -1066,6 +1069,9 @@ fn footer_keys(app: &App, width: u16) -> String {
 
 fn line_style(line: &str, theme: style::Theme) -> Style {
     let trimmed = line.trim_start();
+    if let Some((kind, _)) = style::state_parts(trimmed) {
+        return theme.state(kind);
+    }
     if trimmed.starts_with('>') || trimmed.starts_with("▸ ") {
         return theme.selected();
     }
@@ -1862,7 +1868,10 @@ fn now_lines(app: &App) -> Vec<String> {
             format!("composed: {}", c.composed_path),
             app.message.clone(),
         ],
-        None => vec!["(no current wallpaper)".into(), app.message.clone()],
+        None => vec![
+            style::state_text(style::StateKind::Empty, "no current wallpaper"),
+            app.message.clone(),
+        ],
     }
 }
 
@@ -2346,7 +2355,7 @@ mod tests {
 
         assert!(text.contains("▸ Wallhaven"), "{text}");
         assert!(text.contains("query mountains"), "{text}");
-        assert!(text.contains("api key: missing"), "{text}");
+        assert!(text.contains("api key: [missing]"), "{text}");
         assert!(text.contains("search query: mountains"), "{text}");
         assert!(text.contains("categories: general, people"), "{text}");
         assert!(text.contains("purity: SFW"), "{text}");
@@ -2356,7 +2365,7 @@ mod tests {
         );
         assert!(text.contains("Abstract: alice/42"), "{text}");
         assert!(
-            text.contains("warning: API key missing; NSFW purity unavailable"),
+            text.contains("[warning] API key missing; NSFW purity unavailable"),
             "{text}"
         );
     }
@@ -2390,9 +2399,9 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("purity: SFW, sketchy, NSFW"), "{text}");
-        assert!(text.contains("collections: none"), "{text}");
+        assert!(text.contains("collections: [empty] none"), "{text}");
         assert!(
-            text.contains("warning: NSFW purity requires Wallhaven account access"),
+            text.contains("[warning] NSFW purity requires Wallhaven account access"),
             "{text}"
         );
         assert!(!text.contains("super-secret-token"), "{text}");
@@ -2657,6 +2666,38 @@ mod tests {
     }
 
     #[test]
+    fn search_history_browse_and_logs_empty_states_use_state_labels() {
+        let mut app = test_app();
+        app.ctx.state.history.clear();
+        app.ctx.state.cache_queue.clear();
+        app.local_candidates.clear();
+
+        app.tab = Tab::Search;
+        let search = render_text(&app, 90, 18);
+        assert!(search.contains("[empty] no results; press i"), "{search}");
+
+        app.tab = Tab::History;
+        let history = render_text(&app, 90, 18);
+        assert!(
+            history.contains("[empty] no wallpaper history captured yet"),
+            "{history}"
+        );
+
+        app.tab = Tab::Browse;
+        let browse = render_text(&app, 90, 20);
+        assert!(browse.contains("[empty] queue is empty"), "{browse}");
+        assert!(
+            browse.contains("[empty] no local candidates found"),
+            "{browse}"
+        );
+
+        super::LOG_BUFFER.lock().unwrap().clear();
+        app.tab = Tab::Logs;
+        let logs = render_text(&app, 90, 18);
+        assert!(logs.contains("[empty] no logs captured yet"), "{logs}");
+    }
+
+    #[test]
     fn terminal_size_contracts_cover_tiny_narrow_standard_and_wide() {
         assert_eq!(
             super::terminal_size(Rect::new(0, 0, 9, 24)),
@@ -2698,7 +2739,7 @@ mod tests {
 
         assert!(text.contains("Now"), "{text}");
         assert!(text.contains("preview"), "{text}");
-        assert!(text.contains("(no current wallpaper)"), "{text}");
+        assert!(text.contains("[empty] no current wallpaper"), "{text}");
     }
 
     #[test]
@@ -3092,7 +3133,7 @@ mod tests {
         app.config_sub_cursor = 0;
 
         let text = render_text(&app, 120, 30);
-        assert!(text.contains("reddit api credentials: missing"), "{text}");
+        assert!(text.contains("reddit api credentials: [missing]"), "{text}");
         assert!(text.contains("reddit.com/prefs/apps"), "{text}");
     }
 

@@ -13,7 +13,7 @@ use walls_core::validate::{
 };
 use walls_core::WallsCtx;
 
-use super::style::{ColorMode, StatusKind};
+use super::style::{self, ColorMode, StateKind, StatusKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -894,7 +894,8 @@ impl App {
     }
 
     pub fn history_lines(&self) -> Vec<String> {
-        self.ctx
+        let lines: Vec<String> = self
+            .ctx
             .state
             .history
             .iter()
@@ -903,7 +904,15 @@ impl App {
                 let mark = if i == self.cursor { ">" } else { " " };
                 format!("{mark} {h}")
             })
-            .collect()
+            .collect();
+        if lines.is_empty() {
+            vec![style::state_text(
+                StateKind::Empty,
+                "no wallpaper history captured yet",
+            )]
+        } else {
+            lines
+        }
     }
 
     pub fn browse_lines(&self) -> Vec<String> {
@@ -920,7 +929,10 @@ impl App {
     pub fn search_lines(&self) -> Vec<String> {
         let mut lines = vec![format!("query: {}", self.search_query)];
         if self.search_results.is_empty() {
-            lines.push("(no results — press i to edit query, Enter to search)".into());
+            lines.push(style::state_text(
+                StateKind::Empty,
+                "no results; press i to edit query, Enter to search",
+            ));
         } else {
             for (i, hit) in self.search_results.iter().enumerate() {
                 let mark = if i == self.cursor { ">" } else { " " };
@@ -933,7 +945,7 @@ impl App {
     pub fn logs_lines(&self, width: u16) -> Vec<String> {
         let logs = super::LOG_BUFFER.lock().unwrap();
         if logs.is_empty() {
-            return vec!["(no logs captured yet)".into()];
+            return vec![style::state_text(StateKind::Empty, "no logs captured yet")];
         }
         let wrap_width = usize::from(width).saturating_sub(4);
         let mut lines = Vec::new();
@@ -954,16 +966,34 @@ impl App {
     pub fn browse_items(&self) -> Vec<String> {
         let mut items = Vec::new();
         items.push("-- cache queue --".into());
-        for id in &self.ctx.state.cache_queue {
-            items.push(format!("queue: {id}"));
+        if self.ctx.state.cache_queue.is_empty() {
+            items.push(style::state_text(StateKind::Empty, "queue is empty"));
+        } else {
+            for id in &self.ctx.state.cache_queue {
+                items.push(format!("queue: {id}"));
+            }
         }
         items.push("-- local folders --".into());
-        for path in &self.local_candidates {
-            items.push(format!("local: {}", path.display()));
+        if self.local_candidates.is_empty() {
+            items.push(style::state_text(
+                StateKind::Empty,
+                "no local candidates found",
+            ));
+        } else {
+            for path in &self.local_candidates {
+                items.push(format!("local: {}", path.display()));
+            }
         }
         items.push("-- history --".into());
-        for h in &self.ctx.state.history {
-            items.push(format!("history: {h}"));
+        if self.ctx.state.history.is_empty() {
+            items.push(style::state_text(
+                StateKind::Empty,
+                "no wallpaper history captured yet",
+            ));
+        } else {
+            for h in &self.ctx.state.history {
+                items.push(format!("history: {h}"));
+            }
         }
         items
     }
