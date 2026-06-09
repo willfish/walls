@@ -1290,32 +1290,8 @@ fn footer_paragraph(app: &App, width: u16, theme: style::Theme) -> Paragraph<'_>
 }
 
 fn footer_keys(app: &App, width: u16) -> String {
-    if app.show_key_help {
-        return "help | Esc/q close".into();
-    }
     if width < 50 {
-        return match app.input_mode {
-            InputMode::Command => format!(":{}_ | Enter | Esc | q", app.cmd_line),
-            InputMode::SearchInput => "type | Enter search | Esc | q".into(),
-            InputMode::Normal => match app.tab {
-                Tab::Search => {
-                    let enter_hint = if app.search_results.is_empty() {
-                        "Enter search"
-                    } else {
-                        "Enter apply"
-                    };
-                    format!("←/→ /i | {enter_hint} | j/k | : ? q")
-                }
-                Tab::Config
-                    if app.config_in_subnav && app.is_sources_list_block(app.config_cursor) =>
-                {
-                    "←/→ tabs | Esc | j/k Pg | e | t | n/p | sp | : | ? | q".into()
-                }
-                Tab::Config => "←/→ tabs | j/k Pg | Enter | e | t | n/p | sp | : | ? | q".into(),
-                Tab::Logs => "←/→ tabs | newest | j older k newer | : ? q".into(),
-                _ => "←/→ tabs | j/k Pg | n/p | f/d? | Shift+X | sp | : | ? | q".into(),
-            },
-        };
+        return app.compact_footer_keys();
     }
 
     app.footer_keys()
@@ -2204,7 +2180,7 @@ mod tests {
     use super::{
         action_for_key,
         app::{App, EditFieldKind, SearchHit},
-        apply_effect, draw_inner, footer_paragraph, handle_key, line_style,
+        apply_effect, draw_inner, footer_keys, footer_paragraph, handle_key, line_style,
         startup::{draw_startup_intro, intro_disabled_value, StartupIntro},
         style, update, EditTarget, InputMode, Tab, TerminalSize, UiAction, UpdateEffect,
     };
@@ -3229,7 +3205,7 @@ mod tests {
         assert!(text.contains("/i"), "{text}");
         assert!(text.contains("Enter search"), "{text}");
         assert!(text.contains("j/k"), "{text}");
-        assert!(text.contains(": ? q"), "{text}");
+        assert!(text.contains(":?q"), "{text}");
 
         app.search_results.push(SearchHit {
             id: "id-1".into(),
@@ -3240,6 +3216,86 @@ mod tests {
 
         let text = render_text(&app, 90, 18);
         assert!(text.contains("Wallhaven id-1"), "{text}");
+    }
+
+    #[test]
+    fn normal_footer_uses_shared_tab_navigation_vocabulary() {
+        let mut app = test_app();
+        let tabs = [
+            Tab::Config,
+            Tab::Now,
+            Tab::History,
+            Tab::Browse,
+            Tab::Search,
+            Tab::Logs,
+        ];
+
+        for tab in tabs {
+            app.tab = tab;
+            app.config_cursor = 0;
+            app.config_in_subnav = false;
+
+            let footer = app.footer_keys();
+
+            assert!(footer.starts_with("1-6/←/→ tabs"), "{tab:?}: {footer}");
+            assert!(!footer.starts_with("1 Config"), "{tab:?}: {footer}");
+            assert!(!footer.starts_with("5 Search"), "{tab:?}: {footer}");
+            assert!(!footer.starts_with("6 Logs"), "{tab:?}: {footer}");
+        }
+
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        let footer = app.footer_keys();
+        assert!(footer.contains("e first active"), "{footer}");
+
+        app.tab = Tab::Search;
+        app.search_results.clear();
+        let footer = app.footer_keys();
+        assert!(footer.contains("/ or i edit query"), "{footer}");
+        assert!(footer.contains("Enter search"), "{footer}");
+
+        app.search_results.push(SearchHit {
+            id: "id-1".into(),
+            label: "hit-1".into(),
+        });
+        let footer = app.footer_keys();
+        assert!(footer.contains("Enter apply"), "{footer}");
+
+        app.tab = Tab::Logs;
+        let footer = app.footer_keys();
+        assert!(footer.contains("newest first"), "{footer}");
+    }
+
+    #[test]
+    fn narrow_normal_footer_keeps_same_key_group_ordering() {
+        let mut app = test_app();
+
+        for tab in [Tab::Config, Tab::Now, Tab::Search, Tab::Logs] {
+            app.tab = tab;
+            let footer = footer_keys(&app, 42);
+
+            assert!(footer.starts_with("1-6/←/→ tabs"), "{tab:?}: {footer}");
+            assert!(!footer.starts_with("1 Config"), "{tab:?}: {footer}");
+            assert!(!footer.starts_with("5 Search"), "{tab:?}: {footer}");
+            assert!(!footer.starts_with("6 Logs"), "{tab:?}: {footer}");
+            assert!(footer.contains(":?q"), "{tab:?}: {footer}");
+        }
+
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        let footer = footer_keys(&app, 42);
+        assert!(footer.contains("Enter"), "{footer}");
+        assert!(footer.contains("e"), "{footer}");
+
+        app.tab = Tab::Search;
+        app.search_results.clear();
+        let footer = footer_keys(&app, 42);
+        assert!(footer.contains("/i"), "{footer}");
+        assert!(footer.contains("Enter search"), "{footer}");
+
+        app.tab = Tab::Logs;
+        let footer = footer_keys(&app, 42);
+        assert!(footer.contains("newest"), "{footer}");
     }
 
     #[test]
@@ -3603,7 +3659,7 @@ mod tests {
 
         app.tab = Tab::Now;
         let text = render_text(&app, 80, 24);
-        assert!(text.contains("1-6 tabs"), "{text}");
+        assert!(text.contains("1-6/←/→ tabs"), "{text}");
     }
 
     #[cfg(feature = "tui-preview")]

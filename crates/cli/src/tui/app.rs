@@ -813,6 +813,8 @@ pub struct App {
 }
 
 impl App {
+    const NORMAL_TAB_NAV_HINT: &'static str = "1-6/←/→ tabs";
+
     pub fn new(ctx: WallsCtx) -> anyhow::Result<Self> {
         let search_query = ctx.config.wallhaven.search.q.clone();
         let wallhaven_summary = summarize_wallhaven_provider(&ctx);
@@ -2173,7 +2175,10 @@ impl App {
         }
         let keys = match self.input_mode {
             InputMode::Command => {
-                format!(":{}_ | Ctrl+n/p complete | Enter run Esc cancel", self.cmd_line)
+                format!(
+                    ":{}_ | Ctrl+n/p complete | Enter run Esc cancel",
+                    self.cmd_line
+                )
             }
             InputMode::SearchInput => "Search: type query | Enter search Esc cancel".to_string(),
             InputMode::Normal => match self.tab {
@@ -2184,30 +2189,86 @@ impl App {
                         "Enter apply"
                     };
                     format!(
-                        "5 Search | ←/→ tabs | / or i edit query | {enter_hint} | j/k Pg Home/End | : cmd | ? help"
+                        "{} | / or i edit query | {enter_hint} | j/k Pg Home/End | : cmd | ? help",
+                        Self::NORMAL_TAB_NAV_HINT
                     )
                 }
                 Tab::Config => {
                     if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
-                        "1 Config | ←/→ tabs Esc back | j/k Pg Home/End pick source | e edit | t toggle | n/p | space pause | : cmd | ? help".into()
+                        format!(
+                            "{} | Esc back | j/k Pg Home/End pick source | e edit | t toggle | n/p | space pause | : cmd | ? help",
+                            Self::NORMAL_TAB_NAV_HINT
+                        )
                     } else if self.is_sources_list_block(self.config_cursor) {
-                        "1 Config | ←/→ tabs | j/k Pg Home/End | e first active | Enter pick | t toggle | n/p | space pause | : cmd | ? help"
-                            .into()
+                        format!(
+                            "{} | j/k Pg Home/End | e first active | Enter pick | t toggle | n/p | space pause | : cmd | ? help",
+                            Self::NORMAL_TAB_NAV_HINT
+                        )
                     } else {
-                        "1 Config | ←/→ tabs | j/k Pg Home/End | e edit | t toggle | n/p | space pause | : cmd | ? help".into()
+                        format!(
+                            "{} | j/k Pg Home/End | e edit | t toggle | n/p | space pause | : cmd | ? help",
+                            Self::NORMAL_TAB_NAV_HINT
+                        )
                     }
                 }
                 Tab::Logs => {
-                    "6 Logs | newest first | j older k newer | Home newest End oldest | : cmd | ? help"
-                        .into()
+                    format!(
+                        "{} | newest first | j older k newer | Home newest End oldest | : cmd | ? help",
+                        Self::NORMAL_TAB_NAV_HINT
+                    )
                 }
                 _ => {
-                    "1-6 tabs ←/→ | j/k Pg Home/End | n/p next/prev | f favorite d request trash | Shift+X reset | space pause | : cmd | ? help"
-                        .into()
+                    format!(
+                        "{} | j/k Pg Home/End | n/p next/prev | f favorite d request trash | Shift+X reset | space pause | : cmd | ? help",
+                        Self::NORMAL_TAB_NAV_HINT
+                    )
                 }
             },
         };
         format!("{keys} | q quit")
+    }
+
+    pub fn compact_footer_keys(&self) -> String {
+        if self.show_key_help {
+            return "help | Esc/q close".into();
+        }
+        if self.is_editing() {
+            return "edit | ↑/↓ fields | Space/←/→ | Enter | Esc | q".into();
+        }
+        if self.pending_trash_confirm {
+            return "d confirm trash | Esc cancel".into();
+        }
+        if self.pending_nuke_confirm {
+            return "Shift+X confirm reset | Esc cancel".into();
+        }
+        match self.input_mode {
+            InputMode::Command => format!(":{}_ | Enter | Esc | q", self.cmd_line),
+            InputMode::SearchInput => "type | Enter search | Esc | q".into(),
+            InputMode::Normal => {
+                let nav = Self::NORMAL_TAB_NAV_HINT;
+                match self.tab {
+                    Tab::Search => {
+                        let enter_hint = if self.search_results.is_empty() {
+                            "Enter search"
+                        } else {
+                            "Enter apply"
+                        };
+                        format!("{nav} /i {enter_hint} j/k :?q")
+                    }
+                    Tab::Config
+                        if self.config_in_subnav
+                            && self.is_sources_list_block(self.config_cursor) =>
+                    {
+                        format!("{nav} Esc j/k Pg e t n/p sp :?q")
+                    }
+                    Tab::Config => {
+                        format!("{nav} j/k Pg Enter e t n/p sp :?q")
+                    }
+                    Tab::Logs => format!("{nav} newest j older k newer :?q"),
+                    _ => format!("{nav} j/k Pg n/p f/d? Shift+X sp :?q"),
+                }
+            }
+        }
     }
 }
 
