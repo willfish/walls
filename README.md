@@ -182,6 +182,11 @@ walls-tray         # tray menu → walls prev/next/toggle-pause
 | `walls favorite` | Works |
 | `walls fetch <paths...> [--move]` | Works |
 | `walls trash` | Works |
+| `walls cache status [--json]` | Inspect queue length, provider cache/download counts, sizes, and quota usage |
+| `walls cache inspect [--provider <name>] [--json]` | List provider cache/download files |
+| `walls cache prune [--dry-run] [--force] [--json]` | Clear queued provider downloads first, or purge provider files when the queue is empty |
+| `walls cache clear-queue [--dry-run] [--force] [--json]` | Clear queued provider downloads |
+| `walls cache purge-provider-files [--dry-run] [--force] [--json]` | Remove provider cache files/downloads and prune affected state |
 | `walls config validate [--json]` | Works |
 | `walls config sync` | Reconcile tray autostart desktop entry with `config.json` |
 | `walls pause` / `walls resume` / `walls toggle-pause` | Works |
@@ -244,3 +249,8 @@ Structured command results use a stable envelope:
 - `exit_code_reason` is `null` on normal success and a stable reason string for no-op or failure-like outcomes that scripts may branch on.
 
 `walls current --json` exits non-zero with `status: "missing_current"` when no wallpaper is recorded. `walls next --json` and `walls prev --json` keep the existing successful no-op behavior for `no_change` and `no_previous`, while making the reason explicit.
+
+Cache commands use the same envelope and add cache-specific fields such as
+`queue`, `cache`, `downloads`, `quota`, `plan`, and remove counts. Mutating cache
+commands refuse to change state/files without `--force`; use `--dry-run` to see
+the planned queue clear or provider-file purge.

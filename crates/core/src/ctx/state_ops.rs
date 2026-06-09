@@ -60,6 +60,35 @@ impl WallsCtx {
         crate::downloads::plan_nuke_downloads(&self.paths, &self.state)
     }
 
+    pub fn inspect_cache(&self) -> crate::downloads::CacheInspection {
+        crate::downloads::inspect_cache(&self.paths, &self.state)
+    }
+
+    pub fn list_cache_files(
+        &self,
+        provider: Option<&str>,
+    ) -> Vec<crate::downloads::CacheFileEntry> {
+        crate::downloads::list_cache_files(&self.paths, provider)
+    }
+
+    pub fn clear_cache_queue(&mut self) -> anyhow::Result<usize> {
+        self.with_state_lock(|ctx| {
+            let cleared = crate::downloads::clear_cache_queue(&mut ctx.state);
+            ctx.save_state()?;
+            Ok(cleared)
+        })
+    }
+
+    pub fn purge_provider_files(
+        &mut self,
+    ) -> anyhow::Result<crate::downloads::NukeDownloadsResult> {
+        self.with_state_lock(|ctx| {
+            let result = crate::downloads::purge_provider_files(&ctx.paths, &mut ctx.state);
+            ctx.save_state()?;
+            Ok(result)
+        })
+    }
+
     /// Clear the provider queue, or purge cached/downloaded provider files when the queue is empty.
     pub fn nuke_downloads(&mut self) -> anyhow::Result<crate::downloads::NukeDownloadsResult> {
         self.with_state_lock(|ctx| {

@@ -1,7 +1,7 @@
 use std::fs;
 use walls_core::downloads::{
-    copy_file_atomic, is_provider_cache_file_name, nuke_downloads, plan_nuke_downloads,
-    write_file_atomic, NukeDownloadsMode,
+    copy_file_atomic, inspect_cache, is_provider_cache_file_name, list_cache_files, nuke_downloads,
+    plan_nuke_downloads, write_file_atomic, NukeDownloadsMode,
 };
 use walls_core::paths::WallsPaths;
 use walls_core::state::State;
@@ -146,6 +146,79 @@ fn nuke_purges_provider_files_when_queue_empty() {
     assert!(state.current.is_none());
     assert_eq!(state.history.len(), 1);
     assert!(state.history[0].ends_with("imported.jpg"));
+}
+
+#[test]
+fn inspect_cache_reports_sizes_queue_and_provider_references() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let paths = temp_paths(tmp.path());
+    fs::create_dir_all(&paths.cache_dir).expect("cache");
+    fs::create_dir_all(&paths.download_dir).expect("download");
+    fs::write(paths.cache_dir.join("wallhaven-abc.jpg"), b"abc").expect("cache file");
+    fs::write(paths.cache_dir.join("local-import.jpg"), b"local").expect("local file");
+    fs::write(paths.download_dir.join("unsplash-def.jpg"), b"data").expect("download file");
+
+    let state = State {
+        cache_queue: vec!["wallhaven:abc".into()],
+        history: vec![
+            paths
+                .cache_dir
+                .join("wallhaven-abc.jpg")
+                .display()
+                .to_string(),
+            tmp.path().join("local.jpg").display().to_string(),
+        ],
+        current: Some(walls_core::state::CurrentWall {
+            source_id: "wallhaven-abc.jpg".into(),
+            wallhaven_id: Some("abc".into()),
+            provider: Some("wallhaven".into()),
+            source_url: None,
+            author: None,
+            description: None,
+            original_path: paths
+                .cache_dir
+                .join("wallhaven-abc.jpg")
+                .display()
+                .to_string(),
+            composed_path: paths.compose_dir.join("composed.jpg").display().to_string(),
+            post_filter_path: None,
+        }),
+        ..State::default()
+    };
+
+    let inspection = inspect_cache(&paths, &state);
+
+    assert_eq!(inspection.queue_len, 1);
+    assert_eq!(inspection.queue_ids, vec!["wallhaven:abc"]);
+    assert_eq!(inspection.cache.files, 2);
+    assert_eq!(inspection.cache.bytes, 8);
+    assert_eq!(inspection.cache.provider_files, 1);
+    assert_eq!(inspection.cache.provider_bytes, 3);
+    assert_eq!(inspection.downloads.files, 1);
+    assert_eq!(inspection.downloads.bytes, 4);
+    assert!(inspection.current_provider_storage);
+    assert_eq!(inspection.history_provider_entries, 1);
+}
+
+#[test]
+fn list_cache_files_filters_provider_files() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let paths = temp_paths(tmp.path());
+    fs::create_dir_all(&paths.cache_dir).expect("cache");
+    fs::create_dir_all(&paths.download_dir).expect("download");
+    fs::write(paths.cache_dir.join("wallhaven-abc.jpg"), b"abc").expect("wallhaven");
+    fs::write(paths.cache_dir.join("unsplash-def.jpg"), b"def").expect("unsplash");
+    fs::write(paths.cache_dir.join("local-import.jpg"), b"local").expect("local");
+    fs::write(paths.download_dir.join("wallhaven-copy.jpg"), b"copy").expect("download");
+
+    let files = list_cache_files(&paths, Some("wallhaven"));
+
+    assert_eq!(files.len(), 2);
+    assert!(files
+        .iter()
+        .all(|file| file.provider.as_deref() == Some("wallhaven")));
+    assert!(files.iter().any(|file| file.name == "wallhaven-abc.jpg"));
+    assert!(files.iter().any(|file| file.name == "wallhaven-copy.jpg"));
 }
 
 fn assert_no_temp_files(root: &std::path::Path) {

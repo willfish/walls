@@ -31,6 +31,39 @@ pub struct NukeDownloadsResult {
     pub download_removed: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheDirStats {
+    pub files: usize,
+    pub bytes: u64,
+    pub provider_files: usize,
+    pub provider_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheInspection {
+    pub cache: CacheDirStats,
+    pub downloads: CacheDirStats,
+    pub queue_len: usize,
+    pub queue_ids: Vec<String>,
+    pub current_provider_storage: bool,
+    pub history_provider_entries: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheFileEntry {
+    pub area: CacheFileArea,
+    pub name: String,
+    pub path: PathBuf,
+    pub bytes: u64,
+    pub provider: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheFileArea {
+    Cache,
+    Downloads,
+}
+
 pub async fn write_file_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     let tmp = atomic_tmp_path(path);
     let result = async {
@@ -120,6 +153,69 @@ pub fn plan_nuke_downloads(paths: &WallsPaths, state: &State) -> NukeDownloadsPl
     }
 }
 
+pub fn inspect_cache(paths: &WallsPaths, state: &State) -> CacheInspection {
+    CacheInspection {
+        cache: dir_stats(&paths.cache_dir, true),
+        downloads: dir_stats(&paths.download_dir, false),
+        queue_len: state.cache_queue.len(),
+        queue_ids: state.cache_queue.clone(),
+        current_provider_storage: state.current.as_ref().is_some_and(|current| {
+            let original = PathBuf::from(&current.original_path);
+            let composed = PathBuf::from(&current.composed_path);
+            is_under_provider_storage(paths, &original)
+                || is_under_provider_storage(paths, &composed)
+        }),
+        history_provider_entries: state
+            .history
+            .iter()
+            .filter(|entry| is_under_provider_storage(paths, Path::new(entry)))
+            .count(),
+    }
+}
+
+pub fn list_cache_files(paths: &WallsPaths, provider: Option<&str>) -> Vec<CacheFileEntry> {
+    let mut entries = Vec::new();
+    entries.extend(list_area_files(
+        CacheFileArea::Cache,
+        &paths.cache_dir,
+        true,
+        provider,
+    ));
+    entries.extend(list_area_files(
+        CacheFileArea::Downloads,
+        &paths.download_dir,
+        false,
+        provider,
+    ));
+    entries.sort_by(|left, right| {
+        left.area
+            .label()
+            .cmp(right.area.label())
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    entries
+}
+
+pub fn clear_cache_queue(state: &mut State) -> usize {
+    let cleared = state.cache_queue.len();
+    state.cache_queue.clear();
+    cleared
+}
+
+pub fn purge_provider_files(paths: &WallsPaths, state: &mut State) -> NukeDownloadsResult {
+    let cache_removed = remove_provider_cache_files(&paths.cache_dir);
+    let download_removed = remove_all_dir_files(&paths.download_dir);
+    state.wallhaven.collection_pages.clear();
+    state.wallhaven.search_page = 0;
+    prune_state_after_provider_purge(paths, state);
+    NukeDownloadsResult {
+        mode: NukeDownloadsMode::PurgeProviderFiles,
+        queue_cleared: 0,
+        cache_removed,
+        download_removed,
+    }
+}
+
 pub fn nuke_downloads(
     paths: &WallsPaths,
     state: &mut State,
@@ -127,8 +223,7 @@ pub fn nuke_downloads(
     let plan = plan_nuke_downloads(paths, state);
     match plan.mode {
         NukeDownloadsMode::ClearQueue => {
-            let cleared = state.cache_queue.len();
-            state.cache_queue.clear();
+            let cleared = clear_cache_queue(state);
             Ok(NukeDownloadsResult {
                 mode: NukeDownloadsMode::ClearQueue,
                 queue_cleared: cleared,
@@ -136,19 +231,7 @@ pub fn nuke_downloads(
                 download_removed: 0,
             })
         }
-        NukeDownloadsMode::PurgeProviderFiles => {
-            let cache_removed = remove_provider_cache_files(&paths.cache_dir);
-            let download_removed = remove_all_dir_files(&paths.download_dir);
-            state.wallhaven.collection_pages.clear();
-            state.wallhaven.search_page = 0;
-            prune_state_after_provider_purge(paths, state);
-            Ok(NukeDownloadsResult {
-                mode: NukeDownloadsMode::PurgeProviderFiles,
-                queue_cleared: 0,
-                cache_removed,
-                download_removed,
-            })
-        }
+        NukeDownloadsMode::PurgeProviderFiles => Ok(purge_provider_files(paths, state)),
         NukeDownloadsMode::Nothing => Ok(NukeDownloadsResult {
             mode: NukeDownloadsMode::Nothing,
             queue_cleared: 0,
@@ -156,6 +239,139 @@ pub fn nuke_downloads(
             download_removed: 0,
         }),
     }
+}
+
+impl CacheFileArea {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Cache => "cache",
+            Self::Downloads => "downloads",
+        }
+    }
+}
+
+impl NukeDownloadsMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ClearQueue => "clear_queue",
+            Self::PurgeProviderFiles => "purge_provider_files",
+            Self::Nothing => "nothing",
+        }
+    }
+}
+
+fn dir_stats(dir: &Path, provider_cache_only: bool) -> CacheDirStats {
+    let mut stats = CacheDirStats {
+        files: 0,
+        bytes: 0,
+        provider_files: 0,
+        provider_bytes: 0,
+    };
+    for entry in file_entries(dir) {
+        stats.files += 1;
+        stats.bytes = stats.bytes.saturating_add(entry.bytes);
+        let provider_file = if provider_cache_only {
+            is_provider_cache_file_name(&entry.name)
+        } else {
+            true
+        };
+        if provider_file {
+            stats.provider_files += 1;
+            stats.provider_bytes = stats.provider_bytes.saturating_add(entry.bytes);
+        }
+    }
+    stats
+}
+
+fn list_area_files(
+    area: CacheFileArea,
+    dir: &Path,
+    provider_cache_only: bool,
+    provider: Option<&str>,
+) -> Vec<CacheFileEntry> {
+    file_entries(dir)
+        .into_iter()
+        .filter_map(|entry| {
+            let provider_name = if provider_cache_only {
+                provider_name_from_cache_file(&entry.name)
+            } else {
+                provider_name_from_download_file(&entry.name)
+            };
+            if provider_cache_only && provider_name.is_none() {
+                return None;
+            }
+            if provider.is_some_and(|filter| provider_name.as_deref() != Some(filter)) {
+                return None;
+            }
+            Some(CacheFileEntry {
+                area,
+                name: entry.name,
+                path: entry.path,
+                bytes: entry.bytes,
+                provider: provider_name,
+            })
+        })
+        .collect()
+}
+
+struct FsFileEntry {
+    name: String,
+    path: PathBuf,
+    bytes: u64,
+}
+
+fn file_entries(dir: &Path) -> Vec<FsFileEntry> {
+    fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            if !entry.file_type().ok()?.is_file() {
+                return None;
+            }
+            let name = entry.file_name().into_string().ok()?;
+            let bytes = entry.metadata().ok()?.len();
+            Some(FsFileEntry {
+                name,
+                path: entry.path(),
+                bytes,
+            })
+        })
+        .collect()
+}
+
+fn provider_name_from_cache_file(name: &str) -> Option<String> {
+    let stem = Path::new(name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(name);
+    if stem.starts_with("wallhaven-") {
+        Some("wallhaven".into())
+    } else if stem.starts_with("unsplash-") {
+        Some("unsplash".into())
+    } else {
+        match stem {
+            "bing-daily" => Some("bing".into()),
+            "json-feed" => Some("json-feed".into()),
+            "mediarss" => Some("mediarss".into()),
+            "reddit-fetch" => Some("reddit".into()),
+            "apod-daily" => Some("apod".into()),
+            "pixabay-fetch" => Some("pixabay".into()),
+            "immich-fetch" => Some("immich".into()),
+            "attribution-fetch" => Some("attribution".into()),
+            _ => None,
+        }
+    }
+}
+
+fn provider_name_from_download_file(name: &str) -> Option<String> {
+    let stem = Path::new(name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(name);
+    stem.split_once('-')
+        .map(|(provider, _)| provider.to_string())
+        .or_else(|| Some("downloaded".into()))
 }
 
 fn count_provider_cache_files(cache_dir: &Path) -> usize {
