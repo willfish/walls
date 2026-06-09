@@ -1,6 +1,11 @@
 [
   {
     "enabled": false,
+    "type": "wallhaven",
+    "query": "jupiter"
+  },
+  {
+    "enabled": false,
     "type": "unsplash",
     "label": "Unsplash nature",
     "query": "nature",

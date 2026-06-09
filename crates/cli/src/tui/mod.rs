@@ -117,6 +117,7 @@ enum UiAction {
     CancelNuke,
     TogglePause,
     ToggleConfigValue,
+    AddSource,
     #[allow(dead_code)]
     CycleConfigValue,
     EditConfigItem,
@@ -291,6 +292,11 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
         KeyCode::Char('o') => UiAction::OpenSelected,
         _ if is_shift_x(key) => UiAction::NukeDownloadsRequest,
         KeyCode::Char(' ') => UiAction::TogglePause,
+        KeyCode::Char('a')
+            if app.tab == Tab::Config && app.is_sources_list_block(app.config_cursor) =>
+        {
+            UiAction::AddSource
+        }
         KeyCode::Char('t') if app.tab == Tab::Config => UiAction::ToggleConfigValue,
         KeyCode::Char('e') if app.tab == Tab::Config => UiAction::EditConfigItem,
         KeyCode::Char('e') if app.tab == Tab::Search => UiAction::EditSearchFilters,
@@ -486,6 +492,14 @@ fn update(
             ),
             Err(e) => app.set_message(style::StatusKind::Error, format!("config save error: {e}")),
         },
+        UiAction::AddSource => {
+            if let Err(error) = app.add_wallhaven_source() {
+                app.set_message(
+                    style::StatusKind::Error,
+                    format!("add source error: {error}"),
+                );
+            }
+        }
         UiAction::CycleConfigValue => match app.cycle_focused_config_value() {
             Ok(Some(msg)) => {
                 app.set_message(style::StatusKind::Success, msg);
@@ -1114,7 +1128,7 @@ fn config_value_style(value: &str, theme: style::Theme) -> Option<Style> {
 
 fn config_lines(app: &App) -> Vec<String> {
     let mut lines = Vec::new();
-    // Sources block lists configured providers plus Wallhaven (nested edit with j/k pick + e)
+    // Sources block lists configured providers plus Wallhaven (nested edit with j/k pick + e, a adds).
     let sources = &app.ctx.config.sources;
     let wallhaven_enabled = app.wallhaven_summary.enabled;
     let sources_enabled = sources.iter().any(|s| s.enabled) || wallhaven_enabled;
@@ -1692,7 +1706,7 @@ fn edit_target_title(app: &App) -> String {
                     if src.source_type == "reddit" {
                         format!("Edit Reddit #{}", i + 1)
                     } else {
-                        let lab = src.label.clone().unwrap_or_else(|| src.source_type.clone());
+                        let lab = sources_view::source_display_name(src);
                         format!("Edit Source #{}: {} ({})", i + 1, lab, src.source_type)
                     }
                 } else {
@@ -4128,7 +4142,7 @@ mod tests {
         let text = render_text(&app, 80, 30);
         assert!(text.contains("Key help"), "{text}");
         assert!(text.contains("Global"), "{text}");
-        assert!(text.contains("Sources: e edits first active"), "{text}");
+        assert!(text.contains("Sources: a adds a Wallhaven query"), "{text}");
         assert!(text.contains("Config edit"), "{text}");
         assert!(text.contains("Esc/q close help"), "{text}");
 
@@ -4634,6 +4648,47 @@ mod tests {
     }
 
     #[test]
+    fn sources_a_adds_wallhaven_query_source_without_label_and_opens_edit() {
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "internet_enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [
+                    { "enabled": true, "type": "favorites", "label": "Favorites" }
+                ],
+                "wallhaven": { "enabled": false }
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
+
+        assert_eq!(
+            action_for_key(&app, KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
+            UiAction::AddSource
+        );
+        update(&mut app, UiAction::AddSource, rt.handle()).expect("add source");
+
+        let source = app.ctx.config.sources.last().expect("added source");
+        assert_eq!(source.source_type, "wallhaven");
+        assert_eq!(source.label, None);
+        assert_eq!(source.query.as_deref(), Some("space"));
+        assert!(app.config_in_subnav);
+        assert_eq!(app.config_sub_cursor, app.ctx.config.sources.len() - 1);
+        assert!(matches!(
+            app.editing.as_ref().map(|session| &session.target),
+            Some(EditTarget::Source(_))
+        ));
+
+        let text = render_text(&app, 100, 24);
+        assert!(text.contains("Edit Source"), "{text}");
+        assert!(text.contains("Wallhaven space"), "{text}");
+        assert!(text.contains("Query"), "{text}");
+        assert!(!text.contains("Label"), "{text}");
+    }
+
+    #[test]
     fn config_subnav_enter_enters_and_esc_exits_without_enter_toggle() {
         let mut app = test_app_with_config(
             serde_json::json!({
@@ -5081,7 +5136,7 @@ mod tests {
                 "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
                 "sources": [
                     { "enabled": true, "type": "folder", "label": "my images", "path": "/tmp/c" },
-                    { "enabled": true, "type": "wallhaven", "label": "wallhaven space", "query": "space" },
+                    { "enabled": true, "type": "wallhaven", "query": "space" },
                     { "enabled": false, "type": "reddit", "query": "wallpapers", "sort": "top", "time": "month" }
                 ]
             }),
@@ -5122,10 +5177,10 @@ mod tests {
             "rotation edit must list download_preference_ratio"
         );
 
-        // Now drive source with label from real user config ("wallhaven space")
+        // Now drive source with name derived from type + query ("Wallhaven space")
         app.cancel_edit();
         app.config_cursor = CONFIG_BLOCK_SOURCES; // sources block
-                                                  // ensure subnav targets the first source (wallhaven space)
+                                                  // ensure subnav targets the Wallhaven source.
         app.config_in_subnav = true;
         app.config_sub_cursor = 1;
         app.start_edit_for_current();
@@ -5135,8 +5190,8 @@ mod tests {
             src_text
         );
         assert!(
-            src_text.contains("wallhaven space") && src_text.contains("wallhaven"),
-            "edit form header must show concrete label + type from draft json so 'what is being edited' is obvious"
+            src_text.contains("Wallhaven space") && src_text.contains("wallhaven"),
+            "edit form header must show concrete derived name + type from draft json so 'what is being edited' is obvious"
         );
         assert!(
             src_text.contains("Enabled")

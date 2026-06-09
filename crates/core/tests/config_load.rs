@@ -46,4 +46,5 @@ fn source_examples_cover_extended_provider_shapes() {
     assert!(kinds.contains(&ProviderKind::Pixabay));
     assert!(kinds.contains(&ProviderKind::Immich));
     assert!(kinds.contains(&ProviderKind::Spotlight));
+    assert!(kinds.contains(&ProviderKind::Wallhaven));
 }

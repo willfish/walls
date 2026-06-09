@@ -5,7 +5,7 @@ use walls_core::config::{
     normalize_source_entry, persist_config, reddit_sort_needs_time, reddit_sort_value,
     reddit_time_value, source_editable_fields as core_source_editable_fields, Config,
     SelectionStrategy, SourceEntry, TuiKeyProfile, WallhavenPrefer, WallhavenSearch,
-    REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
+    REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES, WALLHAVEN_DEFAULT_QUERY,
 };
 use walls_core::expand_home;
 use walls_core::sources::list_images_with_paths;
@@ -2065,6 +2065,48 @@ impl App {
         self.config_in_subnav = false;
     }
 
+    pub fn add_wallhaven_source(&mut self) -> anyhow::Result<()> {
+        if self.tab != Tab::Config || !self.is_sources_list_block(self.config_cursor) {
+            self.set_message(StatusKind::Warning, "add source: focus Sources first");
+            return Ok(());
+        }
+
+        let mut config = self.ctx.config.clone();
+        let query = WALLHAVEN_DEFAULT_QUERY.to_string();
+        let index = config.sources.len();
+        config.sources.push(SourceEntry {
+            enabled: true,
+            source_type: "wallhaven".into(),
+            label: None,
+            path: None,
+            query: Some(query),
+            url: None,
+            collection: None,
+            user: None,
+            topic: None,
+            orientation: None,
+            api_key: None,
+            image_path: None,
+            title_path: None,
+            sort: None,
+            time: None,
+        });
+
+        persist_config(&self.ctx.paths.config_file, &config)?;
+        self.reload_ctx()?;
+        self.tab = Tab::Config;
+        self.config_cursor = CONFIG_BLOCK_SOURCES;
+        self.config_in_subnav = true;
+        self.config_sub_cursor = index;
+        self.editing = self.edit_session_for_target(EditTarget::Source(index));
+        let new_buf = self.current_edit_field_value();
+        if let Some(session) = &mut self.editing {
+            session.field_buffer = new_buf;
+        }
+        self.set_message(StatusKind::Success, "source added: Wallhaven query");
+        Ok(())
+    }
+
     #[allow(dead_code)]
     pub fn refresh_edit_validation(&mut self) {
         if let Some(sess) = &mut self.editing {
@@ -2402,12 +2444,12 @@ impl App {
                 Tab::Config => {
                     if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
                         format!(
-                            "{} | Esc back | j/k Pg Home/End pick source | o open | e edit | t toggle | n/p | space pause | : cmd | ? help",
+                            "{} | Esc back | j/k Pg Home/End pick source | a add | o open | e edit | t toggle | n/p | space pause | : cmd | ? help",
                             Self::NORMAL_TAB_NAV_HINT
                         )
                     } else if self.is_sources_list_block(self.config_cursor) {
                         format!(
-                            "{} | j/k Pg Home/End | o open | e first active | Enter pick | t toggle | n/p | space pause | : cmd | ? help",
+                            "{} | j/k Pg Home/End | a add | o open | e first active | Enter pick | t toggle | n/p | space pause | : cmd | ? help",
                             Self::NORMAL_TAB_NAV_HINT
                         )
                     } else {

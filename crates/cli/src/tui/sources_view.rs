@@ -245,6 +245,14 @@ fn source_meta_spans(meta: &str, theme: Theme) -> Vec<Span<'static>> {
 }
 
 pub fn source_display_name(src: &SourceEntry) -> String {
+    if src.source_type == "wallhaven" {
+        return src
+            .query
+            .as_deref()
+            .filter(|query| !query.trim().is_empty())
+            .map(|query| format!("Wallhaven {query}"))
+            .unwrap_or_else(|| "Wallhaven".into());
+    }
     if let Some(label) = src.label.as_deref().filter(|l| !l.is_empty()) {
         if label.to_ascii_lowercase() != src.source_type {
             return label.to_string();
@@ -265,6 +273,7 @@ pub fn source_display_name(src: &SourceEntry) -> String {
         "immich" => "Immich".into(),
         "spotlight" => "Spotlight".into(),
         "weighting" => "Weighting".into(),
+        "wallhaven" => "Wallhaven".into(),
         "attribution" => "Attribution".into(),
         other => title_case_type(other),
     }
@@ -321,6 +330,12 @@ pub fn source_display_meta(src: &SourceEntry) -> String {
             .as_deref()
             .unwrap_or("priority weight")
             .to_string(),
+        "wallhaven" => src
+            .query
+            .as_deref()
+            .filter(|query| !query.trim().is_empty())
+            .map(|query| format!("query {}", short_query(query)))
+            .unwrap_or_else(|| style::state_text(StateKind::MissingConfig, "query not set")),
         "attribution" => "custom URL".into(),
         _ => src
             .url
@@ -452,6 +467,30 @@ mod tests {
             time: None,
         };
         assert_eq!(source_display_name(&src), "My wallpapers");
+    }
+
+    #[test]
+    fn wallhaven_source_display_name_derives_from_query() {
+        let src = SourceEntry {
+            enabled: true,
+            source_type: "wallhaven".into(),
+            label: None,
+            path: None,
+            query: Some("jupiter".into()),
+            url: None,
+            collection: None,
+            user: None,
+            topic: None,
+            orientation: None,
+            api_key: None,
+            image_path: None,
+            title_path: None,
+            sort: None,
+            time: None,
+        };
+
+        assert_eq!(source_display_name(&src), "Wallhaven jupiter");
+        assert_eq!(source_display_meta(&src), "query jupiter");
     }
 
     #[test]

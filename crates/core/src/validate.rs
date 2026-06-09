@@ -290,6 +290,9 @@ fn validate_provider_source(
         }
         SourceKind::Reddit => validate_reddit_source(index, src, errors),
         SourceKind::Bing | SourceKind::Apod => {}
+        SourceKind::Wallhaven | SourceKind::Weighting => {
+            validate_required_text(index, src, "query", src.query.as_deref(), errors);
+        }
         SourceKind::Json => validate_json_source(index, src, errors),
         SourceKind::MediaRss | SourceKind::Attribution => {
             validate_required_url(index, src, "url", src.url.as_deref(), errors);
@@ -316,9 +319,6 @@ fn validate_provider_source(
                     .with_hint("set path to the Spotlight cache or provide a url"),
                 );
             }
-        }
-        SourceKind::Weighting => {
-            validate_required_text(index, src, "query", src.query.as_deref(), errors);
         }
         SourceKind::Unknown => {
             errors.push(

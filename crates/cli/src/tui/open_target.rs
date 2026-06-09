@@ -27,7 +27,15 @@ pub(crate) fn spawn(target: &OpenTarget) -> anyhow::Result<()> {
 
 pub(crate) fn source(ctx: &WallsCtx, source: &SourceEntry) -> Option<OpenTarget> {
     if source.source_type == "wallhaven" {
-        return Some(wallhaven_search(&ctx.config.wallhaven.search));
+        let mut search = ctx.config.wallhaven.search.clone();
+        if let Some(query) = source
+            .query
+            .as_deref()
+            .filter(|query| !query.trim().is_empty())
+        {
+            search.q = query.to_string();
+        }
+        return Some(wallhaven_search(&search));
     }
 
     match SourceKind::parse(&source.source_type) {

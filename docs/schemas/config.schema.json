@@ -170,7 +170,7 @@
         "enabled": { "type": "boolean" },
         "type": {
           "type": "string",
-          "enum": ["folder", "image", "favorites", "fetched", "unsplash", "reddit", "bing", "apod", "mediarss", "attribution", "json", "pixabay", "immich", "spotlight", "weighting"]
+          "enum": ["folder", "image", "favorites", "fetched", "unsplash", "reddit", "bing", "apod", "mediarss", "attribution", "json", "pixabay", "immich", "spotlight", "weighting", "wallhaven"]
         },
         "label": { "type": "string" },
         "path": { "type": "string" },
@@ -226,7 +226,7 @@
         },
         {
           "if": {
-            "properties": { "enabled": { "const": true }, "type": { "const": "weighting" } },
+            "properties": { "enabled": { "const": true }, "type": { "enum": ["weighting", "wallhaven"] } },
             "required": ["enabled", "type"]
           },
           "then": { "required": ["query"] }
