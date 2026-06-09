@@ -169,7 +169,8 @@ fn validate_config_reports_enabled_provider_schema_errors() {
         { "enabled": true, "type": "pixabay", "label": "Pixabay" },
         { "enabled": true, "type": "immich", "label": "Immich", "url": "https://immich.example" },
         { "enabled": true, "type": "spotlight", "label": "Spotlight" },
-        { "enabled": true, "type": "weighting", "label": "Weighting" }
+        { "enabled": true, "type": "weighting", "label": "Weighting" },
+        { "enabled": true, "type": "wallhaven" }
     ]);
     common::write_config(root.path(), config);
 
@@ -258,6 +259,12 @@ fn validate_config_reports_enabled_provider_schema_errors() {
             .any(|error| error.contains("sources[10].query: query is required")),
         "{errors:?}"
     );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("sources[11].query: query is required")),
+        "{errors:?}"
+    );
 }
 
 #[test]
@@ -283,7 +290,8 @@ fn validate_config_accepts_valid_provider_source_schemas() {
         { "enabled": true, "type": "pixabay", "label": "Pixabay", "api_key": "pixabay-key" },
         { "enabled": true, "type": "immich", "label": "Immich", "url": "https://immich.example", "api_key": "immich-key" },
         { "enabled": true, "type": "spotlight", "label": "Spotlight", "path": spotlight.display().to_string() },
-        { "enabled": true, "type": "weighting", "label": "Weighting", "query": "high" }
+        { "enabled": true, "type": "weighting", "label": "Weighting", "query": "high" },
+        { "enabled": true, "type": "wallhaven", "query": "jupiter" }
     ]);
     common::write_config(root.path(), config);
     common::write_secrets(

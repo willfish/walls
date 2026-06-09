@@ -59,6 +59,8 @@ pub struct WallhavenState {
     pub collection_pages: std::collections::HashMap<String, u32>,
     #[serde(default)]
     pub search_page: u32,
+    #[serde(default)]
+    pub source_search_pages: std::collections::HashMap<String, u32>,
 }
 
 impl State {
