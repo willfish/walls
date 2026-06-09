@@ -100,7 +100,7 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Inspect and prune cache, queue, downloaded provider files, and quota usage
+    /// Inspect and prune provider storage, queue, downloads, and quota usage
     Cache {
         #[command(subcommand)]
         sub: CacheSub,
@@ -829,6 +829,8 @@ fn cmd_cache_clear_queue(dry_run: bool, force: bool, json: bool) -> anyhow::Resu
         queue_len: ctx.state.cache_queue.len(),
         cache_files: 0,
         download_files: 0,
+        history_provider_entries: 0,
+        current_provider_storage: false,
     };
     if dry_run {
         return print_cache_plan("cache clear-queue", &ctx, &plan, true, json);
@@ -867,6 +869,8 @@ fn cmd_cache_purge_provider_files(dry_run: bool, force: bool, json: bool) -> any
         queue_len: 0,
         cache_files: inspection.cache.provider_files,
         download_files: inspection.downloads.files,
+        history_provider_entries: inspection.history_provider_entries,
+        current_provider_storage: inspection.current_provider_storage,
     };
     if dry_run {
         return print_cache_plan("cache purge-provider-files", &ctx, &plan, true, json);
@@ -963,6 +967,8 @@ fn print_cache_plan(
                 "queue_len": plan.queue_len,
                 "cache_files": plan.cache_files,
                 "download_files": plan.download_files,
+                "history_provider_entries": plan.history_provider_entries,
+                "current_provider_storage": plan.current_provider_storage,
                 "cache_dir": ctx.paths.cache_dir.display().to_string(),
                 "download_dir": ctx.paths.download_dir.display().to_string(),
             },
@@ -977,6 +983,16 @@ fn print_cache_plan(
                     println!(
                         "would purge provider files: {} cache files, {} downloaded files",
                         plan.cache_files, plan.download_files
+                    );
+                }
+                NukeDownloadsMode::ProviderReset => {
+                    println!(
+                        "would reset provider storage: {} queued, {} cache files, {} downloaded files, {} history entries, current={}",
+                        plan.queue_len,
+                        plan.cache_files,
+                        plan.download_files,
+                        plan.history_provider_entries,
+                        plan.current_provider_storage
                     );
                 }
                 NukeDownloadsMode::Nothing => println!("nothing to prune"),
@@ -1003,6 +1019,8 @@ fn print_cache_result(
             "queue_cleared": result.queue_cleared,
             "cache_removed": result.cache_removed,
             "download_removed": result.download_removed,
+            "history_pruned": result.history_pruned,
+            "current_cleared": result.current_cleared,
             "exit_code_reason": null,
         }),
         || {
@@ -1014,6 +1032,16 @@ fn print_cache_result(
                     println!(
                         "purged provider files: {} cache files, {} downloaded files",
                         result.cache_removed, result.download_removed
+                    );
+                }
+                NukeDownloadsMode::ProviderReset => {
+                    println!(
+                        "reset provider storage: {} queued, {} cache files, {} downloaded files, {} history entries, current={}",
+                        result.queue_cleared,
+                        result.cache_removed,
+                        result.download_removed,
+                        result.history_pruned,
+                        result.current_cleared
                     );
                 }
                 NukeDownloadsMode::Nothing => println!("nothing to prune"),
@@ -1040,8 +1068,10 @@ fn cache_plan_status(plan: &NukeDownloadsPlan, dry_run: bool) -> &'static str {
         (_, NukeDownloadsMode::Nothing) => "noop",
         (true, NukeDownloadsMode::ClearQueue) => "would_clear_queue",
         (true, NukeDownloadsMode::PurgeProviderFiles) => "would_purge_provider_files",
+        (true, NukeDownloadsMode::ProviderReset) => "would_reset_provider_storage",
         (false, NukeDownloadsMode::ClearQueue) => "clear_queue",
         (false, NukeDownloadsMode::PurgeProviderFiles) => "purge_provider_files",
+        (false, NukeDownloadsMode::ProviderReset) => "provider_reset",
     }
 }
 
@@ -1052,6 +1082,15 @@ fn cache_result_status(result: &walls_core::downloads::NukeDownloadsResult) -> &
             if result.cache_removed > 0 || result.download_removed > 0 =>
         {
             "purged_provider_files"
+        }
+        NukeDownloadsMode::ProviderReset
+            if result.queue_cleared > 0
+                || result.cache_removed > 0
+                || result.download_removed > 0
+                || result.history_pruned > 0
+                || result.current_cleared =>
+        {
+            "reset_provider_storage"
         }
         _ => "noop",
     }

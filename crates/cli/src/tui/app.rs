@@ -1320,12 +1320,12 @@ impl App {
         let plan = self.ctx.plan_nuke_downloads();
         match plan.mode {
             walls_core::downloads::NukeDownloadsMode::ClearQueue => format!(
-                "nuke: clear {} queued provider item{}? Shift+X confirm, Esc cancel",
+                "provider queue: clear {} queued provider item{}? Shift+X confirm, Esc cancel",
                 plan.queue_len,
                 if plan.queue_len == 1 { "" } else { "s" }
             ),
             walls_core::downloads::NukeDownloadsMode::PurgeProviderFiles => format!(
-                "nuke: delete {} cache + {} downloaded provider file{}? Shift+X confirm, Esc cancel",
+                "provider files: delete {} cache + {} downloaded provider file{}? Shift+X confirm, Esc cancel",
                 plan.cache_files,
                 plan.download_files,
                 if plan.cache_files + plan.download_files == 1 {
@@ -1334,8 +1334,23 @@ impl App {
                     "s"
                 }
             ),
+            walls_core::downloads::NukeDownloadsMode::ProviderReset => format!(
+                "provider reset: clear {} queued, delete {} cache + {} downloaded file{}, prune {} history entr{}, current={}? Shift+X confirm, Esc cancel",
+                plan.queue_len,
+                plan.cache_files,
+                plan.download_files,
+                if plan.cache_files + plan.download_files == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                plan.history_provider_entries,
+                if plan.history_provider_entries == 1 { "y" } else { "ies" },
+                plan.current_provider_storage
+            ),
             walls_core::downloads::NukeDownloadsMode::Nothing => {
-                "nuke: queue empty and no provider downloads to delete".into()
+                "provider reset: no queue, cache, downloads, history, or current state to clear"
+                    .into()
             }
         }
     }
@@ -1344,12 +1359,12 @@ impl App {
         let result = self.ctx.nuke_downloads()?;
         Ok(match result.mode {
             walls_core::downloads::NukeDownloadsMode::ClearQueue => format!(
-                "nuke: cleared {} queued provider item{}",
+                "provider queue: cleared {} queued provider item{}",
                 result.queue_cleared,
                 if result.queue_cleared == 1 { "" } else { "s" }
             ),
             walls_core::downloads::NukeDownloadsMode::PurgeProviderFiles => format!(
-                "nuke: removed {} cache + {} downloaded provider file{}",
+                "provider files: removed {} cache + {} downloaded provider file{}",
                 result.cache_removed,
                 result.download_removed,
                 if result.cache_removed + result.download_removed == 1 {
@@ -1358,8 +1373,23 @@ impl App {
                     "s"
                 }
             ),
+            walls_core::downloads::NukeDownloadsMode::ProviderReset => format!(
+                "provider reset: cleared {} queued, removed {} cache + {} downloaded file{}, pruned {} history entr{}, current={}",
+                result.queue_cleared,
+                result.cache_removed,
+                result.download_removed,
+                if result.cache_removed + result.download_removed == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                result.history_pruned,
+                if result.history_pruned == 1 { "y" } else { "ies" },
+                result.current_cleared
+            ),
             walls_core::downloads::NukeDownloadsMode::Nothing => {
-                "nuke: queue empty and no provider downloads to delete".into()
+                "provider reset: no queue, cache, downloads, history, or current state to clear"
+                    .into()
             }
         })
     }
@@ -2194,7 +2224,7 @@ impl App {
             return "d confirm trash current wallpaper | Esc cancel".into();
         }
         if self.pending_nuke_confirm {
-            return "Shift+X confirm nuke downloads | Esc cancel".into();
+            return "Shift+X confirm provider reset | Esc cancel".into();
         }
         let keys = match self.input_mode {
             InputMode::Command => {
@@ -2227,7 +2257,7 @@ impl App {
                         .into()
                 }
                 _ => {
-                    "1-6 tabs ←/→ | j/k Pg Home/End | n/p next/prev | f favorite d request trash | Shift+X nuke | space pause | : cmd | ? help"
+                    "1-6 tabs ←/→ | j/k Pg Home/End | n/p next/prev | f favorite d request trash | Shift+X reset | space pause | : cmd | ? help"
                         .into()
                 }
             },

@@ -536,12 +536,15 @@ fn update(
             }
             Err(e) => {
                 app.pending_nuke_confirm = false;
-                app.set_message(style::StatusKind::Error, format!("nuke error: {e}"));
+                app.set_message(
+                    style::StatusKind::Error,
+                    format!("provider reset error: {e}"),
+                );
             }
         },
         UiAction::CancelNuke => {
             app.pending_nuke_confirm = false;
-            app.set_message(style::StatusKind::Neutral, "nuke cancelled");
+            app.set_message(style::StatusKind::Neutral, "provider reset cancelled");
         }
         UiAction::TogglePause => match app.ctx.toggle_pause() {
             Ok(()) => app.set_message(
@@ -950,7 +953,7 @@ fn key_help_lines(app: &App, width: u16) -> Vec<String> {
         "Global".into(),
         "  Esc/q close help".into(),
         "  ? help   q quit   n/p next/prev   Space pause".into(),
-        "  f favorite current   d request trash current   Shift+X nuke downloads".into(),
+        "  f favorite current   d request trash current   Shift+X reset provider storage".into(),
         "Tabs and lists".into(),
         "  Emacs: 1-6 or ←/→ tabs   j/k or ↑/↓ move".into(),
         "  Vim: 1-6 or h/l tabs   j/k move   gg/G first/last".into(),
@@ -969,7 +972,7 @@ fn key_help_lines(app: &App, width: u16) -> Vec<String> {
         "  Space or ←/→ cycle bool/choice fields   Enter save   Esc cancel".into(),
         "Destructive confirmations".into(),
         "  Trash prompt: d confirm   Esc cancel".into(),
-        "  Nuke prompt: Shift+X confirm   Esc cancel".into(),
+        "  Provider reset prompt: Shift+X confirm   Esc cancel".into(),
         format!("Current mode: {}", key_help_mode_label(app)),
     ];
 
@@ -979,7 +982,7 @@ fn key_help_lines(app: &App, width: u16) -> Vec<String> {
                 && !line.contains(":next")
                 && !line.contains("Backspace deletes")
                 && !line.contains("Trash prompt")
-                && !line.contains("Nuke prompt")
+                && !line.contains("Provider reset prompt")
         });
     }
 
@@ -990,7 +993,7 @@ fn key_help_mode_label(app: &App) -> &'static str {
     if app.pending_trash_confirm {
         "trash confirmation"
     } else if app.pending_nuke_confirm {
-        "nuke confirmation"
+        "provider reset confirmation"
     } else if app.is_editing() {
         "config edit"
     } else {
@@ -4609,12 +4612,19 @@ mod tests {
     }
 
     #[test]
-    fn shift_x_nuke_requires_confirmation_then_clears_queue() {
+    fn shift_x_provider_reset_requires_confirmation_then_clears_provider_storage() {
         use ratatui::crossterm::event::KeyModifiers;
 
         let tmp = tempfile::tempdir().expect("tempdir");
         fs::create_dir_all(tmp.path().join("cache")).expect("cache");
         fs::create_dir_all(tmp.path().join("downloaded")).expect("downloaded");
+        fs::create_dir_all(tmp.path().join("fetched")).expect("fetched");
+        let cache_file = tmp.path().join("cache").join("wallhaven-wh1.jpg");
+        let download_file = tmp.path().join("downloaded").join("wallhaven-wh2.jpg");
+        let fetched_file = tmp.path().join("fetched").join("imported.jpg");
+        fs::write(&cache_file, b"cache").expect("cache file");
+        fs::write(&download_file, b"download").expect("download file");
+        fs::write(&fetched_file, b"fetched").expect("fetched file");
         let mut app = test_app_with_config(
             serde_json::json!({
                 "change": { "enabled": true, "internet_enabled": false },
@@ -4630,6 +4640,26 @@ mod tests {
             serde_json::json!({}),
         );
         app.ctx.state.cache_queue = vec!["wh1".into(), "wh2".into()];
+        app.ctx.state.history = vec![
+            cache_file.display().to_string(),
+            fetched_file.display().to_string(),
+        ];
+        app.ctx.state.current = Some(CurrentWall {
+            source_id: "wallhaven-wh1.jpg".into(),
+            wallhaven_id: Some("wh1".into()),
+            provider: Some("wallhaven".into()),
+            source_url: None,
+            author: None,
+            description: None,
+            original_path: cache_file.display().to_string(),
+            composed_path: tmp
+                .path()
+                .join("compose")
+                .join("current.jpg")
+                .display()
+                .to_string(),
+            post_filter_path: None,
+        });
         app.ctx.save_state().expect("save state");
 
         let rt = tokio::runtime::Runtime::new().expect("rt");
@@ -4639,7 +4669,9 @@ mod tests {
         assert_eq!(request, UiAction::NukeDownloadsRequest);
         update(&mut app, request, rt.handle()).expect("request nuke");
         assert!(app.pending_nuke_confirm);
-        assert!(app.message.contains("clear 2 queued provider items"));
+        assert!(app.message.contains("provider reset: clear 2 queued"));
+        assert!(app.message.contains("delete 1 cache + 1 downloaded file"));
+        assert!(app.message.contains("prune 1 history entry"));
         assert!(!app.footer_keys().contains("q quit"));
 
         let unrelated = action_for_key(&app, KeyEvent::from(KeyCode::Char('q')));
@@ -4651,8 +4683,19 @@ mod tests {
         assert_eq!(confirm, UiAction::NukeDownloadsConfirm);
         update(&mut app, confirm, rt.handle()).expect("confirm nuke");
         assert!(!app.pending_nuke_confirm);
-        assert!(app.message.contains("cleared 2 queued provider items"));
+        assert!(app.message.contains("provider reset: cleared 2 queued"));
+        assert!(app.message.contains("removed 1 cache + 1 downloaded file"));
+        assert!(app.message.contains("pruned 1 history entry"));
+        assert!(app.message.contains("current=true"));
         assert!(app.ctx.state.cache_queue.is_empty());
+        assert!(app.ctx.state.current.is_none());
+        assert_eq!(
+            app.ctx.state.history,
+            vec![fetched_file.display().to_string()]
+        );
+        assert!(!cache_file.exists());
+        assert!(!download_file.exists());
+        assert!(fetched_file.exists());
     }
 
     #[test]

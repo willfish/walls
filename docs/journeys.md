@@ -125,6 +125,10 @@ Online sources work best when there is also a local fallback source such as
 `favorites`, `fetched`, or a `folder`. Provider failures then degrade instead of
 leaving you with no candidate.
 
+`downloaded` paths are provider-managed outputs. `fetched` paths are local
+library imports created by `walls fetch`; keep them enabled as a durable fallback
+when provider storage is reset.
+
 ### Wallhaven
 
 Wallhaven search can work without a key for public results. Add a key in
@@ -313,6 +317,12 @@ walls cache clear-queue --dry-run
 walls cache purge-provider-files --dry-run
 ```
 
+`walls cache prune` is the broad provider storage reset: it clears queued
+provider items, removes files under `cache_dir` and `download_dir`, prunes
+provider-backed history/current state, and preserves `fetched_dir`. Use
+`clear-queue` or `purge-provider-files` when you intentionally want the narrower
+operation.
+
 Expected JSON shape:
 
 ```json
@@ -330,7 +340,7 @@ Recovery:
   `selection.refetch_when_cache_below` only when you want more prefetching.
 - Over quota: run `walls cache prune --dry-run`, inspect the plan, then rerun
   with `--force`.
-- Missing current after purge: run `walls next --manual` with a local source
+- Missing current after provider reset: run `walls next --manual` with a local source
   enabled.
 
 ## CLI Scripting And JSON Output
