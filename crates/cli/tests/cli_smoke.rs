@@ -171,6 +171,14 @@ fn cli_doctor_json_reports_ready_checks() {
     assert!(checks.iter().all(|check| {
         check["message"].is_string() && check["severity"].is_string() && check["status"].is_string()
     }));
+    let attempts = value["provider_attempts"]
+        .as_array()
+        .expect("provider_attempts array");
+    assert!(attempts.iter().any(|attempt| {
+        attempt["provider_kind"] == "local"
+            && attempt["operation"] == "doctor_check"
+            && attempt["status"] == "enabled"
+    }));
 }
 
 #[test]
@@ -278,6 +286,25 @@ fn cli_next_json_includes_provider_attempts_for_applied_wallpaper() {
             && attempt["outcome"]["result"] == "applied"
             && attempt["outcome"]["candidate_count"] == 1
     }));
+}
+
+#[test]
+fn cli_next_verbose_prints_provider_attempts() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home) = setup_xdg_home(tmp.path());
+
+    walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["next", "--verbose"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("images/a.jpg"))
+        .stdout(predicate::str::contains("provider attempts:"))
+        .stdout(predicate::str::contains(
+            "local (local) local_source_listing",
+        ))
+        .stdout(predicate::str::contains("applied (1 candidate)"));
 }
 
 #[test]

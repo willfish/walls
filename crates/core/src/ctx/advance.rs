@@ -1,8 +1,10 @@
 use super::WallsCtx;
 use crate::apply::ApplyTrigger;
+use crate::config::SourceKind;
 use crate::providers::{
     ProviderAttempt, ProviderCapability, ProviderDescriptor, ProviderFailureKind, ProviderKind,
-    ProviderNoCandidateReason, ProviderOperation, ProviderStatus, ProviderStatusReport,
+    ProviderNoCandidateReason, ProviderOperation, ProviderRetry, ProviderStatus,
+    ProviderStatusReport,
 };
 use crate::state::State;
 use rand::RngExt;
@@ -84,11 +86,16 @@ enum AdvanceMode {
 struct AdvanceNext<'ctx> {
     ctx: &'ctx mut WallsCtx,
     mode: AdvanceMode,
+    provider_retries: Vec<ProviderRetry>,
 }
 
 impl<'ctx> AdvanceNext<'ctx> {
     fn new(ctx: &'ctx mut WallsCtx, mode: AdvanceMode) -> Self {
-        Self { ctx, mode }
+        Self {
+            ctx,
+            mode,
+            provider_retries: Vec::new(),
+        }
     }
 
     async fn run(&mut self) -> anyhow::Result<Option<PathBuf>> {
@@ -122,22 +129,40 @@ impl<'ctx> AdvanceNext<'ctx> {
             return Ok(Some(path));
         }
 
-        if let Some(path) = crate::inline_providers::try_reddit(self.ctx).await? {
+        if let Some(path) = self
+            .try_inline_provider(SourceKind::Reddit, true, "apod")
+            .await?
+        {
             return Ok(Some(path));
         }
-        if let Some(path) = crate::inline_providers::try_apod(self.ctx).await? {
+        if let Some(path) = self
+            .try_inline_provider(SourceKind::Apod, true, "pixabay")
+            .await?
+        {
             return Ok(Some(path));
         }
-        if let Some(path) = crate::inline_providers::try_pixabay(self.ctx).await? {
+        if let Some(path) = self
+            .try_inline_provider(SourceKind::Pixabay, true, "immich")
+            .await?
+        {
             return Ok(Some(path));
         }
-        if let Some(path) = crate::inline_providers::try_immich(self.ctx).await? {
+        if let Some(path) = self
+            .try_inline_provider(SourceKind::Immich, true, "attribution")
+            .await?
+        {
             return Ok(Some(path));
         }
-        if let Some(path) = crate::inline_providers::try_attribution(self.ctx).await? {
+        if let Some(path) = self
+            .try_inline_provider(SourceKind::Attribution, true, "spotlight")
+            .await?
+        {
             return Ok(Some(path));
         }
-        if let Some(path) = crate::inline_providers::try_spotlight(self.ctx).await? {
+        if let Some(path) = self
+            .try_inline_provider(SourceKind::Spotlight, false, "local")
+            .await?
+        {
             return Ok(Some(path));
         }
 
@@ -466,6 +491,177 @@ impl<'ctx> AdvanceNext<'ctx> {
         }
     }
 
+    async fn try_inline_provider(
+        &mut self,
+        source_kind: SourceKind,
+        internet_required: bool,
+        fallback_provider_id: &'static str,
+    ) -> anyhow::Result<Option<PathBuf>> {
+        let Some(source) = self
+            .ctx
+            .config
+            .sources
+            .iter()
+            .find(|source| SourceKind::parse(&source.source_type) == source_kind)
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        let provider = crate::providers::provider_for_source(&source);
+        if !source.enabled {
+            self.record(
+                provider
+                    .attempt(ProviderOperation::AdvanceNext)
+                    .with_status(ProviderStatus::Disabled)
+                    .skipped(ProviderNoCandidateReason::Disabled)
+                    .with_fallback(fallback_provider_id),
+            );
+            return Ok(None);
+        }
+        if internet_required && !self.ctx.config.change.internet_enabled {
+            self.record(
+                provider
+                    .attempt(ProviderOperation::AdvanceNext)
+                    .with_status(ProviderStatus::OfflineDisabled)
+                    .skipped(ProviderNoCandidateReason::OfflineDisabled)
+                    .with_fallback(fallback_provider_id),
+            );
+            return Ok(None);
+        }
+
+        let result = match source_kind {
+            SourceKind::Reddit => crate::inline_providers::try_reddit(self.ctx).await,
+            SourceKind::Apod => crate::inline_providers::try_apod(self.ctx).await,
+            SourceKind::Pixabay => crate::inline_providers::try_pixabay(self.ctx).await,
+            SourceKind::Immich => crate::inline_providers::try_immich(self.ctx).await,
+            SourceKind::Attribution => crate::inline_providers::try_attribution(self.ctx).await,
+            SourceKind::Spotlight => crate::inline_providers::try_spotlight(self.ctx).await,
+            _ => Ok(None),
+        };
+
+        match result {
+            Ok(Some(path)) => {
+                self.record(
+                    provider
+                        .attempt(ProviderOperation::AdvanceNext)
+                        .applied(Some(1)),
+                );
+                Ok(Some(path))
+            }
+            Ok(None) => {
+                self.record(
+                    provider
+                        .attempt(ProviderOperation::AdvanceNext)
+                        .no_candidates(ProviderNoCandidateReason::EmptyResult, Some(0))
+                        .with_fallback(fallback_provider_id),
+                );
+                Ok(None)
+            }
+            Err(error) => {
+                tracing::warn!(
+                    provider = provider.id,
+                    error = %error,
+                    "provider failed, trying next source"
+                );
+                let (kind, status_code) = ProviderFailureKind::classify(&error);
+                self.record(
+                    provider
+                        .attempt(ProviderOperation::AdvanceNext)
+                        .failed(kind, status_code, Some(error.to_string()))
+                        .with_fallback(fallback_provider_id),
+                );
+                Ok(None)
+            }
+        }
+    }
+
+    async fn try_direct_provider(
+        &mut self,
+        source_kind: SourceKind,
+        fallback_provider_id: &'static str,
+    ) -> anyhow::Result<Option<PathBuf>> {
+        let Some(source) = self
+            .ctx
+            .config
+            .sources
+            .iter()
+            .find(|source| SourceKind::parse(&source.source_type) == source_kind)
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        let provider = crate::providers::provider_for_source(&source);
+        if !source.enabled {
+            self.record(
+                provider
+                    .attempt(ProviderOperation::AdvanceNext)
+                    .with_status(ProviderStatus::Disabled)
+                    .skipped(ProviderNoCandidateReason::Disabled)
+                    .with_fallback(fallback_provider_id),
+            );
+            return Ok(None);
+        }
+        if !self.ctx.config.change.internet_enabled {
+            self.record(
+                provider
+                    .attempt(ProviderOperation::AdvanceNext)
+                    .with_status(ProviderStatus::OfflineDisabled)
+                    .skipped(ProviderNoCandidateReason::OfflineDisabled)
+                    .with_fallback(fallback_provider_id),
+            );
+            return Ok(None);
+        }
+
+        self.provider_retries.clear();
+        let result = match source_kind {
+            SourceKind::Bing => self.apply_bing_inner().await,
+            SourceKind::Json => self.apply_json_feed_inner().await,
+            SourceKind::MediaRss => self.apply_media_rss_inner().await,
+            _ => Ok(None),
+        };
+
+        match result {
+            Ok(Some(path)) => {
+                let retries = std::mem::take(&mut self.provider_retries);
+                self.record(
+                    provider
+                        .attempt(ProviderOperation::AdvanceNext)
+                        .with_retries(retries)
+                        .applied(Some(1)),
+                );
+                Ok(Some(path))
+            }
+            Ok(None) => {
+                let retries = std::mem::take(&mut self.provider_retries);
+                self.record(
+                    provider
+                        .attempt(ProviderOperation::AdvanceNext)
+                        .with_retries(retries)
+                        .no_candidates(ProviderNoCandidateReason::EmptyResult, Some(0))
+                        .with_fallback(fallback_provider_id),
+                );
+                Ok(None)
+            }
+            Err(error) => {
+                let retries = std::mem::take(&mut self.provider_retries);
+                tracing::warn!(
+                    provider = provider.id,
+                    error = %error,
+                    "provider failed, trying next source"
+                );
+                let (kind, status_code) = ProviderFailureKind::classify(&error);
+                self.record(
+                    provider
+                        .attempt(ProviderOperation::AdvanceNext)
+                        .with_retries(retries)
+                        .failed(kind, status_code, Some(error.to_string()))
+                        .with_fallback(fallback_provider_id),
+                );
+                Ok(None)
+            }
+        }
+    }
+
     fn cached_wallhaven_path(&self, id: &str) -> Option<PathBuf> {
         crate::wallhaven::cached_wallpaper_path(&self.ctx.paths.cache_dir, id)
     }
@@ -474,6 +670,10 @@ impl<'ctx> AdvanceNext<'ctx> {
     // a SourceEntry {type: "bing"} can deliver a real wallpaper.
     // Fetches current daily image using reqwest (already a dep).
     async fn apply_bing(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        self.try_direct_provider(SourceKind::Bing, "json").await
+    }
+
+    async fn apply_bing_inner(&mut self) -> anyhow::Result<Option<PathBuf>> {
         use crate::config::SourceKind;
         use crate::providers::provider_for_source;
         use anyhow::Context;
@@ -494,13 +694,15 @@ impl<'ctx> AdvanceNext<'ctx> {
         let base = bing_api_base();
         let client = crate::provider_http::client()?;
         let archive_url = format!("{base}/HPImageArchive.aspx?format=js&idx=0&n=1");
-        let j: serde_json::Value =
-            crate::provider_http::send_with_retries(|| client.get(&archive_url))
-                .await
-                .with_context(|| provider.failure_scope("bing json fetch").to_string())?
-                .json()
-                .await
-                .with_context(|| provider.failure_scope("bing json parse").to_string())?;
+        let outcome = crate::provider_http::send_with_retry_report(|| client.get(&archive_url))
+            .await
+            .with_context(|| provider.failure_scope("bing json fetch").to_string())?;
+        self.provider_retries.extend(outcome.retries);
+        let j: serde_json::Value = outcome
+            .response
+            .json()
+            .await
+            .with_context(|| provider.failure_scope("bing json parse").to_string())?;
 
         let img = &j["images"][0];
         let rel = img["url"].as_str().unwrap_or("");
@@ -513,9 +715,12 @@ impl<'ctx> AdvanceNext<'ctx> {
             format!("{base}{rel}")
         };
 
-        let bytes = crate::provider_http::send_with_retries(|| client.get(&url))
+        let outcome = crate::provider_http::send_with_retry_report(|| client.get(&url))
             .await
-            .with_context(|| provider.failure_scope("bing image download").to_string())?
+            .with_context(|| provider.failure_scope("bing image download").to_string())?;
+        self.provider_retries.extend(outcome.retries);
+        let bytes = outcome
+            .response
             .bytes()
             .await
             .with_context(|| provider.failure_scope("bing bytes").to_string())?;
@@ -533,6 +738,10 @@ impl<'ctx> AdvanceNext<'ctx> {
     // Minimal support for JSON image feed (url + optional image_path like "$.download_url").
     // Used by the default in config.example.json for the "json" provider type.
     async fn apply_json_feed(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        self.try_direct_provider(SourceKind::Json, "mediarss").await
+    }
+
+    async fn apply_json_feed_inner(&mut self) -> anyhow::Result<Option<PathBuf>> {
         use crate::config::SourceKind;
         use crate::providers::provider_for_source;
         use anyhow::Context;
@@ -556,9 +765,12 @@ impl<'ctx> AdvanceNext<'ctx> {
             .ok_or_else(|| anyhow::anyhow!("json source missing url"))?;
 
         let client = crate::provider_http::client()?;
-        let j: serde_json::Value = crate::provider_http::send_with_retries(|| client.get(feed_url))
+        let outcome = crate::provider_http::send_with_retry_report(|| client.get(feed_url))
             .await
-            .with_context(|| provider.failure_scope("json feed fetch").to_string())?
+            .with_context(|| provider.failure_scope("json feed fetch").to_string())?;
+        self.provider_retries.extend(outcome.retries);
+        let j: serde_json::Value = outcome
+            .response
             .json()
             .await
             .with_context(|| provider.failure_scope("json feed parse").to_string())?;
@@ -577,9 +789,12 @@ impl<'ctx> AdvanceNext<'ctx> {
                 })
                 .ok_or_else(|| anyhow::anyhow!("no image url found in json feed"))?;
 
-        let bytes = crate::provider_http::send_with_retries(|| client.get(&image_url))
+        let outcome = crate::provider_http::send_with_retry_report(|| client.get(&image_url))
             .await
-            .with_context(|| provider.failure_scope("json image download").to_string())?
+            .with_context(|| provider.failure_scope("json image download").to_string())?;
+        self.provider_retries.extend(outcome.retries);
+        let bytes = outcome
+            .response
             .bytes()
             .await
             .with_context(|| provider.failure_scope("json bytes").to_string())?;
@@ -597,6 +812,11 @@ impl<'ctx> AdvanceNext<'ctx> {
     // Minimal support for Media RSS (url pointing to RSS with enclosure or media:content).
     // Supports the default in example for "mediarss" type.
     async fn apply_media_rss(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        self.try_direct_provider(SourceKind::MediaRss, "reddit")
+            .await
+    }
+
+    async fn apply_media_rss_inner(&mut self) -> anyhow::Result<Option<PathBuf>> {
         use crate::config::SourceKind;
         use crate::providers::provider_for_source;
         use anyhow::Context;
@@ -620,9 +840,12 @@ impl<'ctx> AdvanceNext<'ctx> {
             .ok_or_else(|| anyhow::anyhow!("mediarss missing url"))?;
 
         let client = crate::provider_http::client()?;
-        let xml = crate::provider_http::send_with_retries(|| client.get(rss_url))
+        let outcome = crate::provider_http::send_with_retry_report(|| client.get(rss_url))
             .await
-            .with_context(|| provider.failure_scope("mediarss fetch").to_string())?
+            .with_context(|| provider.failure_scope("mediarss fetch").to_string())?;
+        self.provider_retries.extend(outcome.retries);
+        let xml = outcome
+            .response
             .text()
             .await
             .with_context(|| provider.failure_scope("mediarss text").to_string())?;
@@ -630,13 +853,16 @@ impl<'ctx> AdvanceNext<'ctx> {
         let image_url = crate::feeds::extract_first_media_from_rss(&xml)
             .ok_or_else(|| anyhow::anyhow!("no image enclosure found in mediarss"))?;
 
-        let bytes = crate::provider_http::send_with_retries(|| client.get(&image_url))
+        let outcome = crate::provider_http::send_with_retry_report(|| client.get(&image_url))
             .await
             .with_context(|| {
                 provider
                     .failure_scope("mediarss image download")
                     .to_string()
-            })?
+            })?;
+        self.provider_retries.extend(outcome.retries);
+        let bytes = outcome
+            .response
             .bytes()
             .await
             .with_context(|| provider.failure_scope("mediarss bytes").to_string())?;
