@@ -31,8 +31,9 @@ pub use source_schema::{
 pub use unsplash::UnsplashSourceConfig;
 pub use wallhaven::{
     default_wallhaven_source, source_wallhaven_prefer, source_wallhaven_search,
-    wallhaven_resolution_choices, wallhaven_resolution_supported, WallhavenCollection,
-    WallhavenPrefer, WallhavenSearch, WALLHAVEN_DEFAULT_QUERY, WALLHAVEN_FALLBACK_RESOLUTION,
+    wallhaven_ratio_choices, wallhaven_ratio_supported, wallhaven_resolution_choices,
+    wallhaven_resolution_supported, WallhavenCollection, WallhavenPrefer, WallhavenSearch,
+    WALLHAVEN_DEFAULT_QUERY, WALLHAVEN_FALLBACK_RESOLUTION,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -203,6 +204,8 @@ pub struct SourceEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub atleast: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ratios: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefer: Option<WallhavenPrefer>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collections: Vec<WallhavenCollection>,
@@ -261,12 +264,11 @@ impl Default for SelectionConfig {
 /// config stays focused on immediately useful providers.
 pub fn default_config() -> anyhow::Result<Config> {
     let mut config: Config = serde_json::from_str(include_str!("../../../../config.example.json"))?;
-    let detected_atleast = wallhaven::detected_wallhaven_atleast()
-        .unwrap_or(wallhaven::WALLHAVEN_FALLBACK_RESOLUTION)
-        .to_string();
+    let detected_defaults = wallhaven::detected_wallhaven_search_defaults();
     for source in &mut config.sources {
         if SourceKind::parse(&source.source_type) == SourceKind::Wallhaven {
-            source.atleast = Some(detected_atleast.clone());
+            source.atleast = Some(detected_defaults.atleast.clone());
+            source.ratios = Some(detected_defaults.ratios.clone());
             wallhaven::populate_wallhaven_source_defaults(source);
         }
     }
@@ -386,6 +388,9 @@ mod tests {
         );
         assert!(super::wallhaven_resolution_supported(
             wallhaven.atleast.as_deref().expect("wallhaven resolution")
+        ));
+        assert!(super::wallhaven_ratio_supported(
+            wallhaven.ratios.as_deref().expect("wallhaven ratio")
         ));
     }
 

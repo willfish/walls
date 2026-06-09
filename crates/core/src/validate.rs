@@ -1,7 +1,8 @@
 use crate::config::UnsplashSourceConfig;
 use crate::config::{
-    source_wallhaven_search, wallhaven_resolution_choices, wallhaven_resolution_supported,
-    ApplyBackendSetting, Config, Secrets, SourceEntry, SourceKind,
+    source_wallhaven_search, wallhaven_ratio_choices, wallhaven_ratio_supported,
+    wallhaven_resolution_choices, wallhaven_resolution_supported, ApplyBackendSetting, Config,
+    Secrets, SourceEntry, SourceKind,
 };
 use crate::paths::{expand_home, WallsPaths};
 use serde::Serialize;
@@ -488,6 +489,7 @@ fn validate_wallhaven_source(
         errors,
     );
     validate_wallhaven_resolution(&source_field(index, "atleast"), &search.atleast, errors);
+    validate_wallhaven_ratio(&source_field(index, "ratios"), &search.ratios, errors);
 
     for (collection_index, collection) in source.collections.iter().enumerate() {
         if collection.username.trim().is_empty() {
@@ -561,6 +563,21 @@ fn validate_wallhaven_resolution(field: &str, value: &str, errors: &mut Vec<Vali
     errors.push(
         ValidationDiagnostic::error(field, format!("must be one of: {choices}"))
             .with_hint(format!("choose Minimum resolution in the TUI, or replace {value:?} with one of the listed values")),
+    );
+}
+
+fn validate_wallhaven_ratio(field: &str, value: &str, errors: &mut Vec<ValidationDiagnostic>) {
+    if wallhaven_ratio_supported(value) {
+        return;
+    }
+
+    let choices = wallhaven_ratio_choices().join(", ");
+    errors.push(
+        ValidationDiagnostic::error(field, format!("must be one of: {choices}")).with_hint(
+            format!(
+            "choose Aspect ratio in the TUI, or replace {value:?} with one of the listed values"
+        ),
+        ),
     );
 }
 

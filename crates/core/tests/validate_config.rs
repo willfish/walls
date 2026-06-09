@@ -610,6 +610,7 @@ fn validate_config_reports_invalid_wallhaven_provider_settings() {
         "purity": "000",
         "sorting": "popular",
         "order": "sideways",
+        "ratios": "wide-ish",
         "atleast": "large",
         "collections": [
             { "username": "", "id": 0 }
@@ -651,6 +652,12 @@ fn validate_config_reports_invalid_wallhaven_provider_settings() {
     assert!(
         errors
             .iter()
+            .any(|error| error.contains("sources[0].ratios: must be one of")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
             .any(|error| error.contains("sources[0].collections[0].username: must not be empty")),
         "{errors:?}"
     );
@@ -680,6 +687,7 @@ fn validate_wallhaven_edit_reports_provider_errors_without_global_config_checks(
         "purity": "001",
         "sorting": "random",
         "order": "desc",
+        "ratios": "16x9",
         "atleast": "1920x1080"
     },
     {
@@ -728,6 +736,7 @@ fn validate_config_allows_keyless_wallhaven_with_safe_purity() {
         "purity": "100",
         "sorting": "random",
         "order": "desc",
+        "ratios": "16x9",
         "atleast": "1920x1080"
     }]);
     common::write_config(root.path(), config);
@@ -753,6 +762,7 @@ fn validate_config_rejects_custom_wallhaven_resolution_with_actionable_hint() {
         "purity": "100",
         "sorting": "random",
         "order": "desc",
+        "ratios": "16x9",
         "atleast": "2561x1440"
     }]);
     common::write_config(root.path(), config);
@@ -767,6 +777,43 @@ fn validate_config_rejects_custom_wallhaven_resolution_with_actionable_hint() {
         errors
             .iter()
             .any(|error| error.contains("choose Minimum resolution in the TUI")),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn validate_config_rejects_custom_wallhaven_ratio_with_actionable_hint() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    std::fs::create_dir_all(&images).unwrap();
+    let noop = common::write_noop_script(root.path());
+    common::write_minimal_config(root.path(), &images, &noop);
+
+    let mut config = load_config_json(root.path());
+    config["sources"] = serde_json::json!([{
+        "enabled": true,
+        "type": "wallhaven",
+        "query": "forest",
+        "categories": "111",
+        "purity": "100",
+        "sorting": "random",
+        "order": "desc",
+        "ratios": "17x9",
+        "atleast": "1920x1080"
+    }]);
+    common::write_config(root.path(), config);
+
+    let errors = validate_root(root.path());
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("sources[0].ratios: must be one of: 16x9, 16x10, 21x9")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("choose Aspect ratio in the TUI")),
         "{errors:?}"
     );
 }
@@ -788,6 +835,7 @@ fn validate_config_skips_disabled_wallhaven_provider_settings() {
         "purity": "000",
         "sorting": "popular",
         "order": "sideways",
+        "ratios": "wide-ish",
         "atleast": "large",
         "collections": [
             { "username": "", "id": 0 }

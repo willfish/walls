@@ -59,13 +59,14 @@ pub(crate) fn wallhaven_wallpaper(id: &str) -> OpenTarget {
 
 pub(crate) fn wallhaven_search(search: &WallhavenSearch) -> OpenTarget {
     OpenTarget::Url(format!(
-        "https://wallhaven.cc/search?q={}&categories={}&purity={}&sorting={}&order={}&atleast={}",
+        "https://wallhaven.cc/search?q={}&categories={}&purity={}&sorting={}&order={}&atleast={}&ratios={}",
         url_component(&search.q),
         search.categories,
         search.purity,
         search.sorting,
         search.order,
-        url_component(&search.atleast)
+        url_component(&search.atleast),
+        url_component(&search.ratios)
     ))
 }
 

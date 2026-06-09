@@ -14,7 +14,12 @@ pub const WALLHAVEN_RESOLUTION_CHOICES: &[&str] = &[
     "3840x2160",
 ];
 
+pub const WALLHAVEN_RATIO_CHOICES: &[&str] = &[
+    "16x9", "16x10", "21x9", "32x9", "48x9", "9x16", "10x16", "9x18", "1x1", "3x2", "4x3", "5x4",
+];
+
 pub const WALLHAVEN_FALLBACK_RESOLUTION: &str = "1920x1080";
+pub const WALLHAVEN_FALLBACK_RATIO: &str = "16x9";
 pub const WALLHAVEN_DEFAULT_QUERY: &str = "space";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -39,6 +44,8 @@ pub struct WallhavenSearch {
     pub order: String,
     #[serde(default = "default_atleast")]
     pub atleast: String,
+    #[serde(default = "default_ratios")]
+    pub ratios: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -64,6 +71,7 @@ impl Default for WallhavenSearch {
             sorting: default_sorting(),
             order: default_order(),
             atleast: default_atleast(),
+            ratios: default_ratios(),
         }
     }
 }
@@ -87,17 +95,45 @@ fn default_order() -> String {
     "desc".into()
 }
 fn default_atleast() -> String {
-    detected_wallhaven_atleast()
-        .unwrap_or(WALLHAVEN_FALLBACK_RESOLUTION)
-        .into()
+    detected_wallhaven_search_defaults().atleast
+}
+fn default_ratios() -> String {
+    detected_wallhaven_search_defaults().ratios
+}
+
+pub fn detected_wallhaven_search_defaults() -> WallhavenSearchDefaults {
+    match main_monitor_resolution() {
+        Some((width, height)) => WallhavenSearchDefaults {
+            atleast: wallhaven_atleast_for_monitor(width, height).into(),
+            ratios: wallhaven_ratio_for_monitor(width, height).into(),
+        },
+        None => WallhavenSearchDefaults {
+            atleast: WALLHAVEN_FALLBACK_RESOLUTION.into(),
+            ratios: WALLHAVEN_FALLBACK_RATIO.into(),
+        },
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WallhavenSearchDefaults {
+    pub atleast: String,
+    pub ratios: String,
 }
 
 pub fn wallhaven_resolution_choices() -> &'static [&'static str] {
     WALLHAVEN_RESOLUTION_CHOICES
 }
 
+pub fn wallhaven_ratio_choices() -> &'static [&'static str] {
+    WALLHAVEN_RATIO_CHOICES
+}
+
 pub fn wallhaven_resolution_supported(value: &str) -> bool {
     WALLHAVEN_RESOLUTION_CHOICES.contains(&value)
+}
+
+pub fn wallhaven_ratio_supported(value: &str) -> bool {
+    WALLHAVEN_RATIO_CHOICES.contains(&value)
 }
 
 pub fn wallhaven_atleast_for_monitor(width: u32, height: u32) -> &'static str {
@@ -113,8 +149,20 @@ pub fn wallhaven_atleast_for_monitor(width: u32, height: u32) -> &'static str {
         .unwrap_or(WALLHAVEN_FALLBACK_RESOLUTION)
 }
 
-pub fn detected_wallhaven_atleast() -> Option<&'static str> {
-    main_monitor_resolution().map(|(width, height)| wallhaven_atleast_for_monitor(width, height))
+pub fn wallhaven_ratio_for_monitor(width: u32, height: u32) -> &'static str {
+    if width == 0 || height == 0 {
+        return WALLHAVEN_FALLBACK_RATIO;
+    }
+    let monitor_ratio = f64::from(width) / f64::from(height);
+    WALLHAVEN_RATIO_CHOICES
+        .iter()
+        .copied()
+        .min_by(|a, b| {
+            let a_delta = ratio_delta(monitor_ratio, a);
+            let b_delta = ratio_delta(monitor_ratio, b);
+            a_delta.total_cmp(&b_delta)
+        })
+        .unwrap_or(WALLHAVEN_FALLBACK_RATIO)
 }
 
 pub fn default_wallhaven_source() -> SourceEntry {
@@ -140,6 +188,7 @@ pub fn default_wallhaven_source() -> SourceEntry {
         sorting: Some(search.sorting),
         order: Some(search.order),
         atleast: Some(search.atleast),
+        ratios: Some(search.ratios),
         prefer: Some(default_prefer()),
         collections: Vec::new(),
     }
@@ -188,6 +237,13 @@ pub fn populate_wallhaven_source_defaults(source: &mut SourceEntry) {
         .is_none_or(|value| value.trim().is_empty())
     {
         source.atleast = Some(defaults.atleast);
+    }
+    if source
+        .ratios
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        source.ratios = Some(defaults.ratios);
     }
     if source.prefer.is_none() {
         source.prefer = Some(default_prefer());
@@ -238,6 +294,13 @@ pub fn source_wallhaven_search(source: &SourceEntry) -> WallhavenSearch {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .unwrap_or(&defaults.atleast)
+            .to_string(),
+        ratios: source
+            .ratios
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(&defaults.ratios)
             .to_string(),
     }
 }
@@ -306,6 +369,12 @@ fn parse_resolution(value: &str) -> Option<(u32, u32)> {
     Some((width.parse().ok()?, height.parse().ok()?))
 }
 
+fn ratio_delta(monitor_ratio: f64, candidate: &str) -> f64 {
+    parse_resolution(candidate).map_or(f64::INFINITY, |(width, height)| {
+        (monitor_ratio - f64::from(width) / f64::from(height)).abs()
+    })
+}
+
 fn strip_ansi_codes(text: &str) -> String {
     let mut stripped = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
@@ -332,7 +401,7 @@ fn resolution_area(width: u32, height: u32) -> u64 {
 mod tests {
     use super::{
         main_monitor_resolution_from_cosmic_randr, main_monitor_resolution_from_xrandr,
-        wallhaven_atleast_for_monitor, WallhavenSearch,
+        wallhaven_atleast_for_monitor, wallhaven_ratio_for_monitor, WallhavenSearch,
     };
 
     #[test]
@@ -353,6 +422,14 @@ mod tests {
         assert_eq!(wallhaven_atleast_for_monitor(2880, 1920), "2560x1440");
         assert_eq!(wallhaven_atleast_for_monitor(3840, 2160), "3840x2160");
         assert_eq!(wallhaven_atleast_for_monitor(1366, 768), "1366x768");
+    }
+
+    #[test]
+    fn monitor_resolution_maps_to_closest_supported_ratio() {
+        assert_eq!(wallhaven_ratio_for_monitor(3360, 2100), "16x10");
+        assert_eq!(wallhaven_ratio_for_monitor(3840, 2160), "16x9");
+        assert_eq!(wallhaven_ratio_for_monitor(3440, 1440), "21x9");
+        assert_eq!(wallhaven_ratio_for_monitor(1080, 1920), "9x16");
     }
 
     #[test]

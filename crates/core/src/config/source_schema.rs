@@ -87,6 +87,7 @@ pub fn source_config_fields(source_type: &str) -> &'static [&'static str] {
             "sorting",
             "order",
             "atleast",
+            "ratios",
             "prefer",
             "collections",
         ],
@@ -132,6 +133,7 @@ pub fn source_editable_fields(entry: &SourceEntry) -> Vec<&'static str> {
             "purity_nsfw",
             "sorting",
             "order",
+            "ratios",
             "atleast",
             "prefer",
         ],
@@ -170,6 +172,7 @@ pub fn normalize_source_entry(entry: &mut SourceEntry) {
     normalize_optional_field(&allowed, "sorting", &mut entry.sorting);
     normalize_optional_field(&allowed, "order", &mut entry.order);
     normalize_optional_field(&allowed, "atleast", &mut entry.atleast);
+    normalize_optional_field(&allowed, "ratios", &mut entry.ratios);
     if !allowed.contains("prefer") {
         entry.prefer = None;
     }
@@ -327,6 +330,7 @@ mod tests {
             purity: Some("000".into()),
             sorting: Some("date".into()),
             order: Some("asc".into()),
+            ratios: Some("16x10".into()),
             atleast: Some("1024x768".into()),
             prefer: Some(crate::config::WallhavenPrefer::SearchOnly),
             collections: Vec::new(),
@@ -337,6 +341,7 @@ mod tests {
         assert_eq!(entry.purity.as_deref(), Some("000"));
         assert_eq!(entry.sorting.as_deref(), Some("date"));
         assert_eq!(entry.order.as_deref(), Some("asc"));
+        assert_eq!(entry.ratios.as_deref(), Some("16x10"));
         assert_eq!(entry.atleast.as_deref(), Some("1024x768"));
         assert_eq!(
             entry.prefer,

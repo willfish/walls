@@ -64,6 +64,7 @@ async fn wallhaven_search_url_encodes_human_query_text() {
         raw_query.contains("q=cosmic+desktop+%26+stars"),
         "{raw_query}"
     );
+    assert!(raw_query.contains("ratios="), "{raw_query}");
     assert!(!raw_query.contains("cosmic desktop"), "{raw_query}");
 }
 
