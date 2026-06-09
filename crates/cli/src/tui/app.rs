@@ -1288,79 +1288,88 @@ impl App {
         if self.tab != Tab::Config {
             return;
         }
-        // Support subnav for Sources block: if in subnav, target the sub item
-        if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
-            let idx = self.config_sub_cursor;
-            if self.is_wallhaven_subnav_index(idx) {
-                let session = EditSession {
-                    target: EditTarget::Wallhaven,
-                    draft_source: None,
-                    draft_block_values: wallhaven_block_draft(
-                        &self.ctx.config,
-                        wallhaven_api_key_present(&self.ctx.secrets),
-                    ),
-                    field_cursor: 0,
-                    field_buffer: String::new(),
-                    validation_errors: vec![],
-                };
-                self.editing = Some(session);
-                let new_buf = self.current_edit_field_value();
-                if let Some(s) = &mut self.editing {
-                    s.field_buffer = new_buf;
+        let target = if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
+            self.selected_sources_subnav_edit_target()
+        } else if self.is_sources_list_block(self.config_cursor) {
+            match self.default_sources_edit_target() {
+                Some(target) => Some(target),
+                None => {
+                    self.set_message(
+                        StatusKind::Warning,
+                        "no active sources to edit; enable a source or Wallhaven first",
+                    );
+                    None
                 }
-                self.clear_message();
-                return;
             }
-            if idx < self.ctx.config.sources.len() {
-                let target = EditTarget::Source(idx);
-                let mut draft = self.ctx.config.sources[idx].clone();
-                normalize_source_entry(&mut draft);
-                let session = EditSession {
-                    target,
-                    draft_source: Some(draft),
-                    draft_block_values: std::collections::HashMap::new(),
-                    field_cursor: 0,
-                    field_buffer: String::new(),
-                    validation_errors: vec![],
-                };
-                self.editing = Some(session);
-                let new_buf = self.current_edit_field_value();
-                if let Some(s) = &mut self.editing {
-                    s.field_buffer = new_buf;
-                }
-                self.clear_message();
-                return;
-            }
-        }
-        // block target (or first source fallback for old tests)
-        let target = if !self.ctx.config.sources.is_empty() && self.config_cursor == 1 {
-            EditTarget::Source(0)
         } else {
-            EditTarget::Block(self.config_cursor)
+            Some(EditTarget::Block(self.config_cursor))
         };
-        let session = match &target {
+
+        let Some(target) = target else {
+            return;
+        };
+        let Some(session) = self.edit_session_for_target(target) else {
+            return;
+        };
+        self.editing = Some(session);
+        let new_buf = self.current_edit_field_value();
+        if let Some(s) = &mut self.editing {
+            s.field_buffer = new_buf;
+        }
+        self.clear_message();
+    }
+
+    fn selected_sources_subnav_edit_target(&self) -> Option<EditTarget> {
+        let idx = self.config_sub_cursor;
+        if self.is_wallhaven_subnav_index(idx) {
+            Some(EditTarget::Wallhaven)
+        } else if idx < self.ctx.config.sources.len() {
+            Some(EditTarget::Source(idx))
+        } else {
+            None
+        }
+    }
+
+    fn default_sources_edit_target(&self) -> Option<EditTarget> {
+        self.ctx
+            .config
+            .sources
+            .iter()
+            .position(|source| source.enabled)
+            .map(EditTarget::Source)
+            .or_else(|| {
+                self.ctx
+                    .config
+                    .wallhaven
+                    .enabled
+                    .then_some(EditTarget::Wallhaven)
+            })
+    }
+
+    fn edit_session_for_target(&self, target: EditTarget) -> Option<EditSession> {
+        match &target {
             EditTarget::Source(i) if *i < self.ctx.config.sources.len() => {
                 let idx = *i;
                 let mut draft = self.ctx.config.sources[idx].clone();
                 normalize_source_entry(&mut draft);
-                EditSession {
+                Some(EditSession {
                     target: target.clone(),
                     draft_source: Some(draft),
                     draft_block_values: std::collections::HashMap::new(),
                     field_cursor: 0,
                     field_buffer: String::new(),
                     validation_errors: vec![],
-                }
+                })
             }
-            EditTarget::Block(0) => EditSession {
+            EditTarget::Block(0) => Some(EditSession {
                 target: target.clone(),
                 draft_source: None,
                 draft_block_values: rotation_block_draft(&self.ctx.config),
                 field_cursor: 0,
                 field_buffer: String::new(),
                 validation_errors: vec![],
-            },
-            EditTarget::Wallhaven => EditSession {
+            }),
+            EditTarget::Wallhaven => Some(EditSession {
                 target: target.clone(),
                 draft_source: None,
                 draft_block_values: wallhaven_block_draft(
@@ -1370,15 +1379,9 @@ impl App {
                 field_cursor: 0,
                 field_buffer: String::new(),
                 validation_errors: vec![],
-            },
-            _ => return,
-        };
-        self.editing = Some(session);
-        let new_buf = self.current_edit_field_value();
-        if let Some(s) = &mut self.editing {
-            s.field_buffer = new_buf;
+            }),
+            _ => None,
         }
-        self.clear_message();
     }
 
     #[allow(dead_code)]
@@ -2022,7 +2025,7 @@ impl App {
                     if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
                         "1 Config | ←/→ tabs Esc back | j/k Pg Home/End pick source | e edit | t toggle | n/p | space pause | : cmd | ? help".into()
                     } else if self.is_sources_list_block(self.config_cursor) {
-                        "1 Config | ←/→ tabs | j/k Pg Home/End | Enter sub | e edit | t toggle | n/p | space pause | : cmd | ? help"
+                        "1 Config | ←/→ tabs | j/k Pg Home/End | e first active | Enter pick | t toggle | n/p | space pause | : cmd | ? help"
                             .into()
                     } else {
                         "1 Config | ←/→ tabs | j/k Pg Home/End | e edit | t toggle | n/p | space pause | : cmd | ? help".into()

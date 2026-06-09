@@ -1014,7 +1014,8 @@ fn key_help_lines(app: &App, width: u16) -> Vec<String> {
         "  : opens commands; Enter runs; Esc cancels".into(),
         "  :next :prev :pause :favorite :status :quit".into(),
         "Config".into(),
-        "  Enter opens Sources subnav   Esc leaves subnav   e edit   t toggle".into(),
+        "  Sources: e edits first active; Enter picks a source; Esc leaves subnav".into(),
+        "  Config values: e edit   t toggle".into(),
         "Config edit".into(),
         "  ↑/↓ fields   text keys type   Backspace deletes".into(),
         "  Space or ←/→ cycle bool/choice fields   Enter save   Esc cancel".into(),
@@ -2834,6 +2835,99 @@ mod tests {
     }
 
     #[test]
+    fn top_level_sources_e_edits_first_enabled_configured_source() {
+        use crate::tui::app::EditTarget;
+
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [
+                    { "enabled": false, "type": "folder", "path": "/tmp" },
+                    { "enabled": true, "type": "json", "label": "active json", "url": "https://example.test/feed.json", "image_path": "$.image" }
+                ],
+                "wallhaven": { "enabled": true }
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+        app.config_in_subnav = false;
+
+        app.start_edit_for_current();
+
+        let editing = app.editing.as_ref().expect("top-level e should edit");
+        assert!(
+            matches!(editing.target, EditTarget::Source(1)),
+            "top-level Sources e should pick first enabled configured source, got {:?}",
+            editing.target
+        );
+    }
+
+    #[test]
+    fn top_level_sources_e_falls_back_to_enabled_wallhaven() {
+        use crate::tui::app::EditTarget;
+
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [
+                    { "enabled": false, "type": "folder", "path": "/tmp" },
+                    { "enabled": false, "type": "json", "url": "https://example.test/feed.json", "image_path": "$.image" }
+                ],
+                "wallhaven": { "enabled": true, "search": { "q": "forest" } }
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+
+        app.start_edit_for_current();
+
+        let editing = app
+            .editing
+            .as_ref()
+            .expect("enabled Wallhaven should be editable");
+        assert!(
+            matches!(editing.target, EditTarget::Wallhaven),
+            "top-level Sources e should fall back to Wallhaven, got {:?}",
+            editing.target
+        );
+    }
+
+    #[test]
+    fn top_level_sources_e_explains_when_no_source_is_active() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [
+                    { "enabled": false, "type": "folder", "path": "/tmp" }
+                ],
+                "wallhaven": { "enabled": false }
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = 1;
+
+        app.start_edit_for_current();
+
+        assert!(
+            app.editing.is_none(),
+            "no active source should leave edit mode closed"
+        );
+        assert!(
+            app.message
+                .contains("no active sources to edit; enable a source or Wallhaven first"),
+            "{}",
+            app.message
+        );
+        assert_eq!(app.message_kind, style::StatusKind::Warning);
+    }
+
+    #[test]
     fn edit_form_space_toggles_bool_field_without_typing() {
         let mut app = test_app_with_config(
             serde_json::json!({
@@ -3183,6 +3277,10 @@ mod tests {
             "{text}"
         );
 
+        app.config_cursor = 1;
+        let text = render_text(&app, 120, 24);
+        assert!(text.contains("e first active"), "{text}");
+
         app.tab = Tab::Now;
         let text = render_text(&app, 80, 24);
         assert!(text.contains("1-6 tabs"), "{text}");
@@ -3392,6 +3490,7 @@ mod tests {
         let text = render_text(&app, 80, 30);
         assert!(text.contains("Key help"), "{text}");
         assert!(text.contains("Global"), "{text}");
+        assert!(text.contains("Sources: e edits first active"), "{text}");
         assert!(text.contains("Config edit"), "{text}");
         assert!(text.contains("Esc/q close help"), "{text}");
 
