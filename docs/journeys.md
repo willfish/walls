@@ -187,6 +187,7 @@ Check session readiness:
 
 ```bash
 walls doctor
+walls config sync --dry-run
 walls config sync
 walls-tray
 ```
@@ -198,11 +199,13 @@ $ walls config sync
 tray autostart: skipped (tray autostart disabled)
 ```
 
-The exact action depends on `tray.autostart.desktops` and the current desktop.
+The dry-run and sync action depends on `tray.autostart.desktops` and the current
+desktop.
 
 Desktop autostart is controlled by `tray.autostart.desktops` in
 `config.json` and reconciled into `~/.config/autostart/walls-tray.desktop` by
-`walls config sync`.
+`walls config sync`; preview that file change first with
+`walls config sync --dry-run`.
 
 Terminal selection for tray "Open TUI" follows README order:
 

@@ -135,6 +135,44 @@ fn cli_config_validate_formats_human_and_json_diagnostics() {
 }
 
 #[test]
+fn cli_config_sync_dry_run_reports_autostart_write_without_mutating() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home) = setup_xdg_home(tmp.path());
+    let config_file = config_home.join("walls/config.json");
+    let mut config: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&config_file).unwrap()).unwrap();
+    config["tray"] = serde_json::json!({
+        "accent": "blue",
+        "autostart": {
+            "desktops": {
+                "kde": true
+            }
+        }
+    });
+    fs::write(&config_file, serde_json::to_string_pretty(&config).unwrap()).unwrap();
+
+    let tray_bin = tmp.path().join("walls-tray");
+    fs::write(&tray_bin, b"tray").unwrap();
+    let autostart_file = config_home.join("autostart/walls-tray.desktop");
+
+    walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .env("XDG_SESSION_TYPE", "wayland")
+        .env("WAYLAND_DISPLAY", "wayland-1")
+        .env("WALLS_TRAY_BIN", &tray_bin)
+        .args(["config", "sync", "--dry-run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tray autostart: would update"))
+        .stdout(predicate::str::contains(
+            autostart_file.display().to_string(),
+        ));
+
+    assert!(!autostart_file.exists());
+}
+
+#[test]
 fn cli_doctor_json_reports_ready_checks() {
     let tmp = tempfile::tempdir().unwrap();
     let (config_home, state_home) = setup_xdg_home(tmp.path());

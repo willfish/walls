@@ -32,6 +32,8 @@ pub struct AutostartSyncOpts<'a> {
 pub enum AutostartSyncOutcome {
     Written,
     Removed,
+    WouldWrite { path: PathBuf },
+    WouldRemove { path: PathBuf },
     Skipped { reason: String },
 }
 
@@ -207,6 +209,18 @@ fn should_write_autostart(opts: &AutostartSyncOpts<'_>) -> Option<Vec<&'static s
 
 /// Sync tray autostart from live environment.
 pub fn sync_tray_autostart(config: &Config) -> anyhow::Result<AutostartSyncOutcome> {
+    sync_tray_autostart_mode(config, false)
+}
+
+/// Preview tray autostart sync from live environment without writing files.
+pub fn dry_run_tray_autostart_sync(config: &Config) -> anyhow::Result<AutostartSyncOutcome> {
+    sync_tray_autostart_mode(config, true)
+}
+
+fn sync_tray_autostart_mode(
+    config: &Config,
+    dry_run: bool,
+) -> anyhow::Result<AutostartSyncOutcome> {
     let config_home = config_home_dir()?;
     let tray_bin = resolve_binary(BinResolveOpts {
         env_var: std::env::var("WALLS_TRAY_BIN").ok().as_deref(),
@@ -233,17 +247,34 @@ pub fn sync_tray_autostart(config: &Config) -> anyhow::Result<AutostartSyncOutco
         wayland_display: wayland_display.as_deref(),
         display: display.as_deref(),
     };
-    sync_tray_autostart_with(&opts)
+    sync_tray_autostart_with_mode(&opts, dry_run)
 }
 
 /// Sync tray autostart with explicit paths/env (testable).
 pub fn sync_tray_autostart_with(
     opts: &AutostartSyncOpts<'_>,
 ) -> anyhow::Result<AutostartSyncOutcome> {
+    sync_tray_autostart_with_mode(opts, false)
+}
+
+/// Preview tray autostart sync with explicit paths/env without writing files.
+pub fn dry_run_tray_autostart_sync_with(
+    opts: &AutostartSyncOpts<'_>,
+) -> anyhow::Result<AutostartSyncOutcome> {
+    sync_tray_autostart_with_mode(opts, true)
+}
+
+fn sync_tray_autostart_with_mode(
+    opts: &AutostartSyncOpts<'_>,
+    dry_run: bool,
+) -> anyhow::Result<AutostartSyncOutcome> {
     let path = autostart_desktop_file_path(opts.config_home);
 
     let Some(only_show_in) = should_write_autostart(opts) else {
         if path.exists() && is_managed_autostart_file(&path)? {
+            if dry_run {
+                return Ok(AutostartSyncOutcome::WouldRemove { path });
+            }
             fs::remove_file(&path)?;
             return Ok(AutostartSyncOutcome::Removed);
         }
@@ -260,6 +291,9 @@ pub fn sync_tray_autostart_with(
 
     let exec = opts.tray_bin.display().to_string();
     let contents = build_autostart_desktop_entry(&exec, &only_show_in);
+    if dry_run {
+        return Ok(AutostartSyncOutcome::WouldWrite { path });
+    }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
