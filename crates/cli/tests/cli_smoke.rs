@@ -122,6 +122,38 @@ fn cli_manual_next_works_when_paused() {
         .assert()
         .success()
         .stdout(predicate::str::contains("no change"));
+
+    let assert = walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["next", "--json"])
+        .assert()
+        .success();
+    let value: serde_json::Value =
+        serde_json::from_slice(&assert.get_output().stdout).expect("next json");
+    assert_eq!(value["command"], "next");
+    assert_eq!(value["changed"], false);
+    assert_eq!(value["status"], "no_change");
+    assert_eq!(value["exit_code_reason"], "no_change");
+}
+
+#[test]
+fn cli_prev_json_reports_no_previous() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home) = setup_xdg_home(tmp.path());
+
+    let assert = walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["prev", "--json"])
+        .assert()
+        .success();
+    let value: serde_json::Value =
+        serde_json::from_slice(&assert.get_output().stdout).expect("prev json");
+    assert_eq!(value["command"], "prev");
+    assert_eq!(value["changed"], false);
+    assert_eq!(value["status"], "no_previous");
+    assert_eq!(value["exit_code_reason"], "no_previous");
 }
 
 /// Red test for story #193: TUI launch attempts to start tray but does not block.

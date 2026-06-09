@@ -71,4 +71,15 @@ fn cli_prev_walks_history() {
         .assert()
         .success()
         .stdout(predicate::str::contains("first.jpg"));
+
+    let mut c = Command::new(cargo_bin("walls"));
+    env(&mut c);
+    let assert = c.args(["prev", "--json"]).assert().success();
+    let value: serde_json::Value =
+        serde_json::from_slice(&assert.get_output().stdout).expect("prev json");
+    assert_eq!(value["command"], "prev");
+    assert_eq!(value["changed"], true);
+    assert_eq!(value["status"], "applied_previous");
+    assert!(value["path"].as_str().unwrap().ends_with(".jpg"));
+    assert_eq!(value["exit_code_reason"], serde_json::Value::Null);
 }
