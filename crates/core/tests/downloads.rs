@@ -1,7 +1,7 @@
 use std::fs;
 use walls_core::downloads::{
     copy_file_atomic, inspect_cache, is_provider_cache_file_name, list_cache_files, nuke_downloads,
-    plan_nuke_downloads, write_file_atomic, NukeDownloadsMode,
+    plan_nuke_downloads, purge_provider_files, write_file_atomic, NukeDownloadsMode,
 };
 use walls_core::paths::WallsPaths;
 use walls_core::state::State;
@@ -72,33 +72,77 @@ async fn copy_file_atomic_writes_final_copy() {
 }
 
 #[test]
-fn nuke_clears_queue_before_purging_files() {
+fn nuke_resets_provider_storage_in_one_step() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let paths = temp_paths(tmp.path());
     fs::create_dir_all(&paths.cache_dir).expect("cache");
     fs::create_dir_all(&paths.download_dir).expect("download");
+    fs::create_dir_all(&paths.fetched_dir).expect("fetched");
+    fs::create_dir_all(paths.cache_dir.join("thumbs")).expect("cache subdir");
     fs::write(paths.cache_dir.join("wallhaven-abc.jpg"), b"x").expect("cache file");
+    fs::write(paths.cache_dir.join("local-import.jpg"), b"x").expect("cache file");
+    fs::write(paths.cache_dir.join("thumbs").join("preview.jpg"), b"x").expect("nested cache file");
     fs::write(paths.download_dir.join("copy.jpg"), b"x").expect("download file");
+    fs::write(paths.fetched_dir.join("imported.jpg"), b"x").expect("fetched file");
 
     let mut state = State {
         cache_queue: vec!["abc".into(), "def".into()],
         ..State::default()
     };
+    state.history.push(
+        paths
+            .cache_dir
+            .join("wallhaven-abc.jpg")
+            .display()
+            .to_string(),
+    );
+    state
+        .history
+        .push(paths.fetched_dir.join("imported.jpg").display().to_string());
+    state.current = Some(walls_core::state::CurrentWall {
+        source_id: "wallhaven-abc.jpg".into(),
+        wallhaven_id: Some("abc".into()),
+        provider: Some("wallhaven".into()),
+        source_url: None,
+        author: None,
+        description: None,
+        original_path: paths
+            .cache_dir
+            .join("wallhaven-abc.jpg")
+            .display()
+            .to_string(),
+        composed_path: paths.compose_dir.join("composed.jpg").display().to_string(),
+        post_filter_path: None,
+    });
 
     let plan = plan_nuke_downloads(&paths, &state);
-    assert_eq!(plan.mode, NukeDownloadsMode::ClearQueue);
+    assert_eq!(plan.mode, NukeDownloadsMode::ProviderReset);
     assert_eq!(plan.queue_len, 2);
+    assert_eq!(plan.cache_files, 2);
+    assert_eq!(plan.download_files, 1);
+    assert_eq!(plan.history_provider_entries, 1);
+    assert!(plan.current_provider_storage);
 
     let result = nuke_downloads(&paths, &mut state).expect("nuke");
-    assert_eq!(result.mode, NukeDownloadsMode::ClearQueue);
+    assert_eq!(result.mode, NukeDownloadsMode::ProviderReset);
     assert_eq!(result.queue_cleared, 2);
+    assert_eq!(result.cache_removed, 3);
+    assert_eq!(result.download_removed, 1);
+    assert_eq!(result.history_pruned, 1);
+    assert!(result.current_cleared);
     assert!(state.cache_queue.is_empty());
-    assert!(paths.cache_dir.join("wallhaven-abc.jpg").exists());
-    assert!(paths.download_dir.join("copy.jpg").exists());
+    assert!(!paths.cache_dir.join("wallhaven-abc.jpg").exists());
+    assert!(!paths.cache_dir.join("local-import.jpg").exists());
+    assert!(!paths.cache_dir.join("thumbs").exists());
+    assert!(!paths.download_dir.join("copy.jpg").exists());
+    assert!(paths.fetched_dir.join("imported.jpg").exists());
+    assert!(state.current.is_none());
+    assert_eq!(state.history.len(), 1);
+    assert!(state.history[0].ends_with("imported.jpg"));
 }
 
 #[test]
-fn nuke_purges_provider_files_when_queue_empty() {
+fn purge_provider_files_keeps_cache_files_that_are_not_provider_named() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let paths = temp_paths(tmp.path());
     fs::create_dir_all(&paths.cache_dir).expect("cache");
@@ -136,7 +180,7 @@ fn nuke_purges_provider_files_when_queue_empty() {
         post_filter_path: None,
     });
 
-    let result = nuke_downloads(&paths, &mut state).expect("nuke");
+    let result = purge_provider_files(&paths, &mut state);
     assert_eq!(result.mode, NukeDownloadsMode::PurgeProviderFiles);
     assert_eq!(result.cache_removed, 1);
     assert_eq!(result.download_removed, 1);

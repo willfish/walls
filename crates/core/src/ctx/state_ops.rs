@@ -89,7 +89,7 @@ impl WallsCtx {
         })
     }
 
-    /// Clear the provider queue, or purge cached/downloaded provider files when the queue is empty.
+    /// Clear provider queue, cache/download storage, and provider-backed state references.
     pub fn nuke_downloads(&mut self) -> anyhow::Result<crate::downloads::NukeDownloadsResult> {
         self.with_state_lock(|ctx| {
             let result = crate::downloads::nuke_downloads(&ctx.paths, &mut ctx.state)?;

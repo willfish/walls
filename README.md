@@ -169,7 +169,9 @@ flowchart TD
 ```
 
 - **Config** — `config.json`, `secrets.json`, locked `state.json` (history, queue, current).
-- **Cache** — downloaded Wallhaven images and composed outputs.
+- **Provider storage** — queued provider candidates plus files under
+  `cache_dir` and `download_dir`. `fetched_dir` is user-imported local library
+  content and is not removed by provider reset actions.
 - **Triggers** — `walls-tray` polls `change.interval_secs` and calls `advance_next`; tray menu runs manual `prev` / `next`, favorites the current wallpaper, toggles pause, and opens TUI. On StatusNotifier tray hosts, wheel down/up over the tray icon runs the same manual next/previous actions. TUI runs the scheduler only when the tray did not start.
 
 ### TUI (`walls tui`)
@@ -222,14 +224,14 @@ you already have a symptom.
 | `walls trash [--dry-run] [--force] [--json]` | Delete the current wallpaper from disk/state; `--force` is required unless using `--dry-run` |
 | `walls cache status [--json]` | Inspect queue length, provider cache/download counts, sizes, and quota usage |
 | `walls cache inspect [--provider <name>] [--json]` | List provider cache/download files |
-| `walls cache prune [--dry-run] [--force] [--json]` | Clear queued provider downloads first, or purge provider files when the queue is empty |
+| `walls cache prune [--dry-run] [--force] [--json]` | Reset provider storage in one step: clear queue, remove cache/download files, and prune provider-backed current/history state |
 | `walls cache clear-queue [--dry-run] [--force] [--json]` | Clear queued provider downloads |
 | `walls cache purge-provider-files [--dry-run] [--force] [--json]` | Remove provider cache files/downloads and prune affected state |
 | `walls config validate [--json]` | Works |
 | `walls config sync [--dry-run]` | Reconcile tray autostart desktop entry with `config.json`; preview file changes with `--dry-run` |
 | `walls pause` / `walls resume` / `walls toggle-pause` | Works |
 | `walls next [--manual] [--refresh <level>] [--verbose] [--json]` / `walls prev [--json]` | Works (auto `next` respects pause/rotation-off; `--manual` for explicit changes; `--verbose` prints provider attempts/skips/retries/fallbacks; refresh levels: `all`, `filters-and-texts`, `texts`, `clock-only`) |
-| `walls tui` | Works — tabs: Config/Now/History/Browse/Search/Logs; `?` key help; `/` or `i` search; `:` commands; `f` favorite; `d` requests trash confirmation; image preview for Now and selected History/Browse items in terminals supporting Kitty graphics (Ghostty/Kitty) or iTerm2 inline images, with metadata-only fallback otherwise |
+| `walls tui` | Works — tabs: Config/Now/History/Browse/Search/Logs; `?` key help; `/` or `i` search; `:` commands; `f` favorite; `d` requests trash confirmation; Shift+X requests provider storage reset; image preview for Now and selected History/Browse items in terminals supporting Kitty graphics (Ghostty/Kitty) or iTerm2 inline images, with metadata-only fallback otherwise |
 | `WALLS_TUI_PREVIEW=0 walls tui` | Force metadata-only TUI preview mode when inline image rendering is not wanted |
 | `walls-tray` | Works (prev/next/favorite/pause, Open TUI, brand tray icon from `assets/icons/walls-tray.svg`; StatusNotifier wheel down/up runs next/previous) |
 
@@ -316,7 +318,8 @@ live fetch.
 Cache commands use the same envelope and add cache-specific fields such as
 `queue`, `cache`, `downloads`, `quota`, `plan`, and remove counts. Mutating cache
 commands refuse to change state/files without `--force`; use `--dry-run` to see
-the planned queue clear or provider-file purge.
+the planned provider storage reset, queue clear, or targeted provider-file
+purge.
 
 `walls undo --json` uses `status: "restored_previous"` when it restores from
 history, and `status: "missing_previous"` when the restore target has been

@@ -99,6 +99,19 @@ Wide layouts render previews for the current Now wallpaper and for the selected 
 
 Use `WALLS_TUI_PREVIEW=0`, `false`, `no`, `off`, `never`, or `metadata` for metadata-only mode.
 
+## Library Semantics
+
+History is the applied-wallpaper timeline. Browse is the candidate surface for
+queued provider items, local source results, and other selectable wallpaper
+rows. A Browse row for a queued Wallhaven or Unsplash item can show a preview
+when its provider cache file already exists; otherwise the row remains usable as
+metadata.
+
+`download_dir` and `cache_dir` are provider-managed storage. `fetched_dir` is
+the user-imported local library populated by `walls fetch` and source entries of
+type `fetched`; provider reset actions must not remove fetched files or fetched
+history entries.
+
 ## Verification
 
 Before closing TUI work, run the checks in [`tui-verification.md`](tui-verification.md). Layout, colour, key handling, and preview changes require both automated tests and PTY visual/behavioural verification.
@@ -200,4 +213,4 @@ Normal mode navigation:
 - `j/k` and arrow up/down move within the active list.
 - Home/End jump to the first/last row for History, Browse, Search, Config blocks, and Config Sources subnav.
 - PageUp/PageDown jump five rows and clamp at list boundaries.
-- Destructive actions are two-step: `d` requests trash for the current wallpaper, then `d` confirms or Esc cancels; Shift+X requests nuke downloads, then Shift+X confirms or Esc cancels. Other keys are ignored while a destructive confirmation is pending.
+- Destructive actions are two-step: `d` requests trash for the current wallpaper, then `d` confirms or Esc cancels; Shift+X requests provider storage reset, then Shift+X confirms or Esc cancels. Provider reset clears the queue, deletes files under `cache_dir` and `download_dir`, prunes provider-backed History/current state, and leaves `fetched_dir` alone. Other keys are ignored while a destructive confirmation is pending.
