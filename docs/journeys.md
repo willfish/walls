@@ -360,3 +360,8 @@ Stable command results use an envelope:
 Script against `status`, `changed`, and `exit_code_reason` rather than human
 phrasing. Use `walls --help` and `walls <command> --help` in CI or docs tooling
 when you need the current command surface.
+
+Rollback commands keep missing history explicit. `walls prev --json` and
+`walls undo --json` use `status: "missing_previous"` and a non-zero exit when
+the selected history entry points at a deleted file; the failed restore does not
+advance the history index.
