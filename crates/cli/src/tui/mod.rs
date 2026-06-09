@@ -1736,11 +1736,6 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
                     walls_core::config::SECRETS_EDIT_HINT.into(),
                     app::EditFieldKind::Text,
                 ));
-                fields.push((
-                    "Collections".into(),
-                    "(edit config.json for now)".into(),
-                    app::EditFieldKind::Text,
-                ));
             }
         } else if let EditTarget::Block(block) = &sess.target {
             let keys = match *block {
@@ -4529,7 +4524,8 @@ mod tests {
                 "order",
                 "ratios",
                 "atleast",
-                "prefer"
+                "prefer",
+                "collections"
             ]
         );
         assert!(app.config_in_subnav);
@@ -4539,18 +4535,88 @@ mod tests {
             Some(EditTarget::Source(_))
         ));
 
-        let text = render_text(&app, 100, 24);
+        let text = render_text(&app, 100, 32);
         assert!(text.contains("Edit Source"), "{text}");
         assert!(text.contains("Wallhaven space"), "{text}");
         assert!(text.contains("Search query"), "{text}");
         assert!(text.contains("Aspect ratio"), "{text}");
         assert!(text.contains("Minimum resolution"), "{text}");
+        assert!(text.contains("Collections"), "{text}");
         assert!(text.contains("Wallhaven API key"), "{text}");
         assert!(
             text.contains(walls_core::config::SECRETS_EDIT_HINT),
             "{text}"
         );
         assert!(!text.contains("Label"), "{text}");
+    }
+
+    #[test]
+    fn wallhaven_source_edit_persists_collection_entries() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "internet_enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [
+                    {
+                        "enabled": true,
+                        "type": "wallhaven",
+                        "query": "nebula",
+                        "collections": [
+                            { "username": "alice", "id": 42, "label": "Favorites" }
+                        ]
+                    }
+                ]
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
+        app.start_edit_for_current();
+
+        let fields = app
+            .editing
+            .as_ref()
+            .and_then(|session| session.draft_source.as_ref())
+            .map(App::source_editable_fields)
+            .expect("draft source fields");
+        let collections_idx = fields
+            .iter()
+            .position(|field| field == "collections")
+            .expect("collections field");
+        {
+            let editing = app.editing.as_mut().expect("editing");
+            editing.field_cursor = collections_idx;
+            editing.field_buffer = "bob/7:Mountains, carol/9".into();
+        }
+        app.commit_edit_field_buffer();
+        app.save_edit_item(false).expect("save collection edit");
+
+        let source = &app.ctx.config.sources[0];
+        assert_eq!(source.collections.len(), 2);
+        assert_eq!(source.collections[0].username, "bob");
+        assert_eq!(source.collections[0].id, 7);
+        assert_eq!(source.collections[0].label.as_deref(), Some("Mountains"));
+        assert_eq!(source.collections[1].username, "carol");
+        assert_eq!(source.collections[1].id, 9);
+        assert_eq!(source.collections[1].label, None);
+        let text = fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
+        assert!(text.contains("\"username\": \"bob\""), "{text}");
+        assert!(text.contains("\"id\": 7"), "{text}");
+        assert!(text.contains("\"label\": \"Mountains\""), "{text}");
+
+        app.start_edit_for_current();
+        {
+            let editing = app.editing.as_mut().expect("editing");
+            editing.field_cursor = collections_idx;
+            editing.field_buffer = "missing-id".into();
+        }
+        app.commit_edit_field_buffer();
+        app.save_edit_item(false)
+            .expect("invalid collection edit stays in form");
+        assert!(app.message.contains("collections[0].id"), "{}", app.message);
+        let form = render_text(&app, 100, 28);
+        assert!(form.contains("!! Validation errors"), "{form}");
+        assert!(form.contains("collections[0].id"), "{form}");
     }
 
     #[test]
