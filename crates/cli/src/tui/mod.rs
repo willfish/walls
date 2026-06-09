@@ -1916,6 +1916,7 @@ fn edit_target_title(app: &App) -> String {
     if let Some(sess) = &app.editing {
         match &sess.target {
             EditTarget::Block(0) => "Edit Rotation".to_string(),
+            EditTarget::Block(2) => "Edit Library".to_string(),
             EditTarget::Block(4) => "Edit TUI".to_string(),
             EditTarget::Wallhaven => "Edit Wallhaven".to_string(),
             EditTarget::Block(b) => format!("Edit block {}", b),
@@ -2005,6 +2006,7 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
         } else if let EditTarget::Block(block) = &sess.target {
             let keys = match block {
                 0 => app::ROTATION_BLOCK_FIELDS,
+                2 => app::LIBRARY_BLOCK_FIELDS,
                 4 => app::TUI_BLOCK_FIELDS,
                 _ => &[],
             };
@@ -3969,6 +3971,82 @@ mod tests {
 
         assert_eq!(app.ctx.config.tui.key_profile, TuiKeyProfile::Vim);
         assert!(app.message.contains("config saved"), "{}", app.message);
+    }
+
+    #[test]
+    fn config_library_block_edits_quota_settings() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "interval_secs": 60, "internet_enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "quota": { "enabled": true, "size_mb": 1000 },
+                "sources": []
+            }),
+            serde_json::json!({}),
+        );
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        app.tab = Tab::Config;
+        app.config_cursor = 2;
+
+        app.start_edit_for_current();
+        let editing = app.editing.as_ref().expect("editing");
+        assert!(matches!(editing.target, EditTarget::Block(2)));
+        assert_eq!(editing.field_buffer, "true");
+        assert_eq!(app.current_edit_field_kind(), EditFieldKind::Bool);
+
+        update(
+            &mut app,
+            UiAction::EditFieldCycle { forward: true },
+            rt.handle(),
+        )
+        .expect("toggle quota enabled");
+        assert!(!app.ctx.config.quota.enabled);
+
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to size");
+        {
+            let editing = app.editing.as_mut().expect("editing");
+            assert_eq!(editing.field_buffer, "1000");
+            editing.field_buffer = "512".into();
+        }
+        update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save quota size");
+
+        assert_eq!(app.ctx.config.quota.size_mb, 512);
+        assert!(
+            app.message.contains("config saved: library"),
+            "{}",
+            app.message
+        );
+    }
+
+    #[test]
+    fn config_library_block_shows_quota_validation_errors_inline() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "interval_secs": 60, "internet_enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "quota": { "enabled": true, "size_mb": 1000 },
+                "sources": []
+            }),
+            serde_json::json!({}),
+        );
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        app.tab = Tab::Config;
+        app.config_cursor = 2;
+
+        app.start_edit_for_current();
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to size");
+        app.editing.as_mut().expect("editing").field_buffer = "0".into();
+        update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("reject zero quota");
+
+        assert_eq!(app.ctx.config.quota.size_mb, 1000);
+        assert!(
+            app.message.contains("config validation failed"),
+            "{}",
+            app.message
+        );
+        let text = render_text(&app, 100, 24);
+        assert!(text.contains("quota.size_mb"), "{text}");
+        assert!(text.contains("must be greater than zero"), "{text}");
     }
 
     #[test]

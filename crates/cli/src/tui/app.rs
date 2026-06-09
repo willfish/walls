@@ -79,7 +79,7 @@ pub enum EditTarget {
 }
 
 /// Internal block index for shared Wallhaven field metadata helpers.
-pub(crate) const WALLHAVEN_FIELDS_BLOCK: usize = 2;
+pub(crate) const WALLHAVEN_FIELDS_BLOCK: usize = usize::MAX;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EditFieldKind {
@@ -136,6 +136,7 @@ pub(crate) const WALLHAVEN_BLOCK_FIELDS: &[&str] = &[
 
 pub(crate) const TUI_BLOCK_FIELDS: &[&str] = &["key_profile"];
 pub(crate) const TUI_KEY_PROFILE_CHOICES: &[&str] = &["emacs", "vim"];
+pub(crate) const LIBRARY_BLOCK_FIELDS: &[&str] = &["quota_enabled", "quota_size_mb"];
 
 fn wallhaven_bit_at(s: &str, idx: usize, default: bool) -> bool {
     s.chars().nth(idx).map(|c| c == '1').unwrap_or(default)
@@ -298,6 +299,11 @@ pub(crate) fn block_field_label(block: usize, key: &str) -> String {
             other => other.into(),
         },
         2 => match key {
+            "quota_enabled" => "Quota enabled".into(),
+            "quota_size_mb" => "Quota size (MB)".into(),
+            other => other.into(),
+        },
+        WALLHAVEN_FIELDS_BLOCK => match key {
             "enabled" => "Enabled".into(),
             "prefer" => "Prefer".into(),
             "search_q" => "Search query".into(),
@@ -339,6 +345,10 @@ pub(crate) fn block_field_kind(block: usize, key: &str) -> EditFieldKind {
             _ => EditFieldKind::Text,
         },
         2 => match key {
+            "quota_enabled" => EditFieldKind::Bool,
+            _ => EditFieldKind::Text,
+        },
+        WALLHAVEN_FIELDS_BLOCK => match key {
             "enabled" => EditFieldKind::Bool,
             "prefer" => EditFieldKind::Choice(&[
                 "collections_then_search",
@@ -468,8 +478,9 @@ fn block_field_value_at(
 ) -> String {
     let keys = match block {
         0 => ROTATION_BLOCK_FIELDS,
-        2 => WALLHAVEN_BLOCK_FIELDS,
+        2 => LIBRARY_BLOCK_FIELDS,
         4 => TUI_BLOCK_FIELDS,
+        WALLHAVEN_FIELDS_BLOCK => WALLHAVEN_BLOCK_FIELDS,
         _ => return String::new(),
     };
     let Some(key) = keys.get(idx) else {
@@ -503,6 +514,11 @@ fn block_field_value_at(
             _ => String::new(),
         },
         2 => match *key {
+            "quota_enabled" => config.quota.enabled.to_string(),
+            "quota_size_mb" => config.quota.size_mb.to_string(),
+            _ => String::new(),
+        },
+        WALLHAVEN_FIELDS_BLOCK => match *key {
             "enabled" => config.wallhaven.enabled.to_string(),
             "prefer" => wallhaven_prefer_label(config.wallhaven.prefer),
             "search_q" => config.wallhaven.search.q.clone(),
@@ -543,8 +559,9 @@ fn commit_block_field_buffer(
 ) {
     let keys = match block {
         0 => ROTATION_BLOCK_FIELDS,
-        2 => WALLHAVEN_BLOCK_FIELDS,
+        2 => LIBRARY_BLOCK_FIELDS,
         4 => TUI_BLOCK_FIELDS,
+        WALLHAVEN_FIELDS_BLOCK => WALLHAVEN_BLOCK_FIELDS,
         _ => return,
     };
     let Some(key) = keys.get(field_idx) else {
@@ -559,6 +576,13 @@ fn tui_block_draft(config: &Config) -> std::collections::HashMap<String, String>
         "key_profile".into(),
         tui_key_profile_label(config.tui.key_profile).into(),
     );
+    vals
+}
+
+fn library_block_draft(config: &Config) -> std::collections::HashMap<String, String> {
+    let mut vals = std::collections::HashMap::new();
+    vals.insert("quota_enabled".into(), config.quota.enabled.to_string());
+    vals.insert("quota_size_mb".into(), config.quota.size_mb.to_string());
     vals
 }
 
@@ -583,6 +607,20 @@ fn apply_tui_block_draft(config: &mut Config, draft: &std::collections::HashMap<
         .and_then(|v| parse_tui_key_profile(v))
     {
         config.tui.key_profile = profile;
+    }
+}
+
+fn apply_library_block_draft(
+    config: &mut Config,
+    draft: &std::collections::HashMap<String, String>,
+) {
+    if let Some(v) = draft.get("quota_enabled") {
+        config.quota.enabled = App::parse_bool_like(v).unwrap_or(config.quota.enabled);
+    }
+    if let Some(v) = draft.get("quota_size_mb") {
+        if let Ok(size_mb) = v.parse::<u64>() {
+            config.quota.size_mb = size_mb;
+        }
     }
 }
 
@@ -1474,6 +1512,14 @@ impl App {
                 field_buffer: String::new(),
                 validation_errors: vec![],
             }),
+            EditTarget::Block(2) => Some(EditSession {
+                target: target.clone(),
+                draft_source: None,
+                draft_block_values: library_block_draft(&self.ctx.config),
+                field_cursor: 0,
+                field_buffer: String::new(),
+                validation_errors: vec![],
+            }),
             EditTarget::Block(4) => Some(EditSession {
                 target: target.clone(),
                 draft_source: None,
@@ -1521,6 +1567,7 @@ impl App {
                 Self::source_editable_fields(src).len()
             }
             EditTarget::Block(0) => ROTATION_BLOCK_FIELDS.len(),
+            EditTarget::Block(2) => LIBRARY_BLOCK_FIELDS.len(),
             EditTarget::Block(4) => TUI_BLOCK_FIELDS.len(),
             EditTarget::Block(_) => 0,
             EditTarget::Wallhaven => WALLHAVEN_BLOCK_FIELDS.len(),
@@ -1548,6 +1595,7 @@ impl App {
             EditTarget::Block(block) => {
                 let keys = match block {
                     0 => ROTATION_BLOCK_FIELDS,
+                    2 => LIBRARY_BLOCK_FIELDS,
                     4 => TUI_BLOCK_FIELDS,
                     _ => &[] as &[&str],
                 };
@@ -1849,6 +1897,11 @@ impl App {
         match target {
             EditTarget::Source(i) => validate_source_edit(*i, config, secrets, paths),
             EditTarget::Wallhaven => validate_wallhaven_edit(config, secrets),
+            EditTarget::Block(2) => validate_config_diagnostics(config, secrets, paths)
+                .into_iter()
+                .filter(|diagnostic| diagnostic.path.starts_with("quota."))
+                .map(|diagnostic| diagnostic.to_string())
+                .collect(),
             EditTarget::Block(_) => Vec::new(),
         }
     }
@@ -1889,6 +1942,9 @@ impl App {
                 }
                 EditTarget::Block(0) => {
                     apply_rotation_block_draft(&mut temp, &sess.draft_block_values);
+                }
+                EditTarget::Block(2) => {
+                    apply_library_block_draft(&mut temp, &sess.draft_block_values);
                 }
                 EditTarget::Block(4) => {
                     apply_tui_block_draft(&mut temp, &sess.draft_block_values);
@@ -2008,6 +2064,10 @@ impl App {
             EditTarget::Block(0) => {
                 apply_rotation_block_draft(&mut config, &sess.draft_block_values);
                 success_msg = "config saved: rotation".into();
+            }
+            EditTarget::Block(2) => {
+                apply_library_block_draft(&mut config, &sess.draft_block_values);
+                success_msg = "config saved: library".into();
             }
             EditTarget::Block(4) => {
                 apply_tui_block_draft(&mut config, &sess.draft_block_values);
