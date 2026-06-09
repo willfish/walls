@@ -1,5 +1,6 @@
 # Example home-manager module for walls.
 # Rotation interval is in config.json (change.interval_secs); walls-tray runs the scheduler.
+# StatusNotifier tray hosts support wheel next/previous; legacy AppIndicator remains menu-only.
 { pkgs, ... }:
 {
   home.packages = [

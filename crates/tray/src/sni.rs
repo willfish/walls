@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use ksni::blocking::TrayMethods;
 use ksni::menu::StandardItem;
-use ksni::{MenuItem, Tray};
+use ksni::{MenuItem, Orientation, Tray};
 
 use crate::actions::{dispatch, menu_actions, MenuAction};
 use crate::icon;
@@ -55,6 +55,20 @@ impl WallsSniTray {
         }
         .into()
     }
+
+    fn send_action(&self, action: MenuAction) {
+        if self.action_tx.send(action).is_err() {
+            tracing::warn!("tray action channel closed");
+        }
+    }
+}
+
+fn action_for_scroll(delta: i32, orientation: Orientation) -> Option<MenuAction> {
+    match (delta.cmp(&0), orientation) {
+        (std::cmp::Ordering::Greater, Orientation::Vertical) => Some(MenuAction::Next),
+        (std::cmp::Ordering::Less, Orientation::Vertical) => Some(MenuAction::Prev),
+        _ => None,
+    }
 }
 
 impl Tray for WallsSniTray {
@@ -80,6 +94,12 @@ impl Tray for WallsSniTray {
             items.push(Self::item(spec.label, spec.action, tx.clone()));
         }
         items
+    }
+
+    fn scroll(&mut self, delta: i32, orientation: Orientation) {
+        if let Some(action) = action_for_scroll(delta, orientation) {
+            self.send_action(action);
+        }
     }
 }
 
@@ -125,4 +145,36 @@ pub fn run() -> anyhow::Result<()> {
 
     handle.shutdown().wait();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vertical_scroll_maps_to_next_and_previous_actions() {
+        assert_eq!(
+            action_for_scroll(1, Orientation::Vertical),
+            Some(MenuAction::Next)
+        );
+        assert_eq!(
+            action_for_scroll(120, Orientation::Vertical),
+            Some(MenuAction::Next)
+        );
+        assert_eq!(
+            action_for_scroll(-1, Orientation::Vertical),
+            Some(MenuAction::Prev)
+        );
+        assert_eq!(
+            action_for_scroll(-120, Orientation::Vertical),
+            Some(MenuAction::Prev)
+        );
+    }
+
+    #[test]
+    fn scroll_ignores_zero_and_horizontal_events() {
+        assert_eq!(action_for_scroll(0, Orientation::Vertical), None);
+        assert_eq!(action_for_scroll(1, Orientation::Horizontal), None);
+        assert_eq!(action_for_scroll(-1, Orientation::Horizontal), None);
+    }
 }
