@@ -66,6 +66,7 @@ fn source_with_url(url: &str) -> TestSourceBuilder {
             title_path: None,
             sort: None,
             time: None,
+            ..SourceEntry::default()
         },
     }
 }

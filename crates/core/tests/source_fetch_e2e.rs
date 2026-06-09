@@ -224,7 +224,11 @@ async fn e2e_wallhaven_refills_without_api_key_via_mock() {
 #[tokio::test]
 async fn e2e_wallhaven_applies_preseeded_cached_file_without_network() {
     let harness = FetchHarness::new();
-    harness.write_offline_empty_sources_config();
+    harness.write_config(harness.base_config(
+        false,
+        json!([{ "enabled": true, "type": "wallhaven", "query": "space" }]),
+    ));
+    harness.write_secrets(json!({}));
     harness.write_cache_file("wallhaven-94x38z.jpg", b"jpeg");
     harness.write_state(json!({
         "cache_queue": ["94x38z"],
@@ -233,6 +237,33 @@ async fn e2e_wallhaven_applies_preseeded_cached_file_without_network() {
 
     let applied = advance_expect_applied(harness.load_ctx()).await;
     assert!(applied.ends_with("wallhaven-94x38z.jpg"));
+}
+
+#[tokio::test]
+async fn e2e_sequential_sources_apply_local_before_queued_wallhaven() {
+    let harness = FetchHarness::new();
+    let favorite = common::write_image(harness.path(), "favorites/fav.jpg", b"fav");
+    harness.write_cache_file("wallhaven-94x38z.jpg", b"jpeg");
+    harness.write_config(harness.base_config(
+        false,
+        json!([
+            { "enabled": true, "type": "favorites", "label": "Favorites" },
+            { "enabled": true, "type": "wallhaven", "query": "space" }
+        ]),
+    ));
+    let mut config: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(harness.path().join("config.json")).unwrap())
+            .unwrap();
+    config["selection"]["strategy"] = json!("sequential");
+    harness.write_config(config);
+    harness.write_secrets(json!({}));
+    harness.write_state(json!({
+        "cache_queue": ["94x38z"],
+        "history": [],
+    }));
+
+    let applied = advance_expect_applied(harness.load_ctx()).await;
+    assert_eq!(applied, favorite);
 }
 
 #[tokio::test]
@@ -249,11 +280,14 @@ async fn e2e_advance_falls_through_when_wallhaven_refill_fails() {
     let image = common::write_image(harness.path(), "images/fallback.jpg", b"fake jpeg");
     harness.write_config(harness.base_config_with_wallhaven(
         true,
-        json!([{
-            "enabled": true,
-            "type": "folder",
-            "path": image.parent().unwrap().display().to_string()
-        }]),
+        json!([
+            { "enabled": true, "type": "wallhaven", "query": "nature" },
+            {
+                "enabled": true,
+                "type": "folder",
+                "path": image.parent().unwrap().display().to_string()
+            }
+        ]),
         FetchHarness::wallhaven_provider(json!({})),
     ));
     harness.write_secrets(FetchHarness::wallhaven_secrets("bad-key"));

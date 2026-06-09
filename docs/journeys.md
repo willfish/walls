@@ -159,8 +159,9 @@ Recovery:
 
 - Missing credential: add the key to `secrets.json`, then `chmod 600` the file.
 - Rate limited or offline: keep a local fallback enabled and retry later.
-- No candidates: broaden `wallhaven.search` filters or add a collection with
-  images that match the configured purity/category constraints.
+- No candidates: broaden the enabled Wallhaven source filters in `sources[]` or
+  add a collection with images that match the configured purity/category
+  constraints.
 
 ### Unsplash And Reddit
 

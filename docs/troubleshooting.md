@@ -114,8 +114,8 @@ Recovery:
 
 - Keep at least one local source enabled so provider outages do not block manual
   wallpaper changes.
-- For Wallhaven, loosen `wallhaven.search` filters or add collection IDs that
-  contain matching images.
+- For Wallhaven, loosen the enabled Wallhaven source filters in `sources[]` or
+  add collection IDs that contain matching images.
 - For Unsplash, Reddit, Pixabay, or Immich, check provider-specific keys in
   `secrets.json` and file permissions.
 - For local sources, add image files with supported extensions or correct the

@@ -81,19 +81,17 @@
       "enabled": true,
       "type": "bing",
       "label": "Bing Image of the Day"
-    }
-  ],
-  "wallhaven": {
-    "enabled": true,
-    "collections": [],
-    "search": {
-      "q": "space",
+    },
+    {
+      "enabled": true,
+      "type": "wallhaven",
+      "query": "space",
       "categories": "111",
       "purity": "100",
       "sorting": "random",
       "order": "desc",
-      "atleast": "1920x1080"
-    },
-    "prefer": "collections_then_search"
-  }
+      "atleast": "1920x1080",
+      "prefer": "collections_then_search"
+    }
+  ]
 }

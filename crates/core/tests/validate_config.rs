@@ -602,63 +602,62 @@ fn validate_config_reports_invalid_wallhaven_provider_settings() {
     common::write_minimal_config(root.path(), &images, &noop);
 
     let mut config = load_config_json(root.path());
-    config["wallhaven"] = serde_json::json!({
+    config["sources"] = serde_json::json!([{
         "enabled": true,
+        "type": "wallhaven",
+        "query": "forest",
+        "categories": "12",
+        "purity": "000",
+        "sorting": "popular",
+        "order": "sideways",
+        "atleast": "large",
         "collections": [
             { "username": "", "id": 0 }
-        ],
-        "search": {
-            "q": "forest",
-            "categories": "12",
-            "purity": "000",
-            "sorting": "popular",
-            "order": "sideways",
-            "atleast": "large"
-        }
-    });
+        ]
+    }]);
     common::write_config(root.path(), config);
 
     let errors = validate_root(root.path());
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("wallhaven.search.categories: must be three binary digits")),
+            .any(|error| error.contains("sources[0].categories: must be three binary digits")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("wallhaven.search.purity: must enable at least one option")),
+            .any(|error| error.contains("sources[0].purity: must enable at least one option")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("wallhaven.search.sorting: must be one of")),
+            .any(|error| error.contains("sources[0].sorting: must be one of")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("wallhaven.search.order: must be one of")),
+            .any(|error| error.contains("sources[0].order: must be one of")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("wallhaven.search.atleast: must be one of")),
+            .any(|error| error.contains("sources[0].atleast: must be one of")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("wallhaven.collections[0].username: must not be empty")),
+            .any(|error| error.contains("sources[0].collections[0].username: must not be empty")),
         "{errors:?}"
     );
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("wallhaven.collections[0].id: must be greater than zero")),
+            .any(|error| error.contains("sources[0].collections[0].id: must be greater than zero")),
         "{errors:?}"
     );
 }
@@ -672,22 +671,23 @@ fn validate_wallhaven_edit_reports_provider_errors_without_global_config_checks(
     common::write_minimal_config(root.path(), &images, &noop);
 
     let mut config = load_config_json(root.path());
-    config["sources"] = serde_json::json!([{
+    config["sources"] = serde_json::json!([
+    {
+        "enabled": true,
+        "type": "wallhaven",
+        "query": "forest",
+        "categories": "abc",
+        "purity": "001",
+        "sorting": "random",
+        "order": "desc",
+        "atleast": "1920x1080"
+    },
+    {
         "enabled": true,
         "type": "folder",
         "label": "Missing",
         "path": "/nonexistent/walls-test-folder"
     }]);
-    config["wallhaven"] = serde_json::json!({
-        "enabled": true,
-        "search": {
-            "categories": "abc",
-            "purity": "001",
-            "sorting": "random",
-            "order": "desc",
-            "atleast": "1920x1080"
-        }
-    });
     common::write_config(root.path(), config);
 
     let ctx = WallsCtx::load_from(root.path()).unwrap();
@@ -696,7 +696,7 @@ fn validate_wallhaven_edit_reports_provider_errors_without_global_config_checks(
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("wallhaven.search.categories: must be three binary digits")),
+            .any(|error| error.contains("sources[0].categories: must be three binary digits")),
         "{errors:?}"
     );
     assert!(
@@ -720,17 +720,16 @@ fn validate_config_allows_keyless_wallhaven_with_safe_purity() {
     common::write_minimal_config(root.path(), &images, &noop);
 
     let mut config = load_config_json(root.path());
-    config["wallhaven"] = serde_json::json!({
+    config["sources"] = serde_json::json!([{
         "enabled": true,
-        "search": {
-            "q": "forest",
-            "categories": "111",
-            "purity": "100",
-            "sorting": "random",
-            "order": "desc",
-            "atleast": "1920x1080"
-        }
-    });
+        "type": "wallhaven",
+        "query": "forest",
+        "categories": "111",
+        "purity": "100",
+        "sorting": "random",
+        "order": "desc",
+        "atleast": "1920x1080"
+    }]);
     common::write_config(root.path(), config);
 
     let errors = validate_root(root.path());
@@ -746,23 +745,22 @@ fn validate_config_rejects_custom_wallhaven_resolution_with_actionable_hint() {
     common::write_minimal_config(root.path(), &images, &noop);
 
     let mut config = load_config_json(root.path());
-    config["wallhaven"] = serde_json::json!({
+    config["sources"] = serde_json::json!([{
         "enabled": true,
-        "search": {
-            "q": "forest",
-            "categories": "111",
-            "purity": "100",
-            "sorting": "random",
-            "order": "desc",
-            "atleast": "2561x1440"
-        }
-    });
+        "type": "wallhaven",
+        "query": "forest",
+        "categories": "111",
+        "purity": "100",
+        "sorting": "random",
+        "order": "desc",
+        "atleast": "2561x1440"
+    }]);
     common::write_config(root.path(), config);
 
     let errors = validate_root(root.path());
     assert!(
         errors.iter().any(|error| error
-            .contains("wallhaven.search.atleast: must be one of: 1024x768, 1280x720, 1366x768")),
+            .contains("sources[0].atleast: must be one of: 1024x768, 1280x720, 1366x768")),
         "{errors:?}"
     );
     assert!(
@@ -782,19 +780,19 @@ fn validate_config_skips_disabled_wallhaven_provider_settings() {
     common::write_minimal_config(root.path(), &images, &noop);
 
     let mut config = load_config_json(root.path());
-    config["wallhaven"] = serde_json::json!({
+    config["sources"] = serde_json::json!([{
         "enabled": false,
+        "type": "wallhaven",
+        "query": "forest",
+        "categories": "abc",
+        "purity": "000",
+        "sorting": "popular",
+        "order": "sideways",
+        "atleast": "large",
         "collections": [
             { "username": "", "id": 0 }
-        ],
-        "search": {
-            "categories": "abc",
-            "purity": "000",
-            "sorting": "popular",
-            "order": "sideways",
-            "atleast": "large"
-        }
-    });
+        ]
+    }]);
     common::write_config(root.path(), config);
 
     let errors = validate_root(root.path());

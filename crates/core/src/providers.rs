@@ -336,10 +336,8 @@ pub fn configured_source_providers(sources: &[SourceEntry]) -> Vec<ProviderDescr
     sources.iter().map(provider_for_source).collect()
 }
 
-pub fn configured_providers(config: &Config, secrets: &Secrets) -> Vec<ProviderDescriptor> {
-    let mut providers = configured_source_providers(&config.sources);
-    providers.push(wallhaven_provider(config, secrets));
-    providers
+pub fn configured_providers(config: &Config, _secrets: &Secrets) -> Vec<ProviderDescriptor> {
+    configured_source_providers(&config.sources)
 }
 
 pub fn enabled_local_sources(sources: &[SourceEntry]) -> impl Iterator<Item = &SourceEntry> {
@@ -355,7 +353,7 @@ pub fn wallhaven_provider(config: &Config, _secrets: &Secrets) -> ProviderDescri
     ProviderDescriptor {
         id: "wallhaven".into(),
         kind: ProviderKind::Wallhaven,
-        enabled: config.change.internet_enabled && (config.wallhaven.enabled || source_enabled),
+        enabled: config.change.internet_enabled && source_enabled,
         capabilities: capabilities_for_kind(ProviderKind::Wallhaven),
     }
 }

@@ -16,8 +16,8 @@ use crate::config::{
 use crate::ctx::WallsCtx;
 use crate::events::{last_run_summary, read_events, LastRunStatus, LastRunSummary};
 use crate::providers::{
-    configured_providers, provider_for_source, ProviderAttempt, ProviderNoCandidateReason,
-    ProviderOperation, ProviderStatus,
+    provider_for_source, ProviderAttempt, ProviderNoCandidateReason, ProviderOperation,
+    ProviderStatus,
 };
 use crate::sources::list_images_with_paths;
 use crate::tray::{decide_tray_action_from_env, TrayAction};
@@ -251,23 +251,6 @@ fn provider_doctor_attempts(ctx: &WallsCtx) -> Vec<ProviderAttempt> {
         attempts.push(attempt);
     }
 
-    let configured = configured_providers(&ctx.config, &ctx.secrets);
-    if let Some(wallhaven) = configured
-        .iter()
-        .find(|provider| provider.kind == crate::providers::ProviderKind::Wallhaven)
-    {
-        let mut attempt = wallhaven.attempt(ProviderOperation::DoctorCheck);
-        if !ctx.config.wallhaven.enabled {
-            attempt = attempt
-                .with_status(ProviderStatus::Disabled)
-                .skipped(ProviderNoCandidateReason::Disabled);
-        } else if !ctx.config.change.internet_enabled {
-            attempt = attempt
-                .with_status(ProviderStatus::OfflineDisabled)
-                .skipped(ProviderNoCandidateReason::OfflineDisabled);
-        }
-        attempts.push(attempt);
-    }
     attempts
 }
 
@@ -774,12 +757,10 @@ fn verified_local_candidate_count(ctx: &WallsCtx, checks: &mut Vec<DoctorCheck>)
 }
 
 fn has_online_provider(ctx: &WallsCtx) -> bool {
-    ctx.config.wallhaven.enabled
-        || ctx
-            .config
-            .sources
-            .iter()
-            .any(|source| source.enabled && !SourceKind::parse(&source.source_type).is_local())
+    ctx.config
+        .sources
+        .iter()
+        .any(|source| source.enabled && !SourceKind::parse(&source.source_type).is_local())
 }
 
 fn local_source_label(source: &crate::config::SourceEntry) -> String {
@@ -1132,6 +1113,7 @@ mod tests {
             title_path: None,
             sort: None,
             time: None,
+            ..SourceEntry::default()
         }
     }
 

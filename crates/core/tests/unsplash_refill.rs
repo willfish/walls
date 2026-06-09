@@ -72,7 +72,6 @@ fn config_defaults_keep_existing_manual_construction_shape() {
         display: Default::default(),
         selection: SelectionConfig::default(),
         sources: vec![],
-        wallhaven: Default::default(),
         tray: Default::default(),
         tui: Default::default(),
     };
