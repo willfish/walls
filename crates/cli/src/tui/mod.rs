@@ -1,6 +1,7 @@
 mod app;
 mod command;
 mod history_browse_view;
+mod logs_view;
 mod now_view;
 #[cfg(feature = "tui-preview")]
 mod preview;
