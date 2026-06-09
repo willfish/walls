@@ -10,6 +10,13 @@ pub fn no_previous_wallpaper() -> &'static str {
     "no previous wallpaper. Apply or advance at least two wallpapers before using previous."
 }
 
+pub fn missing_previous_wallpaper(path: &std::path::Path) -> String {
+    format!(
+        "previous wallpaper file is missing: {}. Re-apply an available wallpaper with `walls apply <path>`, or use `walls current --json` to inspect the current state.",
+        path.display()
+    )
+}
+
 pub fn tui_next_no_change() -> String {
     format!("next: {}", next_no_change())
 }
@@ -37,6 +44,10 @@ mod tests {
         assert!(next_no_change().contains("walls next --manual --verbose"));
         assert!(next_no_change().contains("walls doctor"));
         assert!(no_previous_wallpaper().contains("at least two wallpapers"));
+        assert!(
+            missing_previous_wallpaper(std::path::Path::new("/tmp/missing.jpg"))
+                .contains("walls apply <path>")
+        );
     }
 
     #[test]
