@@ -10,7 +10,7 @@ use ksni::blocking::TrayMethods;
 use ksni::menu::StandardItem;
 use ksni::{MenuItem, Orientation, Tray};
 
-use crate::actions::{dispatch, menu_actions, MenuAction};
+use crate::actions::{dispatch, menu_actions, tooltip_with_feedback, ActionFeedback, MenuAction};
 use crate::icon;
 use crate::resolve_walls_bin;
 use crate::rotation::RotationLoop;
@@ -19,6 +19,7 @@ use crate::state_watch::StateWatcher;
 pub struct WallsSniTray {
     tooltip: String,
     icons: Vec<ksni::Icon>,
+    feedback: Option<ActionFeedback>,
     action_tx: Sender<MenuAction>,
 }
 
@@ -27,6 +28,7 @@ impl WallsSniTray {
         let mut tray = Self {
             tooltip: icon::tooltip_from_state(),
             icons: icon::ksni_icons_from_state(),
+            feedback: None,
             action_tx,
         };
         if tray.icons.is_empty() {
@@ -41,6 +43,11 @@ impl WallsSniTray {
         if self.icons.is_empty() {
             self.icons = icon::default_ksni_icons();
         }
+    }
+
+    pub fn set_feedback(&mut self, feedback: Option<ActionFeedback>) {
+        self.feedback = feedback;
+        self.refresh_state();
     }
 
     fn item(label: &str, action: MenuAction, tx: Sender<MenuAction>) -> MenuItem<Self> {
@@ -77,7 +84,7 @@ impl Tray for WallsSniTray {
     }
 
     fn title(&self) -> String {
-        self.tooltip.clone()
+        tooltip_with_feedback(&self.tooltip, self.feedback.as_ref())
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
@@ -91,7 +98,7 @@ impl Tray for WallsSniTray {
             if spec.separator_before {
                 items.push(MenuItem::Separator);
             }
-            items.push(Self::item(spec.label, spec.action, tx.clone()));
+            items.push(Self::item(&spec.label, spec.action, tx.clone()));
         }
         items
     }
@@ -127,7 +134,10 @@ pub fn run() -> anyhow::Result<()> {
                 break;
             }
             if outcome.refresh {
-                let _ = worker_handle.update(|tray: &mut WallsSniTray| tray.refresh_state());
+                let feedback = outcome.feedback;
+                let _ = worker_handle.update(|tray: &mut WallsSniTray| {
+                    tray.set_feedback(feedback);
+                });
             }
         }
     });
