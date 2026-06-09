@@ -17,6 +17,13 @@ pub fn missing_previous_wallpaper(path: &std::path::Path) -> String {
     )
 }
 
+pub fn missing_apply_original(path: &std::path::Path) -> String {
+    format!(
+        "wallpaper file does not exist: {}. Choose an existing image path, or run `walls next --manual --verbose` to select from configured sources.",
+        path.display()
+    )
+}
+
 pub fn tui_next_no_change() -> String {
     format!("next: {}", next_no_change())
 }
@@ -47,6 +54,10 @@ mod tests {
         assert!(
             missing_previous_wallpaper(std::path::Path::new("/tmp/missing.jpg"))
                 .contains("walls apply <path>")
+        );
+        assert!(
+            missing_apply_original(std::path::Path::new("/tmp/missing.jpg"))
+                .contains("walls next --manual --verbose")
         );
     }
 

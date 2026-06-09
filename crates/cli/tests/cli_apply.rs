@@ -126,6 +126,49 @@ fn cli_apply_dry_run_reports_missing_original_without_mutating() {
 }
 
 #[test]
+fn cli_apply_json_reports_missing_original_without_raw_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home, _image, marker) = setup_xdg_home(tmp.path());
+    let missing = tmp.path().join("images/missing.jpg");
+
+    let assert = walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["apply", "--json", missing.to_str().unwrap()])
+        .assert()
+        .failure();
+    let value: serde_json::Value =
+        serde_json::from_slice(&assert.get_output().stdout).expect("apply missing json");
+
+    assert_eq!(value["command"], "apply");
+    assert_eq!(value["changed"], false);
+    assert_eq!(value["status"], "missing_original");
+    assert_eq!(value["dry_run"], false);
+    assert_eq!(value["exit_code_reason"], "missing_original");
+    assert_eq!(value["apply"]["original_exists"], false);
+    assert_eq!(value["apply"]["would_run_backend"], false);
+    assert!(!marker.exists(), "missing apply must not invoke backend");
+}
+
+#[test]
+fn cli_apply_human_missing_original_includes_recovery_action() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home, _image, marker) = setup_xdg_home(tmp.path());
+    let missing = tmp.path().join("images/missing.jpg");
+
+    walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["apply", missing.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("wallpaper file does not exist"))
+        .stderr(predicate::str::contains("walls next --manual --verbose"));
+
+    assert!(!marker.exists(), "missing apply must not invoke backend");
+}
+
+#[test]
 fn cli_apply_json_reports_mutating_apply_result() {
     let tmp = tempfile::tempdir().unwrap();
     let (config_home, state_home, image, marker) = setup_xdg_home(tmp.path());
