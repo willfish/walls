@@ -56,7 +56,7 @@
     "strategy": "random"
   },
   "tray": {
-    "accent": "blue",
+    "accent": "white",
     "autostart": {
       "desktops": {
         "cosmic": false,

@@ -2582,7 +2582,7 @@ mod tests {
         assert!(text.contains("safe mode           : true"), "{text}");
         assert!(text.contains("lock screen         : true"), "{text}");
         assert!(text.contains("download preference : 35% online"), "{text}");
-        assert!(text.contains("tray icon           : blue"), "{text}");
+        assert!(text.contains("tray icon           : white"), "{text}");
         assert!(!text.contains("paused:"), "{text}");
     }
 

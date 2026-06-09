@@ -101,7 +101,7 @@ pub fn effective_tray_accent(accent: TrayAccent) -> TrayAccent {
     if tray_accent_available(accent) {
         accent
     } else {
-        TrayAccent::Blue
+        TrayAccent::White
     }
 }
 
@@ -110,9 +110,9 @@ pub fn resolve_tray_palette(config: &Config, wallpaper_path: Option<&Path>) -> T
     match effective_tray_accent(config.tray.accent) {
         TrayAccent::Wallpaper => wallpaper_path
             .and_then(dominant_color_from_image)
-            .map_or_else(TrayAccentPalette::blue, TrayAccentPalette::from_dominant),
+            .map_or_else(TrayAccentPalette::white, TrayAccentPalette::from_dominant),
         TrayAccent::Cosmic => {
-            cosmic_theme::cosmic_accent_palette().unwrap_or_else(TrayAccentPalette::blue)
+            cosmic_theme::cosmic_accent_palette().unwrap_or_else(TrayAccentPalette::white)
         }
         accent => TrayAccentPalette::from_accent(accent),
     }
@@ -146,10 +146,10 @@ pub fn parse_tray_accent(value: &str) -> Option<TrayAccent> {
 }
 
 const TRAY_ACCENT_CHOICES_BASE: &[&str] =
-    &["blue", "white", "green", "pink", "purple", "wallpaper"];
+    &["white", "blue", "green", "pink", "purple", "wallpaper"];
 const TRAY_ACCENT_CHOICES_WITH_COSMIC: &[&str] = &[
-    "blue",
     "white",
+    "blue",
     "cosmic",
     "green",
     "pink",
@@ -309,12 +309,12 @@ mod tests {
                 TrayAccent::Cosmic
             );
         } else {
-            assert_eq!(effective_tray_accent(TrayAccent::Cosmic), TrayAccent::Blue);
+            assert_eq!(effective_tray_accent(TrayAccent::Cosmic), TrayAccent::White);
         }
     }
 
     #[test]
-    fn wallpaper_accent_defaults_to_blue_without_image() {
+    fn wallpaper_accent_defaults_to_white_without_image() {
         let config = Config {
             tray: crate::config::TrayConfig {
                 accent: TrayAccent::Wallpaper,
@@ -323,6 +323,6 @@ mod tests {
             ..crate::config::default_config().expect("default config")
         };
         let palette = resolve_tray_palette(&config, None);
-        assert_eq!(palette.primary, TrayAccentPalette::blue().primary);
+        assert_eq!(palette.primary, TrayAccentPalette::white().primary);
     }
 }
