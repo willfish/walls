@@ -121,7 +121,7 @@ Before closing TUI work, run the checks in [`tui-verification.md`](tui-verificat
 
 Wide (tui-preview): split list-context | form (like Now preview split). Narrow: full form.
 
-Nested providers: "Sources" block shows full sources vec (all types from config.example), subnav j/k or arrow up/down pick, Home/End jump, PageUp/PageDown page, and `e` edits chosen SourceEntry (type-aware fields like path/query/url/image_path/api_key, designed per schema). Reuses atomic save + Reload + existing validation.
+Nested providers: "Sources" block shows the configured sources vec, subnav j/k or arrow up/down pick, Home/End jump, PageUp/PageDown page, and `e` edits chosen SourceEntry (type-aware fields like path/query/url/image_path/api_key, designed per schema). Extended provider examples live in `config.sources.example.json` instead of the first-run config. Reuses atomic save + Reload + existing validation.
 
 ### Config tab field coverage matrix
 

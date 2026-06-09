@@ -243,6 +243,8 @@ impl Default for SelectionConfig {
 }
 
 /// Default configuration for a fresh install, seeded from `config.example.json` at repo root.
+/// Extended source examples live in `config.sources.example.json` so first-run
+/// config stays focused on immediately useful providers.
 pub fn default_config() -> anyhow::Result<Config> {
     let mut config: Config = serde_json::from_str(include_str!("../../../../config.example.json"))?;
     config.wallhaven.search.atleast = wallhaven::detected_wallhaven_atleast()

@@ -397,9 +397,9 @@ async fn advance_next_with_bing_source_fetches_real_bing_wallpaper() {
     );
 }
 
-// TDD RED tests for additional working defaults (JSON feed, MediaRSS).
+// TDD RED tests for additional source examples (JSON feed, MediaRSS).
 // These will fail until we add apply_json_feed / apply_media_rss in advance (similar to bing).
-// The defaults in config.example.json point to public feeds that these will support.
+// The source examples point to public feeds that these will support.
 //
 // Ignored by default: live network fetch against public endpoint. These fail under
 // --offline (as used in nix checkPhase for hermetic derivations) and can be flaky in CI.
@@ -418,7 +418,7 @@ async fn advance_next_with_json_source_fetches_real_image_from_feed() {
         fs::set_permissions(&noop, fs::Permissions::from_mode(0o755)).unwrap();
     }
 
-    // Use the same public json as in the example default (picsum info has $.download_url)
+    // Use the same public json as the source example (picsum info has $.download_url)
     let config = serde_json::json!({
         "change": { "enabled": true, "internet_enabled": true },
         "paths": {
