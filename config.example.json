@@ -90,6 +90,7 @@
       "purity": "100",
       "sorting": "random",
       "order": "desc",
+      "ratios": "16x9",
       "atleast": "1920x1080",
       "prefer": "collections_then_search"
     }

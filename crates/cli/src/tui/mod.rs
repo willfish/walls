@@ -3231,7 +3231,7 @@ mod tests {
                     { "enabled": false, "type": "folder", "path": "/tmp/disabled" },
                     { "enabled": true, "type": "reddit", "query": "rust", "sort": "top", "time": "week" },
                     { "enabled": true, "type": "folder", "path": "/tmp/walls-local" },
-                    { "enabled": true, "type": "wallhaven", "query": "mountain lake", "categories": "100", "purity": "100", "sorting": "random", "order": "desc", "atleast": "1920x1080" }
+                    { "enabled": true, "type": "wallhaven", "query": "mountain lake", "categories": "100", "purity": "100", "sorting": "random", "order": "desc", "ratios": "16x9", "atleast": "1920x1080" }
                 ]
             }),
             serde_json::json!({}),
@@ -3260,7 +3260,7 @@ mod tests {
         assert_eq!(
             app.selected_open_target(),
             Some(OpenTarget::Url(
-                "https://wallhaven.cc/search?q=mountain+lake&categories=100&purity=100&sorting=random&order=desc&atleast=1920x1080".into()
+                "https://wallhaven.cc/search?q=mountain+lake&categories=100&purity=100&sorting=random&order=desc&atleast=1920x1080&ratios=16x9".into()
             ))
         );
     }
@@ -4224,6 +4224,7 @@ mod tests {
                 "purity_nsfw",
                 "sorting",
                 "order",
+                "ratios",
                 "atleast",
                 "prefer"
             ]
@@ -4239,6 +4240,7 @@ mod tests {
         assert!(text.contains("Edit Source"), "{text}");
         assert!(text.contains("Wallhaven space"), "{text}");
         assert!(text.contains("Search query"), "{text}");
+        assert!(text.contains("Aspect ratio"), "{text}");
         assert!(text.contains("Minimum resolution"), "{text}");
         assert!(text.contains("Wallhaven API key"), "{text}");
         assert!(

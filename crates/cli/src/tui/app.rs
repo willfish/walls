@@ -144,6 +144,7 @@ pub(crate) const WALLHAVEN_BLOCK_FIELDS: &[&str] = &[
     "purity_nsfw",
     "sorting",
     "order",
+    "ratios",
     "atleast",
 ];
 pub(crate) const SEARCH_FILTER_FIELDS: &[&str] = &[
@@ -156,6 +157,7 @@ pub(crate) const SEARCH_FILTER_FIELDS: &[&str] = &[
     "purity_nsfw",
     "sorting",
     "order",
+    "ratios",
     "atleast",
 ];
 
@@ -263,6 +265,7 @@ fn wallhaven_search_draft(
     );
     vals.insert("sorting".into(), search.sorting.clone());
     vals.insert("order".into(), search.order.clone());
+    vals.insert("ratios".into(), search.ratios.clone());
     vals.insert("atleast".into(), search.atleast.clone());
     vals
 }
@@ -317,6 +320,7 @@ pub(crate) fn block_field_label(block: usize, key: &str) -> String {
             "purity_nsfw" => "Purity: NSFW".into(),
             "sorting" => "Sorting".into(),
             "order" => "Order".into(),
+            "ratios" => "Aspect ratio".into(),
             "atleast" => "Minimum resolution".into(),
             other => other.into(),
         },
@@ -368,6 +372,7 @@ pub(crate) fn block_field_kind(block: usize, key: &str) -> EditFieldKind {
                 "toplist",
             ]),
             "order" => EditFieldKind::Choice(&["desc", "asc"]),
+            "ratios" => EditFieldKind::Choice(walls_core::config::wallhaven_ratio_choices()),
             "atleast" => EditFieldKind::Choice(walls_core::config::wallhaven_resolution_choices()),
             _ => EditFieldKind::Text,
         },
@@ -414,6 +419,7 @@ pub(crate) fn source_field_kind_for(src: &SourceEntry, name: &str) -> EditFieldK
                 "toplist",
             ]),
             "order" => EditFieldKind::Choice(&["desc", "asc"]),
+            "ratios" => EditFieldKind::Choice(walls_core::config::wallhaven_ratio_choices()),
             "atleast" => EditFieldKind::Choice(walls_core::config::wallhaven_resolution_choices()),
             _ => EditFieldKind::Text,
         };
@@ -451,6 +457,7 @@ pub(crate) fn source_field_label(src: &SourceEntry, name: &str) -> String {
             "purity_nsfw" => "Purity: NSFW".into(),
             "sorting" => "Sorting".into(),
             "order" => "Order".into(),
+            "ratios" => "Aspect ratio".into(),
             "atleast" => "Minimum resolution".into(),
             "prefer" => "Prefer".into(),
             other => other.into(),
@@ -592,6 +599,7 @@ fn block_field_value_at(
             }
             "sorting" => first_wallhaven_search(config).sorting,
             "order" => first_wallhaven_search(config).order,
+            "ratios" => first_wallhaven_search(config).ratios,
             "atleast" => first_wallhaven_search(config).atleast,
             _ => String::new(),
         },
@@ -624,6 +632,7 @@ fn search_filter_field_value_at(
         "purity_nsfw" => wallhaven_bit_at(&search.purity, 2, false).to_string(),
         "sorting" => search.sorting.clone(),
         "order" => search.order.clone(),
+        "ratios" => search.ratios.clone(),
         "atleast" => search.atleast.clone(),
         _ => String::new(),
     }
@@ -868,6 +877,9 @@ fn apply_wallhaven_search_draft(
     if let Some(v) = draft.get("order") {
         search.order = v.clone();
     }
+    if let Some(v) = draft.get("ratios") {
+        search.ratios = v.clone();
+    }
     if let Some(v) = draft.get("atleast") {
         search.atleast = v.clone();
     }
@@ -885,6 +897,7 @@ fn apply_wallhaven_search_draft_to_source(
     source.purity = Some(search.purity);
     source.sorting = Some(search.sorting);
     source.order = Some(search.order);
+    source.ratios = Some(search.ratios);
     source.atleast = Some(search.atleast);
 }
 
@@ -1229,9 +1242,10 @@ impl App {
         let mut lines = vec![
             format!("provider: Wallhaven | query: {}", self.search_query),
             format!(
-                "filters: purity {} | categories {} | sorting {} {} | minimum {}",
+                "filters: purity {} | categories {} | ratio {} | sorting {} {} | minimum {}",
                 self.search_filters.purity,
                 self.search_filters.categories,
+                self.search_filters.ratios,
                 self.search_filters.sorting,
                 self.search_filters.order,
                 self.search_filters.atleast
@@ -1949,6 +1963,7 @@ impl App {
             }
             "sorting" => src.sorting.clone().unwrap_or_default(),
             "order" => src.order.clone().unwrap_or_default(),
+            "ratios" => src.ratios.clone().unwrap_or_default(),
             "atleast" => src.atleast.clone().unwrap_or_default(),
             "prefer" => src.prefer.map(wallhaven_prefer_label).unwrap_or_default(),
             "time" => {
@@ -2006,6 +2021,7 @@ impl App {
             "purity_nsfw" => set_wallhaven_purity_bit(draft, 2, trimmed),
             "sorting" => draft.sorting = v,
             "order" => draft.order = v,
+            "ratios" => draft.ratios = v,
             "atleast" => draft.atleast = v,
             "prefer" => {
                 if let Some(prefer) = parse_wallhaven_prefer(trimmed) {
@@ -2436,6 +2452,7 @@ impl App {
                 source.purity = Some(search.purity.clone());
                 source.sorting = Some(search.sorting.clone());
                 source.order = Some(search.order.clone());
+                source.ratios = Some(search.ratios.clone());
                 source.atleast = Some(search.atleast.clone());
                 temp.sources = vec![source];
                 let issues = Self::validation_issues_for_edit(
