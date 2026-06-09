@@ -78,7 +78,18 @@ pub fn source_config_fields(source_type: &str) -> &'static [&'static str] {
             "url",
         ],
         SourceKind::Weighting => &["enabled", "type", "label", "query"],
-        SourceKind::Wallhaven => &["enabled", "type", "query"],
+        SourceKind::Wallhaven => &[
+            "enabled",
+            "type",
+            "query",
+            "categories",
+            "purity",
+            "sorting",
+            "order",
+            "atleast",
+            "prefer",
+            "collections",
+        ],
         SourceKind::Pixabay => &["enabled", "type", "label", "query", "api_key"],
         SourceKind::Immich => &["enabled", "type", "label", "url", "api_key"],
         _ => COMMON_SOURCE_FIELDS,
@@ -91,19 +102,16 @@ pub fn source_editable_fields(entry: &SourceEntry) -> Vec<&'static str> {
     match source_kind {
         SourceKind::Reddit => vec!["enabled", "query", "sort", "time"],
         SourceKind::Folder | SourceKind::Image | SourceKind::Favorites | SourceKind::Fetched => {
-            let mut fields = vec!["enabled", "type", "label"];
+            let mut fields = vec!["enabled", "label"];
             if matches!(source_kind, SourceKind::Folder | SourceKind::Image) {
                 fields.push("path");
             }
             fields
         }
-        SourceKind::Json => vec!["enabled", "type", "label", "url", "image_path"],
-        SourceKind::MediaRss | SourceKind::Attribution => {
-            vec!["enabled", "type", "label", "url"]
-        }
+        SourceKind::Json => vec!["enabled", "label", "url", "image_path"],
+        SourceKind::MediaRss | SourceKind::Attribution => vec!["enabled", "label", "url"],
         SourceKind::Unsplash => vec![
             "enabled",
-            "type",
             "label",
             "query",
             "collection",
@@ -112,11 +120,24 @@ pub fn source_editable_fields(entry: &SourceEntry) -> Vec<&'static str> {
             "orientation",
             "url",
         ],
-        SourceKind::Weighting => vec!["enabled", "type", "label", "query"],
-        SourceKind::Wallhaven => vec!["enabled", "type", "query"],
-        SourceKind::Pixabay => vec!["enabled", "type", "label", "query", "api_key"],
-        SourceKind::Immich => vec!["enabled", "type", "label", "url", "api_key"],
-        _ => vec!["enabled", "type", "label"],
+        SourceKind::Weighting => vec!["enabled", "label", "query"],
+        SourceKind::Wallhaven => vec![
+            "enabled",
+            "query",
+            "category_general",
+            "category_anime",
+            "category_people",
+            "purity_sfw",
+            "purity_sketchy",
+            "purity_nsfw",
+            "sorting",
+            "order",
+            "atleast",
+            "prefer",
+        ],
+        SourceKind::Pixabay => vec!["enabled", "label", "query", "api_key"],
+        SourceKind::Immich => vec!["enabled", "label", "url", "api_key"],
+        _ => vec!["enabled", "label"],
     }
 }
 
@@ -125,6 +146,7 @@ pub fn normalize_source_entry(entry: &mut SourceEntry) {
     if SourceKind::parse(&entry.source_type) == SourceKind::Reddit {
         normalize_reddit_source(entry);
     }
+    let is_wallhaven = SourceKind::parse(&entry.source_type) == SourceKind::Wallhaven;
 
     let allowed: std::collections::HashSet<&str> = source_config_fields(entry.source_type.as_str())
         .iter()
@@ -143,6 +165,20 @@ pub fn normalize_source_entry(entry: &mut SourceEntry) {
     normalize_optional_field(&allowed, "image_path", &mut entry.image_path);
     normalize_optional_field(&allowed, "sort", &mut entry.sort);
     normalize_optional_field(&allowed, "time", &mut entry.time);
+    normalize_optional_field(&allowed, "categories", &mut entry.categories);
+    normalize_optional_field(&allowed, "purity", &mut entry.purity);
+    normalize_optional_field(&allowed, "sorting", &mut entry.sorting);
+    normalize_optional_field(&allowed, "order", &mut entry.order);
+    normalize_optional_field(&allowed, "atleast", &mut entry.atleast);
+    if !allowed.contains("prefer") {
+        entry.prefer = None;
+    }
+    if !allowed.contains("collections") {
+        entry.collections.clear();
+    }
+    if is_wallhaven {
+        super::wallhaven::populate_wallhaven_source_defaults(entry);
+    }
 
     // serde compat only; never persisted from walls edits.
     entry.title_path = None;
@@ -220,6 +256,7 @@ mod tests {
             orientation: None,
             image_path: None,
             title_path: None,
+            ..SourceEntry::default()
         };
         normalize_source_entry(&mut entry);
         assert_eq!(entry.query.as_deref(), Some("wallpapers"));
@@ -248,11 +285,56 @@ mod tests {
             image_path: None,
             title_path: None,
             time: None,
+            ..SourceEntry::default()
         };
         normalize_source_entry(&mut entry);
         assert_eq!(entry.query.as_deref(), Some("forest"));
         assert_eq!(entry.orientation.as_deref(), Some("landscape"));
         assert!(entry.path.is_none());
+        assert!(entry.sort.is_none());
+    }
+
+    #[test]
+    fn normalize_wallhaven_keeps_query_and_strips_label() {
+        let mut entry = SourceEntry {
+            enabled: true,
+            source_type: "wallhaven".into(),
+            label: Some("Old label".into()),
+            query: Some("jupiter".into()),
+            path: Some("/nope".into()),
+            url: Some("https://example.com".into()),
+            api_key: Some("secret".into()),
+            sort: Some("hot".into()),
+            time: None,
+            collection: None,
+            user: None,
+            topic: None,
+            orientation: None,
+            image_path: None,
+            title_path: None,
+            categories: Some("000".into()),
+            purity: Some("000".into()),
+            sorting: Some("date".into()),
+            order: Some("asc".into()),
+            atleast: Some("1024x768".into()),
+            prefer: Some(crate::config::WallhavenPrefer::SearchOnly),
+            collections: Vec::new(),
+        };
+        normalize_source_entry(&mut entry);
+        assert_eq!(entry.query.as_deref(), Some("jupiter"));
+        assert_eq!(entry.categories.as_deref(), Some("000"));
+        assert_eq!(entry.purity.as_deref(), Some("000"));
+        assert_eq!(entry.sorting.as_deref(), Some("date"));
+        assert_eq!(entry.order.as_deref(), Some("asc"));
+        assert_eq!(entry.atleast.as_deref(), Some("1024x768"));
+        assert_eq!(
+            entry.prefer,
+            Some(crate::config::WallhavenPrefer::SearchOnly)
+        );
+        assert!(entry.label.is_none());
+        assert!(entry.path.is_none());
+        assert!(entry.url.is_none());
+        assert!(entry.api_key.is_none());
         assert!(entry.sort.is_none());
     }
 

@@ -33,6 +33,25 @@ fn state_file() -> anyhow::Result<PathBuf> {
     Ok(base.join("walls").join("state.json"))
 }
 
+fn data_dir() -> PathBuf {
+    if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
+        return PathBuf::from(xdg).join("walls");
+    }
+    if let Some(data) = dirs::data_local_dir() {
+        return data.join("walls");
+    }
+    if let Some(home) = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+    {
+        return home.join(".local").join("share").join("walls");
+    }
+    PathBuf::from(".")
+        .join(".local")
+        .join("share")
+        .join("walls")
+}
+
 impl WallsPaths {
     pub fn discover() -> anyhow::Result<Self> {
         let config_dir = config_dir()?;
@@ -53,11 +72,12 @@ impl WallsPaths {
     }
 
     pub fn apply_config_paths(&mut self, paths: &crate::config::PathsConfig) {
-        self.cache_dir = expand_home(&paths.cache_dir);
-        self.download_dir = expand_home(&paths.download_dir);
-        self.favorites_dir = expand_home(&paths.favorites_dir);
-        self.fetched_dir = expand_home(&paths.fetched_dir);
-        self.compose_dir = expand_home(&paths.compose_dir);
+        let data_dir = data_dir();
+        self.cache_dir = resolve_data_path(&paths.cache_dir, &data_dir);
+        self.download_dir = resolve_data_path(&paths.download_dir, &data_dir);
+        self.favorites_dir = resolve_data_path(&paths.favorites_dir, &data_dir);
+        self.fetched_dir = resolve_data_path(&paths.fetched_dir, &data_dir);
+        self.compose_dir = resolve_data_path(&paths.compose_dir, &data_dir);
     }
 
     pub fn ensure_data_dirs(&self) -> anyhow::Result<()> {
@@ -77,6 +97,15 @@ impl WallsPaths {
     }
 }
 
+fn resolve_data_path(path: impl AsRef<Path>, data_dir: &Path) -> PathBuf {
+    let path = expand_home(path);
+    if path.is_absolute() {
+        path
+    } else {
+        data_dir.join(path)
+    }
+}
+
 /// Expand a leading `~/` to the user home directory.
 pub fn expand_home(path: impl AsRef<Path>) -> PathBuf {
     let path = path.as_ref();
@@ -92,4 +121,26 @@ pub fn expand_home(path: impl AsRef<Path>) -> PathBuf {
         }
     }
     path.to_path_buf()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_data_path;
+    use std::path::Path;
+
+    #[test]
+    fn relative_storage_paths_resolve_under_data_dir() {
+        assert_eq!(
+            resolve_data_path("cache", Path::new("/var/lib/walls")),
+            Path::new("/var/lib/walls/cache")
+        );
+    }
+
+    #[test]
+    fn absolute_storage_paths_are_left_alone() {
+        assert_eq!(
+            resolve_data_path("/tmp/walls-cache", Path::new("/var/lib/walls")),
+            Path::new("/tmp/walls-cache")
+        );
+    }
 }

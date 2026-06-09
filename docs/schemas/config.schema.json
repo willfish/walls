@@ -18,8 +18,7 @@
     "sources": {
       "type": "array",
       "items": { "$ref": "#/$defs/source" }
-    },
-    "wallhaven": { "$ref": "#/$defs/wallhaven" }
+    }
   },
   "$defs": {
     "change": {
@@ -185,6 +184,20 @@
         "title_path": { "type": "string" },
         "sort": { "type": "string", "enum": ["hot", "new", "top", "rising", "controversial"] },
         "time": { "type": "string", "enum": ["hour", "day", "week", "month", "year", "all"] },
+        "categories": { "type": "string", "pattern": "^[01]{3}$" },
+        "purity": { "type": "string", "pattern": "^[01]{3}$" },
+        "sorting": { "type": "string", "enum": ["date", "relevance", "random", "views", "favorites", "toplist"] },
+        "order": { "type": "string", "enum": ["desc", "asc"] },
+        "atleast": {
+          "type": "string",
+          "enum": ["1024x768", "1280x720", "1366x768", "1600x900", "1920x1080", "2560x1440", "3440x1440", "3840x2160"],
+          "default": "1920x1080"
+        },
+        "prefer": { "type": "string", "enum": ["collections_then_search", "search_only", "collections_only"] },
+        "collections": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/wallhavenCollection" }
+        },
         "source": { "type": "string" },
         "author": { "type": "string" }
       },
@@ -233,19 +246,6 @@
         }
       ]
     },
-    "wallhaven": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "enabled": { "type": "boolean" },
-        "collections": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/wallhavenCollection" }
-        },
-        "search": { "$ref": "#/$defs/wallhavenSearch" },
-        "prefer": { "type": "string", "enum": ["collections_then_search", "search_only", "collections_only"] }
-      }
-    },
     "wallhavenCollection": {
       "type": "object",
       "additionalProperties": false,
@@ -254,22 +254,6 @@
         "username": { "type": "string", "minLength": 1 },
         "id": { "type": "integer", "minimum": 1 },
         "label": { "type": ["string", "null"] }
-      }
-    },
-    "wallhavenSearch": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "q": { "type": "string", "default": "space" },
-        "categories": { "type": "string", "pattern": "^[01]{3}$" },
-        "purity": { "type": "string", "pattern": "^[01]{3}$" },
-        "sorting": { "type": "string", "enum": ["date", "relevance", "random", "views", "favorites", "toplist"] },
-        "order": { "type": "string", "enum": ["desc", "asc"] },
-        "atleast": {
-          "type": "string",
-          "enum": ["1024x768", "1280x720", "1366x768", "1600x900", "1920x1080", "2560x1440", "3440x1440", "3840x2160"],
-          "default": "1920x1080"
-        }
       }
     }
   }

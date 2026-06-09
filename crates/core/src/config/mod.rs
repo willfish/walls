@@ -30,9 +30,9 @@ pub use source_schema::{
 };
 pub use unsplash::UnsplashSourceConfig;
 pub use wallhaven::{
+    default_wallhaven_source, source_wallhaven_prefer, source_wallhaven_search,
     wallhaven_resolution_choices, wallhaven_resolution_supported, WallhavenCollection,
-    WallhavenConfig, WallhavenPrefer, WallhavenSearch, WALLHAVEN_DEFAULT_QUERY,
-    WALLHAVEN_FALLBACK_RESOLUTION,
+    WallhavenPrefer, WallhavenSearch, WALLHAVEN_DEFAULT_QUERY, WALLHAVEN_FALLBACK_RESOLUTION,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -50,8 +50,6 @@ pub struct Config {
     pub selection: SelectionConfig,
     #[serde(default)]
     pub sources: Vec<SourceEntry>,
-    #[serde(default)]
-    pub wallhaven: WallhavenConfig,
     #[serde(default)]
     pub tray: TrayConfig,
     #[serde(default)]
@@ -159,7 +157,7 @@ pub enum SelectionStrategy {
     Sequential,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct SourceEntry {
     pub enabled: bool,
     #[serde(rename = "type")]
@@ -192,6 +190,22 @@ pub struct SourceEntry {
     /// Reddit time window for `top`/`controversial` (`hour`, `day`, `week`, `month`, `year`, `all`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time: Option<String>,
+    /// Wallhaven categories bit field (`general`, `anime`, `people`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub categories: Option<String>,
+    /// Wallhaven purity bit field (`sfw`, `sketchy`, `nsfw`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sorting: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atleast: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefer: Option<WallhavenPrefer>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub collections: Vec<WallhavenCollection>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -247,9 +261,15 @@ impl Default for SelectionConfig {
 /// config stays focused on immediately useful providers.
 pub fn default_config() -> anyhow::Result<Config> {
     let mut config: Config = serde_json::from_str(include_str!("../../../../config.example.json"))?;
-    config.wallhaven.search.atleast = wallhaven::detected_wallhaven_atleast()
+    let detected_atleast = wallhaven::detected_wallhaven_atleast()
         .unwrap_or(wallhaven::WALLHAVEN_FALLBACK_RESOLUTION)
-        .into();
+        .to_string();
+    for source in &mut config.sources {
+        if SourceKind::parse(&source.source_type) == SourceKind::Wallhaven {
+            source.atleast = Some(detected_atleast.clone());
+            wallhaven::populate_wallhaven_source_defaults(source);
+        }
+    }
     Ok(config)
 }
 
@@ -355,9 +375,17 @@ mod tests {
         assert!(path.is_file());
         assert!(loaded.change.enabled);
         assert_eq!(loaded.paths.compose_dir, "~/.local/share/walls/wallpaper");
-        assert_eq!(loaded.wallhaven.search.q, super::WALLHAVEN_DEFAULT_QUERY);
+        let wallhaven = loaded
+            .sources
+            .iter()
+            .find(|source| source.source_type == "wallhaven")
+            .expect("default wallhaven source");
+        assert_eq!(
+            wallhaven.query.as_deref(),
+            Some(super::WALLHAVEN_DEFAULT_QUERY)
+        );
         assert!(super::wallhaven_resolution_supported(
-            &loaded.wallhaven.search.atleast
+            wallhaven.atleast.as_deref().expect("wallhaven resolution")
         ));
     }
 
@@ -429,6 +457,7 @@ mod tests {
             image_path: None,
             title_path: None,
             time: None,
+            ..SourceEntry::default()
         });
 
         super::persist_config(&path, &config).expect("persist");

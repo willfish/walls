@@ -26,6 +26,7 @@ fn lists_images_in_folder() {
         title_path: None,
         sort: None,
         time: None,
+        ..SourceEntry::default()
     };
     let images = list_images(&src).unwrap();
     assert_eq!(images.len(), 2);

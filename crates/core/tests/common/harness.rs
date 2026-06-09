@@ -112,20 +112,13 @@ impl FetchHarness {
         })
     }
 
-    /// Online config with only the global Wallhaven provider (no `sources` entries).
+    /// Online config with one configured Wallhaven source.
     pub fn wallhaven_only_config(&self, wallhaven: Value) -> Value {
-        self.base_config_with_wallhaven(true, json!([]), wallhaven)
+        self.base_config_with_wallhaven(
+            true,
+            json!([{ "enabled": true, "type": "wallhaven", "query": "nature" }]),
+            wallhaven,
+        )
     }
 
-    pub fn write_offline_empty_sources_config(&self) {
-        self.write_config(json!({
-            "change": { "enabled": true, "internet_enabled": false },
-            "paths": paths_block(self.path()),
-            "apply": apply_block(&self.noop),
-            "display": { "mode": "os" },
-            "selection": { "refetch_when_cache_below": 5 },
-            "sources": [],
-        }));
-        self.write_secrets(json!({}));
-    }
 }

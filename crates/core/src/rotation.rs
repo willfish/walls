@@ -101,9 +101,9 @@ pub fn rotation_inactive(state: &State, config: &Config) -> bool {
     state.paused || !config.change.enabled || !any_sources_enabled(config)
 }
 
-/// Any configured source (including Wallhaven) is enabled.
+/// Any configured source is enabled.
 pub fn any_sources_enabled(config: &Config) -> bool {
-    config.sources.iter().any(|source| source.enabled) || config.wallhaven.enabled
+    config.sources.iter().any(|source| source.enabled)
 }
 
 #[cfg(test)]
@@ -177,6 +177,7 @@ mod tests {
             title_path: None,
             sort: None,
             time: None,
+            ..crate::config::SourceEntry::default()
         }];
         config
     }
@@ -192,8 +193,7 @@ mod tests {
 
     #[test]
     fn rotation_inactive_when_all_sources_off() {
-        let mut config = config_with_sources(false);
-        config.wallhaven.enabled = false;
+        let config = config_with_sources(false);
         assert!(!any_sources_enabled(&config));
         assert!(rotation_inactive(&state(false, 0), &config));
     }
@@ -206,9 +206,26 @@ mod tests {
     }
 
     #[test]
-    fn wallhaven_enabled_counts_as_active_source() {
+    fn wallhaven_source_counts_as_active_source() {
         let mut config = config_with_sources(false);
-        config.wallhaven.enabled = true;
+        config.sources.push(crate::config::SourceEntry {
+            enabled: true,
+            source_type: "wallhaven".into(),
+            path: None,
+            label: None,
+            query: Some("space".into()),
+            url: None,
+            collection: None,
+            user: None,
+            topic: None,
+            orientation: None,
+            api_key: None,
+            image_path: None,
+            title_path: None,
+            sort: None,
+            time: None,
+            ..crate::config::SourceEntry::default()
+        });
         assert!(any_sources_enabled(&config));
         assert!(!rotation_inactive(&state(false, 0), &config));
     }

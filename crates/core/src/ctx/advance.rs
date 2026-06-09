@@ -1,6 +1,6 @@
 use super::WallsCtx;
 use crate::apply::ApplyTrigger;
-use crate::config::SourceKind;
+use crate::config::{SelectionStrategy, SourceKind};
 use crate::error::{Result, WallsError};
 use crate::providers::{
     ProviderAttempt, ProviderCapability, ProviderDescriptor, ProviderFailureKind, ProviderKind,
@@ -89,6 +89,22 @@ enum AdvanceMode {
     Manual,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ProviderSlot {
+    Local,
+    Unsplash,
+    Wallhaven,
+    Bing,
+    Json,
+    MediaRss,
+    Reddit,
+    Apod,
+    Pixabay,
+    Immich,
+    Attribution,
+    Spotlight,
+}
+
 struct AdvanceNext<'ctx> {
     ctx: &'ctx mut WallsCtx,
     mode: AdvanceMode,
@@ -111,68 +127,13 @@ impl<'ctx> AdvanceNext<'ctx> {
             return Ok(None);
         }
 
-        if let Some(path) = self.apply_cached_queue_head()? {
-            return Ok(Some(path));
+        for slot in self.provider_order()? {
+            if let Some(path) = self.apply_provider_slot(slot).await? {
+                return Ok(Some(path));
+            }
         }
 
-        if let Some(path) = self.apply_unsplash_queue().await? {
-            return Ok(Some(path));
-        }
-
-        if let Some(path) = self.apply_wallhaven_queue().await? {
-            return Ok(Some(path));
-        }
-
-        if let Some(path) = self.apply_bing().await? {
-            return Ok(Some(path));
-        }
-
-        if let Some(path) = self.apply_json_feed().await? {
-            return Ok(Some(path));
-        }
-
-        if let Some(path) = self.apply_media_rss().await? {
-            return Ok(Some(path));
-        }
-
-        if let Some(path) = self
-            .try_inline_provider(SourceKind::Reddit, true, "apod")
-            .await?
-        {
-            return Ok(Some(path));
-        }
-        if let Some(path) = self
-            .try_inline_provider(SourceKind::Apod, true, "pixabay")
-            .await?
-        {
-            return Ok(Some(path));
-        }
-        if let Some(path) = self
-            .try_inline_provider(SourceKind::Pixabay, true, "immich")
-            .await?
-        {
-            return Ok(Some(path));
-        }
-        if let Some(path) = self
-            .try_inline_provider(SourceKind::Immich, true, "attribution")
-            .await?
-        {
-            return Ok(Some(path));
-        }
-        if let Some(path) = self
-            .try_inline_provider(SourceKind::Attribution, true, "spotlight")
-            .await?
-        {
-            return Ok(Some(path));
-        }
-        if let Some(path) = self
-            .try_inline_provider(SourceKind::Spotlight, false, "local")
-            .await?
-        {
-            return Ok(Some(path));
-        }
-
-        self.apply_local_candidate()
+        Ok(None)
     }
 
     fn should_skip(&self) -> bool {
@@ -182,8 +143,79 @@ impl<'ctx> AdvanceNext<'ctx> {
         self.ctx.state.paused || !self.ctx.config.change.enabled
     }
 
+    fn provider_order(&self) -> anyhow::Result<Vec<ProviderSlot>> {
+        let mut slots = Vec::new();
+        for source in self
+            .ctx
+            .config
+            .sources
+            .iter()
+            .filter(|source| source.enabled)
+        {
+            let Some(slot) = provider_slot_for_source_kind(SourceKind::parse(&source.source_type))
+            else {
+                continue;
+            };
+            if !slots.contains(&slot) {
+                slots.push(slot);
+            }
+        }
+
+        if slots.len() > 1 && self.ctx.config.selection.strategy == SelectionStrategy::Random {
+            let start = usize::try_from(rand::rng().random_range(0..u64::try_from(slots.len())?))?;
+            slots.rotate_left(start);
+        }
+
+        Ok(slots)
+    }
+
+    async fn apply_provider_slot(&mut self, slot: ProviderSlot) -> anyhow::Result<Option<PathBuf>> {
+        match slot {
+            ProviderSlot::Local => self.apply_local_candidate(),
+            ProviderSlot::Unsplash => self.apply_unsplash_queue().await,
+            ProviderSlot::Wallhaven => self.apply_wallhaven_queue().await,
+            ProviderSlot::Bing => self.apply_bing().await,
+            ProviderSlot::Json => self.apply_json_feed().await,
+            ProviderSlot::MediaRss => self.apply_media_rss().await,
+            ProviderSlot::Reddit => {
+                self.try_inline_provider(SourceKind::Reddit, true, "next configured provider")
+                    .await
+            }
+            ProviderSlot::Apod => {
+                self.try_inline_provider(SourceKind::Apod, true, "next configured provider")
+                    .await
+            }
+            ProviderSlot::Pixabay => {
+                self.try_inline_provider(SourceKind::Pixabay, true, "next configured provider")
+                    .await
+            }
+            ProviderSlot::Immich => {
+                self.try_inline_provider(SourceKind::Immich, true, "next configured provider")
+                    .await
+            }
+            ProviderSlot::Attribution => {
+                self.try_inline_provider(SourceKind::Attribution, true, "next configured provider")
+                    .await
+            }
+            ProviderSlot::Spotlight => {
+                self.try_inline_provider(SourceKind::Spotlight, false, "next configured provider")
+                    .await
+            }
+        }
+    }
+
     async fn apply_wallhaven_queue(&mut self) -> anyhow::Result<Option<PathBuf>> {
         let provider = crate::providers::wallhaven_provider(&self.ctx.config, &self.ctx.secrets);
+        let client = self.wallhaven_client()?;
+        if let Some(path) = self.apply_wallhaven_queue_head(&client, &provider).await? {
+            self.record(
+                provider
+                    .attempt(ProviderOperation::AdvanceNext)
+                    .applied(None),
+            );
+            return Ok(Some(path));
+        }
+
         if !provider.enabled {
             let reason = if self.ctx.config.change.internet_enabled {
                 ProviderNoCandidateReason::Disabled
@@ -203,16 +235,6 @@ impl<'ctx> AdvanceNext<'ctx> {
                     .with_fallback("bing"),
             );
             return Ok(None);
-        }
-
-        let client = self.wallhaven_client()?;
-        if let Some(path) = self.apply_wallhaven_queue_head(&client, &provider).await? {
-            self.record(
-                provider
-                    .attempt(ProviderOperation::AdvanceNext)
-                    .applied(None),
-            );
-            return Ok(Some(path));
         }
 
         match crate::wallhaven::refill_wallhaven_cache(
@@ -440,22 +462,6 @@ impl<'ctx> AdvanceNext<'ctx> {
             },
             true,
         )?;
-        Ok(Some(path))
-    }
-
-    fn apply_cached_queue_head(&mut self) -> anyhow::Result<Option<PathBuf>> {
-        let Some(id) = self.ctx.state.cache_queue.first().cloned() else {
-            return Ok(None);
-        };
-        if crate::unsplash::queue_photo_id(&id).is_some() {
-            return Ok(None);
-        }
-        let Some(path) = self.cached_wallhaven_path(&id) else {
-            return Ok(None);
-        };
-        self.ctx.state.cache_queue.remove(0);
-        self.ctx
-            .apply_file_inner(&path, ApplyTrigger::Auto, Some(id), true)?;
         Ok(Some(path))
     }
 
@@ -937,6 +943,26 @@ impl<'recent> LocalCandidatePicker<'recent> {
 
     fn finish(self) -> Option<PathBuf> {
         self.selected_available.or(self.selected_any)
+    }
+}
+
+fn provider_slot_for_source_kind(kind: SourceKind) -> Option<ProviderSlot> {
+    match kind {
+        SourceKind::Folder | SourceKind::Favorites | SourceKind::Fetched | SourceKind::Image => {
+            Some(ProviderSlot::Local)
+        }
+        SourceKind::Unsplash => Some(ProviderSlot::Unsplash),
+        SourceKind::Wallhaven => Some(ProviderSlot::Wallhaven),
+        SourceKind::Bing => Some(ProviderSlot::Bing),
+        SourceKind::Json => Some(ProviderSlot::Json),
+        SourceKind::MediaRss => Some(ProviderSlot::MediaRss),
+        SourceKind::Reddit => Some(ProviderSlot::Reddit),
+        SourceKind::Apod => Some(ProviderSlot::Apod),
+        SourceKind::Pixabay => Some(ProviderSlot::Pixabay),
+        SourceKind::Immich => Some(ProviderSlot::Immich),
+        SourceKind::Attribution => Some(ProviderSlot::Attribution),
+        SourceKind::Spotlight => Some(ProviderSlot::Spotlight),
+        SourceKind::Weighting | SourceKind::Unknown => None,
     }
 }
 

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use walls_core::config::{SourceEntry, SourceKind, WallhavenSearch};
+use walls_core::config::{source_wallhaven_search, SourceEntry, SourceKind, WallhavenSearch};
 use walls_core::{expand_home, WallsCtx};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,14 +27,7 @@ pub(crate) fn spawn(target: &OpenTarget) -> anyhow::Result<()> {
 
 pub(crate) fn source(ctx: &WallsCtx, source: &SourceEntry) -> Option<OpenTarget> {
     if source.source_type == "wallhaven" {
-        let mut search = ctx.config.wallhaven.search.clone();
-        if let Some(query) = source
-            .query
-            .as_deref()
-            .filter(|query| !query.trim().is_empty())
-        {
-            search.q = query.to_string();
-        }
+        let search = source_wallhaven_search(source);
         return Some(wallhaven_search(&search));
     }
 

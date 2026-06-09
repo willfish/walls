@@ -4,17 +4,14 @@ use std::path::PathBuf;
 
 use walls_core::apply::ApplyTrigger;
 
-pub use config_summary::{LocalSourceSummary, WallhavenProviderSummary};
+pub use config_summary::LocalSourceSummary;
 
-use config_summary::{
-    is_local_source, summarize_config_warnings, summarize_local_source,
-    summarize_wallhaven_provider,
-};
+use config_summary::{is_local_source, summarize_config_warnings, summarize_local_source};
 use walls_core::config::{
-    normalize_source_entry, persist_config, reddit_sort_needs_time, reddit_sort_value,
-    reddit_time_value, source_editable_fields as core_source_editable_fields, Config,
-    SelectionStrategy, SourceEntry, TuiKeyProfile, WallhavenPrefer, WallhavenSearch,
-    REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES, WALLHAVEN_DEFAULT_QUERY,
+    default_wallhaven_source, normalize_source_entry, persist_config, reddit_sort_needs_time,
+    reddit_sort_value, reddit_time_value, source_editable_fields as core_source_editable_fields,
+    source_wallhaven_prefer, source_wallhaven_search, Config, SelectionStrategy, SourceEntry,
+    TuiKeyProfile, WallhavenPrefer, WallhavenSearch, REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
 };
 use walls_core::validate::{
     validate_config_diagnostics, validate_source_edit, validate_wallhaven_edit,
@@ -174,42 +171,6 @@ fn wallhaven_bits_from_bools(a: bool, b: bool, c: bool) -> String {
     format!("{}{}{}", u8::from(a), u8::from(b), u8::from(c))
 }
 
-pub(crate) fn format_wallhaven_categories(s: &str) -> String {
-    let mut parts = Vec::new();
-    if wallhaven_bit_at(s, 0, true) {
-        parts.push("general");
-    }
-    if wallhaven_bit_at(s, 1, false) {
-        parts.push("anime");
-    }
-    if wallhaven_bit_at(s, 2, false) {
-        parts.push("people");
-    }
-    if parts.is_empty() {
-        "(none)".into()
-    } else {
-        parts.join(", ")
-    }
-}
-
-pub(crate) fn format_wallhaven_purity(s: &str, api_key_present: bool) -> String {
-    let mut parts = Vec::new();
-    if wallhaven_bit_at(s, 0, true) {
-        parts.push("SFW");
-    }
-    if wallhaven_bit_at(s, 1, false) {
-        parts.push("sketchy");
-    }
-    if api_key_present && wallhaven_bit_at(s, 2, false) {
-        parts.push("NSFW");
-    }
-    if parts.is_empty() {
-        "(none)".into()
-    } else {
-        parts.join(", ")
-    }
-}
-
 fn rotation_block_draft(config: &Config) -> std::collections::HashMap<String, String> {
     let mut vals = std::collections::HashMap::new();
     vals.insert("enabled".into(), config.change.enabled.to_string());
@@ -251,14 +212,18 @@ fn wallhaven_block_draft(
     config: &Config,
     api_key_present: bool,
 ) -> std::collections::HashMap<String, String> {
-    let search = &config.wallhaven.search;
+    let source = first_wallhaven_source(config);
+    let search = source.map(source_wallhaven_search).unwrap_or_default();
     let mut vals = std::collections::HashMap::new();
-    vals.insert("enabled".into(), config.wallhaven.enabled.to_string());
+    vals.insert(
+        "enabled".into(),
+        source.is_some_and(|source| source.enabled).to_string(),
+    );
     vals.insert(
         "prefer".into(),
-        wallhaven_prefer_label(config.wallhaven.prefer),
+        wallhaven_prefer_label(source.map(source_wallhaven_prefer).unwrap_or_default()),
     );
-    vals.extend(wallhaven_search_draft(search, api_key_present));
+    vals.extend(wallhaven_search_draft(&search, api_key_present));
     vals
 }
 
@@ -349,7 +314,7 @@ pub(crate) fn block_field_label(block: usize, key: &str) -> String {
             "category_people" => "Category: People".into(),
             "purity_sfw" => "Purity: SFW".into(),
             "purity_sketchy" => "Purity: Sketchy".into(),
-            "purity_nsfw" => "Purity: NSFW (requires API key)".into(),
+            "purity_nsfw" => "Purity: NSFW".into(),
             "sorting" => "Sorting".into(),
             "order" => "Order".into(),
             "atleast" => "Minimum resolution".into(),
@@ -429,6 +394,30 @@ pub(crate) fn source_field_kind_for(src: &SourceEntry, name: &str) -> EditFieldK
     if src.source_type == "reddit" {
         return source_field_kind(name);
     }
+    if src.source_type == "wallhaven" {
+        return match name {
+            "enabled" => EditFieldKind::Bool,
+            "type" => EditFieldKind::Choice(SOURCE_TYPE_CHOICES),
+            "category_general" | "category_anime" | "category_people" | "purity_sfw"
+            | "purity_sketchy" | "purity_nsfw" => EditFieldKind::Bool,
+            "prefer" => EditFieldKind::Choice(&[
+                "collections_then_search",
+                "search_only",
+                "collections_only",
+            ]),
+            "sorting" => EditFieldKind::Choice(&[
+                "date",
+                "relevance",
+                "random",
+                "views",
+                "favorites",
+                "toplist",
+            ]),
+            "order" => EditFieldKind::Choice(&["desc", "asc"]),
+            "atleast" => EditFieldKind::Choice(walls_core::config::wallhaven_resolution_choices()),
+            _ => EditFieldKind::Text,
+        };
+    }
     match name {
         "sort" | "time" => EditFieldKind::Text,
         _ => source_field_kind(name),
@@ -446,6 +435,24 @@ pub(crate) fn source_field_label(src: &SourceEntry, name: &str) -> String {
             "query" => "Subreddit".into(),
             "sort" => "Sort".into(),
             "time" => "Time period".into(),
+            other => other.into(),
+        };
+    }
+    if src.source_type == "wallhaven" {
+        return match name {
+            "enabled" => "Enabled".into(),
+            "type" => "Type".into(),
+            "query" => "Search query".into(),
+            "category_general" => "Category: General".into(),
+            "category_anime" => "Category: Anime".into(),
+            "category_people" => "Category: People".into(),
+            "purity_sfw" => "Purity: SFW".into(),
+            "purity_sketchy" => "Purity: Sketchy".into(),
+            "purity_nsfw" => "Purity: NSFW".into(),
+            "sorting" => "Sorting".into(),
+            "order" => "Order".into(),
+            "atleast" => "Minimum resolution".into(),
+            "prefer" => "Prefer".into(),
             other => other.into(),
         };
     }
@@ -556,28 +563,36 @@ fn block_field_value_at(
             _ => String::new(),
         },
         WALLHAVEN_FIELDS_BLOCK => match *key {
-            "enabled" => config.wallhaven.enabled.to_string(),
-            "prefer" => wallhaven_prefer_label(config.wallhaven.prefer),
-            "search_q" => config.wallhaven.search.q.clone(),
+            "enabled" => first_wallhaven_source(config)
+                .is_some_and(|source| source.enabled)
+                .to_string(),
+            "prefer" => wallhaven_prefer_label(
+                first_wallhaven_source(config)
+                    .map(source_wallhaven_prefer)
+                    .unwrap_or_default(),
+            ),
+            "search_q" => first_wallhaven_search(config).q,
             "category_general" => {
-                wallhaven_bit_at(&config.wallhaven.search.categories, 0, true).to_string()
+                wallhaven_bit_at(&first_wallhaven_search(config).categories, 0, true).to_string()
             }
             "category_anime" => {
-                wallhaven_bit_at(&config.wallhaven.search.categories, 1, false).to_string()
+                wallhaven_bit_at(&first_wallhaven_search(config).categories, 1, false).to_string()
             }
             "category_people" => {
-                wallhaven_bit_at(&config.wallhaven.search.categories, 2, false).to_string()
+                wallhaven_bit_at(&first_wallhaven_search(config).categories, 2, false).to_string()
             }
-            "purity_sfw" => wallhaven_bit_at(&config.wallhaven.search.purity, 0, true).to_string(),
+            "purity_sfw" => {
+                wallhaven_bit_at(&first_wallhaven_search(config).purity, 0, true).to_string()
+            }
             "purity_sketchy" => {
-                wallhaven_bit_at(&config.wallhaven.search.purity, 1, false).to_string()
+                wallhaven_bit_at(&first_wallhaven_search(config).purity, 1, false).to_string()
             }
             "purity_nsfw" => {
-                wallhaven_bit_at(&config.wallhaven.search.purity, 2, false).to_string()
+                wallhaven_bit_at(&first_wallhaven_search(config).purity, 2, false).to_string()
             }
-            "sorting" => config.wallhaven.search.sorting.clone(),
-            "order" => config.wallhaven.search.order.clone(),
-            "atleast" => config.wallhaven.search.atleast.clone(),
+            "sorting" => first_wallhaven_search(config).sorting,
+            "order" => first_wallhaven_search(config).order,
+            "atleast" => first_wallhaven_search(config).atleast,
             _ => String::new(),
         },
         CONFIG_BLOCK_TUI => match *key {
@@ -654,6 +669,33 @@ fn tui_key_profile_label(profile: TuiKeyProfile) -> &'static str {
         TuiKeyProfile::Emacs => "emacs",
         TuiKeyProfile::Vim => "vim",
     }
+}
+
+fn default_wallhaven_source_entry() -> SourceEntry {
+    default_wallhaven_source()
+}
+
+fn source_entry_display_name(source: &SourceEntry) -> String {
+    if source.source_type == "wallhaven" {
+        return source
+            .query
+            .as_deref()
+            .map(str::trim)
+            .filter(|query| !query.is_empty())
+            .map(|query| format!("Wallhaven {query}"))
+            .unwrap_or_else(|| "Wallhaven".into());
+    }
+    source
+        .label
+        .as_deref()
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .unwrap_or(&source.source_type)
+        .to_string()
+}
+
+fn source_removal_protected(source: &SourceEntry) -> bool {
+    matches!(source.source_type.as_str(), "favorites" | "fetched")
 }
 
 fn parse_tui_key_profile(value: &str) -> Option<TuiKeyProfile> {
@@ -740,15 +782,45 @@ fn apply_wallhaven_block_draft(
     draft: &std::collections::HashMap<String, String>,
     api_key_present: bool,
 ) {
+    if !config
+        .sources
+        .iter()
+        .any(|source| source.source_type == "wallhaven")
+    {
+        config.sources.push(default_wallhaven_source());
+    }
+    let Some(source) = first_wallhaven_source_mut(config) else {
+        return;
+    };
     if let Some(v) = draft.get("enabled") {
-        config.wallhaven.enabled = App::parse_bool_like(v).unwrap_or(config.wallhaven.enabled);
+        source.enabled = App::parse_bool_like(v).unwrap_or(source.enabled);
     }
     if let Some(v) = draft.get("prefer") {
         if let Some(prefer) = parse_wallhaven_prefer(v) {
-            config.wallhaven.prefer = prefer;
+            source.prefer = Some(prefer);
         }
     }
-    apply_wallhaven_search_draft(&mut config.wallhaven.search, draft, api_key_present);
+    apply_wallhaven_search_draft_to_source(source, draft, api_key_present);
+}
+
+fn first_wallhaven_source(config: &Config) -> Option<&SourceEntry> {
+    config
+        .sources
+        .iter()
+        .find(|source| source.source_type == "wallhaven")
+}
+
+fn first_wallhaven_source_mut(config: &mut Config) -> Option<&mut SourceEntry> {
+    config
+        .sources
+        .iter_mut()
+        .find(|source| source.source_type == "wallhaven")
+}
+
+fn first_wallhaven_search(config: &Config) -> WallhavenSearch {
+    first_wallhaven_source(config)
+        .map(source_wallhaven_search)
+        .unwrap_or_default()
 }
 
 fn apply_wallhaven_search_draft(
@@ -801,6 +873,53 @@ fn apply_wallhaven_search_draft(
     }
 }
 
+fn apply_wallhaven_search_draft_to_source(
+    source: &mut SourceEntry,
+    draft: &std::collections::HashMap<String, String>,
+    api_key_present: bool,
+) {
+    let mut search = source_wallhaven_search(source);
+    apply_wallhaven_search_draft(&mut search, draft, api_key_present);
+    source.query = Some(search.q);
+    source.categories = Some(search.categories);
+    source.purity = Some(search.purity);
+    source.sorting = Some(search.sorting);
+    source.order = Some(search.order);
+    source.atleast = Some(search.atleast);
+}
+
+fn set_wallhaven_category_bit(source: &mut SourceEntry, index: usize, value: &str) {
+    let Some(enabled) = App::parse_bool_like(value) else {
+        return;
+    };
+    let search = source_wallhaven_search(source);
+    let mut bits = [
+        wallhaven_bit_at(&search.categories, 0, true),
+        wallhaven_bit_at(&search.categories, 1, false),
+        wallhaven_bit_at(&search.categories, 2, false),
+    ];
+    if let Some(bit) = bits.get_mut(index) {
+        *bit = enabled;
+    }
+    source.categories = Some(wallhaven_bits_from_bools(bits[0], bits[1], bits[2]));
+}
+
+fn set_wallhaven_purity_bit(source: &mut SourceEntry, index: usize, value: &str) {
+    let Some(enabled) = App::parse_bool_like(value) else {
+        return;
+    };
+    let search = source_wallhaven_search(source);
+    let mut bits = [
+        wallhaven_bit_at(&search.purity, 0, true),
+        wallhaven_bit_at(&search.purity, 1, false),
+        wallhaven_bit_at(&search.purity, 2, false),
+    ];
+    if let Some(bit) = bits.get_mut(index) {
+        *bit = enabled;
+    }
+    source.purity = Some(wallhaven_bits_from_bools(bits[0], bits[1], bits[2]));
+}
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct EditSession {
@@ -837,7 +956,6 @@ pub struct App {
     pub search_results: Vec<SearchHit>,
     pub(crate) local_candidates: Vec<PathBuf>,
     pub(crate) local_source_summaries: Vec<LocalSourceSummary>,
-    pub(crate) wallhaven_summary: WallhavenProviderSummary,
     pub(crate) config_warnings: Vec<String>,
     pub color_mode: ColorMode,
     pub pending_nuke_confirm: bool,
@@ -850,9 +968,8 @@ impl App {
     const NORMAL_TAB_NAV_HINT: &'static str = "1-6/←/→ tabs";
 
     pub fn new(ctx: WallsCtx) -> anyhow::Result<Self> {
-        let search_query = ctx.config.wallhaven.search.q.clone();
-        let search_filters = ctx.config.wallhaven.search.clone();
-        let wallhaven_summary = summarize_wallhaven_provider(&ctx);
+        let search_filters = first_wallhaven_search(&ctx.config);
+        let search_query = search_filters.q.clone();
         let config_warnings = summarize_config_warnings(&ctx);
         let mut app = Self {
             ctx,
@@ -873,7 +990,6 @@ impl App {
             search_results: Vec::new(),
             local_candidates: Vec::new(),
             local_source_summaries: Vec::new(),
-            wallhaven_summary,
             config_warnings,
             color_mode: ColorMode::from_env(),
             pending_nuke_confirm: false,
@@ -913,17 +1029,12 @@ impl App {
             .filter(|source| is_local_source(source))
             .map(|source| summarize_local_source(&self.ctx, source))
             .collect();
-        self.wallhaven_summary = summarize_wallhaven_provider(&self.ctx);
         self.config_warnings = summarize_config_warnings(&self.ctx);
         Ok(())
     }
 
     pub fn sources_subnav_len(&self) -> usize {
-        self.ctx.config.sources.len() + 1
-    }
-
-    pub fn is_wallhaven_subnav_index(&self, idx: usize) -> bool {
-        idx == self.ctx.config.sources.len()
+        self.ctx.config.sources.len()
     }
 
     pub fn move_down(&mut self) {
@@ -1203,9 +1314,9 @@ impl App {
                 .sources
                 .get(*index)
                 .and_then(|source| open_target::source(&self.ctx, source)),
-            EditTarget::Wallhaven => Some(open_target::wallhaven_search(
-                &self.ctx.config.wallhaven.search,
-            )),
+            EditTarget::Wallhaven => Some(open_target::wallhaven_search(&first_wallhaven_search(
+                &self.ctx.config,
+            ))),
             _ => None,
         }
     }
@@ -1435,14 +1546,6 @@ impl App {
         let mut config = self.ctx.config.clone();
         if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
             let idx = self.config_sub_cursor;
-            if self.is_wallhaven_subnav_index(idx) {
-                config.wallhaven.enabled = !config.wallhaven.enabled;
-                persist_config(&self.ctx.paths.config_file, &config)?;
-                return Ok(Some(format!(
-                    "config saved: wallhaven enabled={}",
-                    config.wallhaven.enabled
-                )));
-            }
             if idx < config.sources.len() {
                 let label = config.sources[idx]
                     .label
@@ -1506,7 +1609,7 @@ impl App {
                 None => {
                     self.set_message(
                         StatusKind::Warning,
-                        "no active sources to edit; enable a source or Wallhaven first",
+                        "no active sources to edit; enable or add a source first",
                     );
                     None
                 }
@@ -1543,9 +1646,7 @@ impl App {
 
     fn selected_sources_subnav_edit_target(&self) -> Option<EditTarget> {
         let idx = self.config_sub_cursor;
-        if self.is_wallhaven_subnav_index(idx) {
-            Some(EditTarget::Wallhaven)
-        } else if idx < self.ctx.config.sources.len() {
+        if idx < self.ctx.config.sources.len() {
             Some(EditTarget::Source(idx))
         } else {
             None
@@ -1559,13 +1660,6 @@ impl App {
             .iter()
             .position(|source| source.enabled)
             .map(EditTarget::Source)
-            .or_else(|| {
-                self.ctx
-                    .config
-                    .wallhaven
-                    .enabled
-                    .then_some(EditTarget::Wallhaven)
-            })
     }
 
     fn edit_session_for_target(&self, target: EditTarget) -> Option<EditSession> {
@@ -1736,6 +1830,9 @@ impl App {
             if let Some(draft) = &sess.draft_source {
                 let names = Self::source_editable_fields(draft);
                 if let Some(name) = names.get(sess.field_cursor) {
+                    if draft.source_type == "wallhaven" && name == "purity_nsfw" {
+                        return self.wallhaven_block_field_locked(name);
+                    }
                     return name == "time" && reddit_time_field_locked(draft);
                 }
             }
@@ -1832,6 +1929,28 @@ impl App {
             "topic" => src.topic.clone().unwrap_or_default(),
             "orientation" => src.orientation.clone().unwrap_or_default(),
             "sort" => reddit_sort_value(src).to_string(),
+            "category_general" => {
+                wallhaven_bit_at(&source_wallhaven_search(src).categories, 0, true).to_string()
+            }
+            "category_anime" => {
+                wallhaven_bit_at(&source_wallhaven_search(src).categories, 1, false).to_string()
+            }
+            "category_people" => {
+                wallhaven_bit_at(&source_wallhaven_search(src).categories, 2, false).to_string()
+            }
+            "purity_sfw" => {
+                wallhaven_bit_at(&source_wallhaven_search(src).purity, 0, true).to_string()
+            }
+            "purity_sketchy" => {
+                wallhaven_bit_at(&source_wallhaven_search(src).purity, 1, false).to_string()
+            }
+            "purity_nsfw" => {
+                wallhaven_bit_at(&source_wallhaven_search(src).purity, 2, false).to_string()
+            }
+            "sorting" => src.sorting.clone().unwrap_or_default(),
+            "order" => src.order.clone().unwrap_or_default(),
+            "atleast" => src.atleast.clone().unwrap_or_default(),
+            "prefer" => src.prefer.map(wallhaven_prefer_label).unwrap_or_default(),
             "time" => {
                 if reddit_sort_needs_time(reddit_sort_value(src)) {
                     reddit_time_value(src).to_string()
@@ -1879,6 +1998,20 @@ impl App {
             "user" => draft.user = v,
             "topic" => draft.topic = v,
             "orientation" => draft.orientation = v,
+            "category_general" => set_wallhaven_category_bit(draft, 0, trimmed),
+            "category_anime" => set_wallhaven_category_bit(draft, 1, trimmed),
+            "category_people" => set_wallhaven_category_bit(draft, 2, trimmed),
+            "purity_sfw" => set_wallhaven_purity_bit(draft, 0, trimmed),
+            "purity_sketchy" => set_wallhaven_purity_bit(draft, 1, trimmed),
+            "purity_nsfw" => set_wallhaven_purity_bit(draft, 2, trimmed),
+            "sorting" => draft.sorting = v,
+            "order" => draft.order = v,
+            "atleast" => draft.atleast = v,
+            "prefer" => {
+                if let Some(prefer) = parse_wallhaven_prefer(trimmed) {
+                    draft.prefer = Some(prefer);
+                }
+            }
             "sort" if !trimmed.is_empty() && REDDIT_SORT_CHOICES.contains(&trimmed) => {
                 draft.sort = Some(trimmed.to_string());
                 if !reddit_sort_needs_time(trimmed) {
@@ -2055,25 +2188,8 @@ impl App {
         }
 
         let mut config = self.ctx.config.clone();
-        let query = WALLHAVEN_DEFAULT_QUERY.to_string();
         let index = config.sources.len();
-        config.sources.push(SourceEntry {
-            enabled: true,
-            source_type: "wallhaven".into(),
-            label: None,
-            path: None,
-            query: Some(query),
-            url: None,
-            collection: None,
-            user: None,
-            topic: None,
-            orientation: None,
-            api_key: None,
-            image_path: None,
-            title_path: None,
-            sort: None,
-            time: None,
-        });
+        config.sources.push(default_wallhaven_source_entry());
 
         persist_config(&self.ctx.paths.config_file, &config)?;
         self.reload_ctx()?;
@@ -2088,6 +2204,62 @@ impl App {
         }
         self.set_message(StatusKind::Success, "source added: Wallhaven query");
         Ok(())
+    }
+
+    pub fn remove_selected_source(&mut self) -> anyhow::Result<Option<String>> {
+        if self.tab != Tab::Config || !self.is_sources_list_block(self.config_cursor) {
+            self.set_message(StatusKind::Warning, "remove source: focus Sources first");
+            return Ok(None);
+        }
+        if !self.config_in_subnav {
+            self.set_message(
+                StatusKind::Warning,
+                "remove source: press Enter to pick a source first",
+            );
+            return Ok(None);
+        }
+
+        let index = self.config_sub_cursor;
+        if index >= self.ctx.config.sources.len() {
+            self.set_message(StatusKind::Warning, "remove source: no source selected");
+            return Ok(None);
+        }
+        if source_removal_protected(&self.ctx.config.sources[index]) {
+            self.set_message(
+                StatusKind::Warning,
+                "remove source: built-in library sources cannot be removed",
+            );
+            return Ok(None);
+        }
+
+        let mut config = self.ctx.config.clone();
+        let removed = config.sources.remove(index);
+        persist_config(&self.ctx.paths.config_file, &config)?;
+        self.reload_ctx()?;
+        self.tab = Tab::Config;
+        self.config_cursor = CONFIG_BLOCK_SOURCES;
+        self.config_in_subnav = true;
+        self.config_sub_cursor = self.ctx.config.sources.len().saturating_sub(1).min(index);
+        self.editing = None;
+
+        Ok(Some(format!(
+            "source removed: {}",
+            source_entry_display_name(&removed)
+        )))
+    }
+
+    pub fn can_remove_selected_source(&self) -> bool {
+        if self.tab != Tab::Config
+            || !self.is_sources_list_block(self.config_cursor)
+            || !self.config_in_subnav
+        {
+            return false;
+        }
+        self.ctx
+            .config
+            .sources
+            .get(self.config_sub_cursor)
+            .is_some_and(|source| !source_removal_protected(source))
     }
 
     #[allow(dead_code)]
@@ -2118,13 +2290,7 @@ impl App {
                         wallhaven_api_key_present(&self.ctx.secrets),
                     );
                 }
-                EditTarget::SearchFilters => {
-                    apply_wallhaven_search_draft(
-                        &mut temp.wallhaven.search,
-                        &sess.draft_block_values,
-                        wallhaven_api_key_present(&self.ctx.secrets),
-                    );
-                }
+                EditTarget::SearchFilters => {}
                 _ => {}
             }
             let issues = Self::validation_issues_for_edit(
@@ -2264,7 +2430,14 @@ impl App {
                     wallhaven_api_key_present(&self.ctx.secrets),
                 );
                 let mut temp = config.clone();
-                temp.wallhaven.search = search.clone();
+                let mut source = default_wallhaven_source();
+                source.query = Some(search.q.clone());
+                source.categories = Some(search.categories.clone());
+                source.purity = Some(search.purity.clone());
+                source.sorting = Some(search.sorting.clone());
+                source.order = Some(search.order.clone());
+                source.atleast = Some(search.atleast.clone());
+                temp.sources = vec![source];
                 let issues = Self::validation_issues_for_edit(
                     &sess.target,
                     &temp,
@@ -2387,7 +2560,7 @@ impl App {
                 {
                     "top/controversial only"
                 } else {
-                    "requires API key"
+                    "locked"
                 }
             } else {
                 match self.current_edit_field_kind() {
@@ -2426,9 +2599,15 @@ impl App {
                 }
                 Tab::Config => {
                     if self.config_in_subnav && self.is_sources_list_block(self.config_cursor) {
+                        let remove_hint = if self.can_remove_selected_source() {
+                            " | x remove"
+                        } else {
+                            ""
+                        };
                         format!(
-                            "{} | Esc back | j/k Pg Home/End pick source | a add | o open | e edit | t toggle | n/p | space pause | : cmd | ? help",
-                            Self::NORMAL_TAB_NAV_HINT
+                            "{} | Esc back | j/k Pg Home/End pick source | a add{} | o open | e edit | t toggle | n/p | space pause | : cmd | ? help",
+                            Self::NORMAL_TAB_NAV_HINT,
+                            remove_hint
                         )
                     } else if self.is_sources_list_block(self.config_cursor) {
                         format!(

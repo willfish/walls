@@ -125,6 +125,7 @@ enum UiAction {
     TogglePause,
     ToggleConfigValue,
     AddSource,
+    RemoveSource,
     #[allow(dead_code)]
     CycleConfigValue,
     EditConfigItem,
@@ -283,6 +284,13 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
             if app.tab == Tab::Config && app.is_sources_list_block(app.config_cursor) =>
         {
             UiAction::AddSource
+        }
+        KeyCode::Char('x')
+            if app.tab == Tab::Config
+                && app.is_sources_list_block(app.config_cursor)
+                && app.can_remove_selected_source() =>
+        {
+            UiAction::RemoveSource
         }
         KeyCode::Char('t') if app.tab == Tab::Config => UiAction::ToggleConfigValue,
         KeyCode::Char('e') if app.tab == Tab::Config => UiAction::EditConfigItem,
@@ -487,6 +495,17 @@ fn update(
                 );
             }
         }
+        UiAction::RemoveSource => match app.remove_selected_source() {
+            Ok(Some(msg)) => {
+                app.set_message(style::StatusKind::Success, msg);
+                return Ok(UpdateEffect::Reload);
+            }
+            Ok(None) => {}
+            Err(error) => app.set_message(
+                style::StatusKind::Error,
+                format!("remove source error: {error}"),
+            ),
+        },
         UiAction::CycleConfigValue => match app.cycle_focused_config_value() {
             Ok(Some(msg)) => {
                 app.set_message(style::StatusKind::Success, msg);
@@ -903,8 +922,7 @@ struct ConfigBlock<'a> {
 fn config_list_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
     let mut items = Vec::new();
     let sources = &app.ctx.config.sources;
-    let wallhaven_enabled = app.wallhaven_summary.enabled;
-    let sources_enabled = sources.iter().any(|s| s.enabled) || wallhaven_enabled;
+    let sources_enabled = sources.iter().any(|s| s.enabled);
     let sources_details = if app.config_cursor == CONFIG_BLOCK_SOURCES {
         sources_view::build_sources_list_items(app, theme, 4)
     } else {
@@ -1039,10 +1057,9 @@ fn push_config_block_items(items: &mut Vec<ListItem<'static>>, block: ConfigBloc
 
 fn config_lines(app: &App) -> Vec<String> {
     let mut lines = Vec::new();
-    // Sources block lists configured providers plus Wallhaven (nested edit with j/k pick + e, a adds).
+    // Sources block lists configured providers (nested edit with j/k pick + e, a adds).
     let sources = &app.ctx.config.sources;
-    let wallhaven_enabled = app.wallhaven_summary.enabled;
-    let sources_enabled = sources.iter().any(|s| s.enabled) || wallhaven_enabled;
+    let sources_enabled = sources.iter().any(|s| s.enabled);
     push_config_block(
         &mut lines,
         CONFIG_BLOCK_SOURCES,
@@ -2011,51 +2028,6 @@ mod tests {
         App::new(WallsCtx::load_from(tmp.path()).expect("ctx")).expect("app")
     }
 
-    fn test_app_with_wallhaven(
-        internet_enabled: bool,
-        wallhaven: serde_json::Value,
-        secrets: serde_json::Value,
-    ) -> App {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        fs::create_dir_all(tmp.path().join("favorites")).expect("favorites dir");
-        fs::create_dir_all(tmp.path().join("fetched")).expect("fetched dir");
-
-        let noop = tmp.path().join("noop.sh");
-        fs::write(&noop, "#!/bin/sh\nexit 0\n").expect("noop");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&noop, fs::Permissions::from_mode(0o755)).expect("chmod");
-        }
-
-        let config = serde_json::json!({
-            "change": { "enabled": true, "internet_enabled": internet_enabled },
-            "paths": {
-                "cache_dir": tmp.path().join("cache").display().to_string(),
-                "download_dir": tmp.path().join("downloaded").display().to_string(),
-                "favorites_dir": tmp.path().join("favorites").display().to_string(),
-                "fetched_dir": tmp.path().join("fetched").display().to_string(),
-                "compose_dir": tmp.path().join("wallpaper").display().to_string(),
-            },
-            "apply": { "backend": "custom-script", "custom_script": noop.display().to_string() },
-            "display": { "mode": "os" },
-            "sources": [],
-            "wallhaven": wallhaven,
-        });
-        fs::write(
-            tmp.path().join("config.json"),
-            serde_json::to_string_pretty(&config).expect("config json"),
-        )
-        .expect("write config");
-        fs::write(
-            tmp.path().join("secrets.json"),
-            serde_json::to_string_pretty(&secrets).expect("secrets json"),
-        )
-        .expect("write secrets");
-
-        App::new(WallsCtx::load_from(tmp.path()).expect("ctx")).expect("app")
-    }
-
     fn render_text(app: &App, width: u16, height: u16) -> String {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).expect("terminal");
@@ -2158,11 +2130,10 @@ mod tests {
         let text = render_text(&app, 80, 24);
 
         assert!(
-            text.contains("> [on] Sources - 2 active · 2 total"),
+            text.contains("> [on] Sources - 1 active · 1 total"),
             "{text}"
         );
         assert!(text.contains("Local folder"), "{text}");
-        assert!(text.contains("Wallhaven"), "{text}");
         assert!(!text.contains("on start: false"), "{text}");
     }
 
@@ -2191,13 +2162,12 @@ mod tests {
 
         let text = render_text(&app, 120, 30);
 
-        assert!(text.contains("6 active · 7 total"), "{text}");
+        assert!(text.contains("5 active · 6 total"), "{text}");
         assert!(text.contains("Favorites"), "{text}");
         assert!(text.contains("Fetched"), "{text}");
         assert!(text.contains("Wallpapers"), "{text}");
         assert!(text.contains("Single"), "{text}");
         assert!(text.contains("Missing"), "{text}");
-        assert!(text.contains("Wallhaven"), "{text}");
         assert!(!text.contains("Disabled"), "{text}");
         assert!(text.contains("1 disabled source"), "{text}");
     }
@@ -2393,95 +2363,14 @@ mod tests {
         let mut app = test_app();
         app.config_cursor = CONFIG_BLOCK_SOURCES;
         app.enter_config_subnav();
-        app.config_sub_cursor = app.ctx.config.sources.len();
+        app.config_sub_cursor = 0;
 
         let text = render_text(&app, 42, 14);
 
         assert!(text.contains("Config"), "{text}");
-        assert!(text.contains("▸ Wallhaven"), "{text}");
-        assert!(text.contains("enabled: true"), "{text}");
+        assert!(text.contains("▸ Local folder"), "{text}");
         assert!(text.contains("←/→ tabs"), "{text}");
         assert!(text.contains("j/k Pg"), "{text}");
-    }
-
-    #[test]
-    fn wallhaven_block_renders_search_collections_and_missing_key_warning() {
-        let mut app = test_app_with_wallhaven(
-            true,
-            serde_json::json!({
-                "prefer": "collections_then_search",
-                "collections": [
-                    { "username": "alice", "id": 42, "label": "Abstract" }
-                ],
-                "search": {
-                    "q": "mountains",
-                    "categories": "101",
-                    "purity": "100",
-                    "sorting": "toplist",
-                    "order": "desc",
-                    "atleast": "2560x1440"
-                }
-            }),
-            serde_json::json!({}),
-        );
-        app.config_cursor = CONFIG_BLOCK_SOURCES;
-        app.enter_config_subnav();
-        app.config_sub_cursor = app.ctx.config.sources.len();
-
-        let text = render_text(&app, 120, 30);
-
-        assert!(text.contains("▸ Wallhaven"), "{text}");
-        assert!(text.contains("query mountains"), "{text}");
-        assert!(text.contains("api key: [missing]"), "{text}");
-        assert!(text.contains("search query: mountains"), "{text}");
-        assert!(text.contains("categories: general, people"), "{text}");
-        assert!(text.contains("purity: SFW"), "{text}");
-        assert!(
-            text.contains("sort: toplist desc minimum 2560x1440"),
-            "{text}"
-        );
-        assert!(text.contains("Abstract: alice/42"), "{text}");
-        assert!(
-            text.contains("[warning] API key missing; NSFW purity unavailable"),
-            "{text}"
-        );
-    }
-
-    #[test]
-    fn wallhaven_block_shows_key_presence_without_leaking_secret() {
-        let mut app = test_app_with_wallhaven(
-            true,
-            serde_json::json!({
-                "prefer": "search_only",
-                "search": {
-                    "q": "forest",
-                    "purity": "111"
-                }
-            }),
-            serde_json::json!({ "wallhaven_api_key": "super-secret-token" }),
-        );
-        app.config_cursor = CONFIG_BLOCK_SOURCES;
-        app.enter_config_subnav();
-        app.config_sub_cursor = app.ctx.config.sources.len();
-
-        let text = render_text(&app, 120, 30);
-
-        assert!(text.contains("▸ Wallhaven"), "{text}");
-        assert!(text.contains("API key"), "{text}");
-        assert!(text.contains("api key: present"), "{text}");
-        assert!(text.contains("prefer: search only"), "{text}");
-        assert!(text.contains("search query: forest"), "{text}");
-        assert!(
-            text.contains("categories: general, anime, people"),
-            "{text}"
-        );
-        assert!(text.contains("purity: SFW, sketchy, NSFW"), "{text}");
-        assert!(text.contains("collections: [empty] none"), "{text}");
-        assert!(
-            text.contains("[warning] NSFW purity requires Wallhaven account access"),
-            "{text}"
-        );
-        assert!(!text.contains("super-secret-token"), "{text}");
     }
 
     #[test]
@@ -2519,115 +2408,6 @@ mod tests {
     }
 
     #[test]
-    fn wallhaven_subnav_t_key_toggles_enabled() {
-        let mut app = test_app_with_wallhaven(
-            true,
-            serde_json::json!({
-                "enabled": true,
-                "search": { "q": "forest", "purity": "100" }
-            }),
-            serde_json::json!({ "wallhaven_api_key": "key" }),
-        );
-        app.config_cursor = CONFIG_BLOCK_SOURCES;
-        app.enter_config_subnav();
-        app.config_sub_cursor = app.ctx.config.sources.len();
-
-        let rt = tokio::runtime::Runtime::new().expect("rt");
-        update(&mut app, UiAction::ToggleConfigValue, rt.handle())
-            .expect("toggle wallhaven enabled");
-        app.reload_ctx().expect("reload");
-
-        let text = render_text(&app, 120, 30);
-        assert!(text.contains("▸ Wallhaven"), "{text}");
-        assert!(text.contains(" off · "), "{text}");
-        assert!(text.contains("enabled: false"), "{text}");
-    }
-
-    #[test]
-    fn wallhaven_block_edit_form_exposes_search_fields() {
-        let mut app = test_app_with_wallhaven(
-            true,
-            serde_json::json!({
-                "prefer": "search_only",
-                "search": {
-                    "q": "forest",
-                    "categories": "111",
-                    "purity": "100",
-                    "sorting": "random",
-                    "order": "desc",
-                    "atleast": "1920x1080"
-                }
-            }),
-            serde_json::json!({ "wallhaven_api_key": "key" }),
-        );
-        app.tab = Tab::Config;
-        app.config_cursor = CONFIG_BLOCK_SOURCES;
-        app.enter_config_subnav();
-        app.config_sub_cursor = app.ctx.config.sources.len();
-        app.start_edit_for_current();
-
-        let text = render_text(&app, 120, 32);
-
-        assert!(text.contains("Edit Wallhaven"), "{text}");
-        assert!(text.contains("Search query"), "{text}");
-        assert!(text.contains("forest"), "{text}");
-        assert!(text.contains("search_only"), "{text}");
-        assert!(text.contains("Category: General"), "{text}");
-        assert!(text.contains("Category: Anime"), "{text}");
-        assert!(text.contains("Purity: SFW"), "{text}");
-        assert!(text.contains("secrets.json"), "{text}");
-    }
-
-    #[test]
-    fn wallhaven_search_query_edit_accepts_spaces_and_saves_human_text() {
-        let mut app = test_app_with_wallhaven(
-            true,
-            serde_json::json!({
-                "prefer": "search_only",
-                "search": {
-                    "q": "cosmic",
-                    "categories": "111",
-                    "purity": "100",
-                    "sorting": "random",
-                    "order": "desc",
-                    "atleast": "1920x1080"
-                }
-            }),
-            serde_json::json!({ "wallhaven_api_key": "key" }),
-        );
-        let rt = tokio::runtime::Runtime::new().expect("rt");
-        app.tab = Tab::Config;
-        app.config_cursor = CONFIG_BLOCK_SOURCES;
-        app.enter_config_subnav();
-        app.config_sub_cursor = app.ctx.config.sources.len();
-        app.start_edit_for_current();
-
-        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("prefer field");
-        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("query field");
-        assert_eq!(app.editing.as_ref().unwrap().field_buffer, "cosmic");
-        assert_eq!(
-            action_for_key(&app, KeyEvent::from(KeyCode::Char(' '))),
-            UiAction::EditFieldChar(' ')
-        );
-
-        for action in [
-            UiAction::EditFieldChar(' '),
-            UiAction::EditFieldChar('d'),
-            UiAction::EditFieldChar('e'),
-            UiAction::EditFieldChar('s'),
-            UiAction::EditFieldChar('k'),
-            UiAction::EditFieldChar('t'),
-            UiAction::EditFieldChar('o'),
-            UiAction::EditFieldChar('p'),
-            UiAction::EditFieldCommit,
-        ] {
-            update(&mut app, action, rt.handle()).expect("edit query");
-        }
-
-        assert_eq!(app.ctx.config.wallhaven.search.q, "cosmic desktop");
-    }
-
-    #[test]
     fn top_level_sources_e_edits_first_enabled_configured_source() {
         use crate::tui::app::EditTarget;
 
@@ -2638,8 +2418,7 @@ mod tests {
                 "sources": [
                     { "enabled": false, "type": "folder", "path": "/tmp" },
                     { "enabled": true, "type": "json", "label": "active json", "url": "https://example.test/feed.json", "image_path": "$.image" }
-                ],
-                "wallhaven": { "enabled": true }
+                ]
             }),
             serde_json::json!({}),
         );
@@ -2658,38 +2437,6 @@ mod tests {
     }
 
     #[test]
-    fn top_level_sources_e_falls_back_to_enabled_wallhaven() {
-        use crate::tui::app::EditTarget;
-
-        let mut app = test_app_with_config(
-            serde_json::json!({
-                "change": { "enabled": true },
-                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
-                "sources": [
-                    { "enabled": false, "type": "folder", "path": "/tmp" },
-                    { "enabled": false, "type": "json", "url": "https://example.test/feed.json", "image_path": "$.image" }
-                ],
-                "wallhaven": { "enabled": true, "search": { "q": "forest" } }
-            }),
-            serde_json::json!({}),
-        );
-        app.tab = Tab::Config;
-        app.config_cursor = CONFIG_BLOCK_SOURCES;
-
-        app.start_edit_for_current();
-
-        let editing = app
-            .editing
-            .as_ref()
-            .expect("enabled Wallhaven should be editable");
-        assert!(
-            matches!(editing.target, EditTarget::Wallhaven),
-            "top-level Sources e should fall back to Wallhaven, got {:?}",
-            editing.target
-        );
-    }
-
-    #[test]
     fn top_level_sources_e_explains_when_no_source_is_active() {
         let mut app = test_app_with_config(
             serde_json::json!({
@@ -2697,8 +2444,7 @@ mod tests {
                 "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
                 "sources": [
                     { "enabled": false, "type": "folder", "path": "/tmp" }
-                ],
-                "wallhaven": { "enabled": false }
+                ]
             }),
             serde_json::json!({}),
         );
@@ -2713,7 +2459,7 @@ mod tests {
         );
         assert!(
             app.message
-                .contains("no active sources to edit; enable a source or Wallhaven first"),
+                .contains("no active sources to edit; enable or add a source first"),
             "{}",
             app.message
         );
@@ -2755,128 +2501,6 @@ mod tests {
         assert!(
             text.contains("Space toggle") || text.contains("Space/"),
             "footer should hint choice controls: {text}"
-        );
-    }
-
-    #[test]
-    fn wallhaven_nsfw_unavailable_without_api_key() {
-        let mut app = test_app_with_wallhaven(
-            true,
-            serde_json::json!({
-                "search": {
-                    "q": "forest",
-                    "purity": "111",
-                    "categories": "111"
-                }
-            }),
-            serde_json::json!({}),
-        );
-        app.tab = Tab::Config;
-        app.config_cursor = CONFIG_BLOCK_SOURCES;
-        app.enter_config_subnav();
-        app.config_sub_cursor = app.ctx.config.sources.len();
-        app.start_edit_for_current();
-
-        let text = render_text(&app, 120, 36);
-        assert!(text.contains("Purity: NSFW (requires API key)"), "{text}");
-        assert!(text.contains("unavailable (no API key)"), "{text}");
-
-        // Navigate to NSFW field (index 7) and try toggling — should stay unavailable.
-        let rt = tokio::runtime::Runtime::new().expect("rt");
-        for _ in 0..8 {
-            update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
-        }
-        update(
-            &mut app,
-            UiAction::EditFieldCycle { forward: true },
-            rt.handle(),
-        )
-        .ok();
-        let text = render_text(&app, 120, 36);
-        assert!(
-            text.contains("unavailable (no API key)"),
-            "Space should not enable NSFW without API key: {text}"
-        );
-    }
-
-    #[test]
-    fn edit_form_space_cycles_wallhaven_sorting_enum() {
-        let mut app = test_app_with_wallhaven(
-            true,
-            serde_json::json!({
-                "search": { "sorting": "random", "purity": "100", "categories": "111", "order": "desc", "atleast": "1920x1080" }
-            }),
-            serde_json::json!({ "wallhaven_api_key": "key" }),
-        );
-        app.tab = Tab::Config;
-        app.config_cursor = CONFIG_BLOCK_SOURCES;
-        app.enter_config_subnav();
-        app.config_sub_cursor = app.ctx.config.sources.len();
-        app.start_edit_for_current();
-        let rt = tokio::runtime::Runtime::new().expect("rt");
-
-        // sorting follows enabled, prefer, search_q, and six category/purity toggles
-        for _ in 0..9 {
-            update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
-        }
-        assert_eq!(
-            app.editing.as_ref().unwrap().field_buffer,
-            "random",
-            "should land on sorting field"
-        );
-        update(
-            &mut app,
-            UiAction::EditFieldCycle { forward: true },
-            rt.handle(),
-        )
-        .ok();
-        assert_eq!(
-            app.editing.as_ref().unwrap().field_buffer,
-            "views",
-            "Space should cycle sorting to next option after random"
-        );
-    }
-
-    #[test]
-    fn edit_form_space_cycles_wallhaven_minimum_resolution_choice() {
-        let mut app = test_app_with_wallhaven(
-            true,
-            serde_json::json!({
-                "search": {
-                    "sorting": "random",
-                    "purity": "100",
-                    "categories": "111",
-                    "order": "desc",
-                    "atleast": "1920x1080"
-                }
-            }),
-            serde_json::json!({ "wallhaven_api_key": "key" }),
-        );
-        app.tab = Tab::Config;
-        app.config_cursor = CONFIG_BLOCK_SOURCES;
-        app.enter_config_subnav();
-        app.config_sub_cursor = app.ctx.config.sources.len();
-        app.start_edit_for_current();
-        let rt = tokio::runtime::Runtime::new().expect("rt");
-
-        for _ in 0..11 {
-            update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
-        }
-        assert_eq!(
-            app.editing.as_ref().unwrap().field_buffer,
-            "1920x1080",
-            "should land on Wallhaven minimum resolution field"
-        );
-        update(
-            &mut app,
-            UiAction::EditFieldCycle { forward: true },
-            rt.handle(),
-        )
-        .ok();
-        assert_eq!(
-            app.editing.as_ref().unwrap().field_buffer,
-            "2560x1440",
-            "Space should cycle minimum resolution through shared choices"
         );
     }
 
@@ -2973,16 +2597,23 @@ mod tests {
         assert_eq!(app.search_filters.sorting, "views");
 
         assert!(!app.ctx.paths.config_file.exists());
-        assert_eq!(app.ctx.config.wallhaven.search.q, "space");
-        assert_eq!(app.ctx.config.wallhaven.search.sorting, "random");
-        assert_eq!(
-            app.ctx.config.wallhaven.search.q,
-            original_config.wallhaven.search.q
-        );
-        assert_eq!(
-            app.ctx.config.wallhaven.search.sorting,
-            original_config.wallhaven.search.sorting
-        );
+        let current_wallhaven: Vec<_> = app
+            .ctx
+            .config
+            .sources
+            .iter()
+            .filter(|source| source.source_type == "wallhaven")
+            .map(walls_core::config::source_wallhaven_search)
+            .map(|search| (search.q, search.sorting))
+            .collect();
+        let original_wallhaven: Vec<_> = original_config
+            .sources
+            .iter()
+            .filter(|source| source.source_type == "wallhaven")
+            .map(walls_core::config::source_wallhaven_search)
+            .map(|search| (search.q, search.sorting))
+            .collect();
+        assert_eq!(current_wallhaven, original_wallhaven);
 
         let text = render_text(&app, 90, 18);
         assert!(text.contains("query: city night"), "{text}");
@@ -3590,21 +3221,11 @@ mod tests {
                 },
                 "apply": { "backend": "auto" },
                 "display": { "mode": "os" },
-                "wallhaven": {
-                    "enabled": true,
-                    "search": {
-                        "q": "mountain lake",
-                        "categories": "100",
-                        "purity": "100",
-                        "sorting": "random",
-                        "order": "desc",
-                        "atleast": "1920x1080"
-                    }
-                },
                 "sources": [
                     { "enabled": false, "type": "folder", "path": "/tmp/disabled" },
                     { "enabled": true, "type": "reddit", "query": "rust", "sort": "top", "time": "week" },
-                    { "enabled": true, "type": "folder", "path": "/tmp/walls-local" }
+                    { "enabled": true, "type": "folder", "path": "/tmp/walls-local" },
+                    { "enabled": true, "type": "wallhaven", "query": "mountain lake", "categories": "100", "purity": "100", "sorting": "random", "order": "desc", "atleast": "1920x1080" }
                 ]
             }),
             serde_json::json!({}),
@@ -3629,7 +3250,7 @@ mod tests {
             )))
         );
 
-        app.config_sub_cursor = app.ctx.config.sources.len();
+        app.config_sub_cursor = 3;
         assert_eq!(
             app.selected_open_target(),
             Some(OpenTarget::Url(
@@ -4317,8 +3938,8 @@ mod tests {
         );
         // fields from demo (labels now Title for clarity)
         let has_field = text.contains("Enabled")
-            || text.contains("type")
             || text.contains("URL")
+            || text.contains("Image path")
             || text.contains("Interval");
         assert!(
             has_field,
@@ -4343,7 +3964,7 @@ mod tests {
         assert!(app.is_editing());
         // With new UX, focus sets buffer to current value for editing/backspace support
         if let Some(s) = &mut app.editing {
-            s.field_cursor = 3; // url in our list
+            s.field_cursor = 2; // url in our list
         }
         // re-focus effect: set buffer (sim in test) - compute before mut borrow
         let initial_buf = app.current_edit_field_value();
@@ -4567,8 +4188,7 @@ mod tests {
                 "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
                 "sources": [
                     { "enabled": true, "type": "favorites", "label": "Favorites" }
-                ],
-                "wallhaven": { "enabled": false }
+                ]
             }),
             serde_json::json!({}),
         );
@@ -4585,6 +4205,23 @@ mod tests {
         assert_eq!(source.source_type, "wallhaven");
         assert_eq!(source.label, None);
         assert_eq!(source.query.as_deref(), Some("space"));
+        assert_eq!(
+            App::source_editable_fields(source),
+            vec![
+                "enabled",
+                "query",
+                "category_general",
+                "category_anime",
+                "category_people",
+                "purity_sfw",
+                "purity_sketchy",
+                "purity_nsfw",
+                "sorting",
+                "order",
+                "atleast",
+                "prefer"
+            ]
+        );
         assert!(app.config_in_subnav);
         assert_eq!(app.config_sub_cursor, app.ctx.config.sources.len() - 1);
         assert!(matches!(
@@ -4595,8 +4232,86 @@ mod tests {
         let text = render_text(&app, 100, 24);
         assert!(text.contains("Edit Source"), "{text}");
         assert!(text.contains("Wallhaven space"), "{text}");
-        assert!(text.contains("Query"), "{text}");
+        assert!(text.contains("Search query"), "{text}");
+        assert!(text.contains("Minimum resolution"), "{text}");
         assert!(!text.contains("Label"), "{text}");
+    }
+
+    #[test]
+    fn sources_x_removes_selected_configured_source() {
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "internet_enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [
+                    { "enabled": true, "type": "favorites", "label": "Favorites" },
+                    { "enabled": true, "type": "wallhaven", "query": "jupiter" },
+                    { "enabled": false, "type": "wallhaven", "query": "neptune" }
+                ]
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
+        app.config_in_subnav = true;
+        app.config_sub_cursor = 1;
+
+        assert!(
+            app.footer_keys().contains("x remove"),
+            "{}",
+            app.footer_keys()
+        );
+        assert_eq!(
+            action_for_key(&app, KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+            UiAction::RemoveSource
+        );
+        update(&mut app, UiAction::RemoveSource, rt.handle()).expect("remove source");
+
+        assert_eq!(app.ctx.config.sources.len(), 2);
+        assert_eq!(app.ctx.config.sources[0].source_type, "favorites");
+        assert_eq!(app.ctx.config.sources[1].source_type, "wallhaven");
+        assert_eq!(app.ctx.config.sources[1].query.as_deref(), Some("neptune"));
+        assert_eq!(app.config_sub_cursor, 1);
+        assert_eq!(app.message, "source removed: Wallhaven jupiter");
+    }
+
+    #[test]
+    fn sources_x_does_not_remove_builtin_library_sources() {
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "internet_enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [
+                    { "enabled": true, "type": "favorites", "label": "Favorites" },
+                    { "enabled": true, "type": "wallhaven", "query": "jupiter" }
+                ]
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
+        app.config_in_subnav = true;
+        app.config_sub_cursor = 0;
+
+        assert_eq!(
+            action_for_key(&app, KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+            UiAction::Ignore
+        );
+        assert!(
+            !app.footer_keys().contains("x remove"),
+            "{}",
+            app.footer_keys()
+        );
+        update(&mut app, UiAction::RemoveSource, rt.handle()).expect("remove source");
+
+        assert_eq!(app.ctx.config.sources.len(), 2);
+        assert_eq!(app.ctx.config.sources[0].source_type, "favorites");
+        assert_eq!(
+            app.message,
+            "remove source: built-in library sources cannot be removed"
+        );
     }
 
     #[test]
@@ -4962,9 +4677,9 @@ mod tests {
         let buf0 = app.editing.as_ref().unwrap().field_buffer.clone();
         assert_eq!(buf0, "true", "enabled must be prefilled from config json");
 
-        // Move to query field (enabled0, type1, label2, query3)
+        // Move to query field (enabled0, label1, query2)
         let rt = tokio::runtime::Runtime::new().expect("rt");
-        for _ in 0..3 {
+        for _ in 0..2 {
             update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
         }
         let qbuf = app.editing.as_ref().unwrap().field_buffer.clone();
@@ -4976,9 +4691,9 @@ mod tests {
         // Edit the query field (append to simulate user typing), commit -- updates *draft* (not yet live ctx)
         update(&mut app, UiAction::EditFieldChar('!'), rt.handle()).ok();
         update(&mut app, UiAction::EditFieldCommit, rt.handle()).ok();
-        // Now move to next field (collection idx5), prefill should come from live (unchanged)
+        // Now move to next field (collection), prefill should come from live (unchanged)
         update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
-        // move back to query (now idx4 after previous moves? wait track: after previous 4 downs we were at query, +1 char+commit (no cursor change), +1 down to collection, now up back
+        // move back to query; the buffer should use the draft value, not stale live config.
         update(&mut app, UiAction::EditFieldUp, rt.handle()).ok();
         let qbuf_after_commit_and_return = app.editing.as_ref().unwrap().field_buffer.clone();
         // With improved prefill from draft, this should be the edited value "nature!" (committed to draft); if only live ctx, would be stale "nature"
