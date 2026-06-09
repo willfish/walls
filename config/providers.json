@@ -1,0 +1,42 @@
+[
+  {
+    "name": "wallhaven",
+    "enabled": true,
+    "search_config": {
+      "query": "nature landscape",
+      "max_results": 50,
+      "sort_by": "relevance"
+    },
+    "source_schemas": ["https", "http"],
+    "timeout_seconds": 10,
+    "retry_policy": {
+      "max_retries": 3,
+      "initial_backoff_ms": 1000,
+      "max_backoff_ms": 10000
+    }
+  },
+  {
+    "name": "unsplash",
+    "enabled": true,
+    "search_config": null,
+    "source_schemas": ["https"],
+    "timeout_seconds": 15,
+    "retry_policy": {
+      "max_retries": 2,
+      "initial_backoff_ms": 2000,
+      "max_backoff_ms": 8000
+    }
+  },
+  {
+    "name": "pexels",
+    "enabled": false,
+    "search_config": null,
+    "source_schemas": ["https"],
+    "timeout_seconds": 10,
+    "retry_policy": {
+      "max_retries": 1,
+      "initial_backoff_ms": 5000,
+      "max_backoff_ms": 5000
+    }
+  }
+]
