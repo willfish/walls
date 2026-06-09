@@ -11,7 +11,7 @@ name = "walls"
 path = "src/main.rs"
 
 [features]
-default = ["tui"]
+default = ["tui-preview"]
 tui = ["dep:ratatui"]
 tui-preview = ["tui", "dep:image", "dep:ratatui-image"]
 

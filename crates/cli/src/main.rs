@@ -257,20 +257,7 @@ impl From<CliRefreshLevel> for RefreshLevel {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let filter = EnvFilter::from_default_env().add_directive("walls=info".parse()?);
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_writer(tui::ConsoleWriter)
-                .with_ansi(true)
-                .with_filter(filter.clone()),
-        )
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_writer(tui::CaptureWriter)
-                .with_ansi(false)
-                .with_filter(filter),
-        )
-        .init();
+    init_tracing(filter);
 
     let cli = Cli::parse();
     match cli.command {
@@ -342,6 +329,36 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(feature = "tui")]
+fn init_tracing(filter: EnvFilter) {
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(tui::ConsoleWriter)
+                .with_ansi(true)
+                .with_filter(filter.clone()),
+        )
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(tui::CaptureWriter)
+                .with_ansi(false)
+                .with_filter(filter),
+        )
+        .init();
+}
+
+#[cfg(not(feature = "tui"))]
+fn init_tracing(filter: EnvFilter) {
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_ansi(true)
+                .with_filter(filter),
+        )
+        .init();
 }
 
 fn cmd_apply(path: PathBuf, dry_run: bool, json: bool) -> anyhow::Result<()> {
