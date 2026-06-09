@@ -106,7 +106,10 @@ fn cli_logs_reports_recent_events_newest_first() {
         .assert()
         .success()
         .stdout(predicate::str::contains("300\twarn\tprovider\tunsplash"))
-        .stdout(predicate::str::contains("200\terror\tprovider\twallhaven"));
+        .stdout(predicate::str::contains("200\terror\tprovider\twallhaven"))
+        .stdout(predicate::str::contains(
+            "check the provider credential in secrets.json",
+        ));
 
     let output = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     assert!(
@@ -149,6 +152,13 @@ fn cli_logs_json_filters_provider_level_and_since_without_leaking_secrets() {
     assert_eq!(value["events"].as_array().unwrap().len(), 1);
     assert_eq!(value["events"][0]["level"], "error");
     assert_eq!(value["events"][0]["attempt"]["provider_id"], "wallhaven");
+    assert!(
+        value["events"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("check the provider credential in secrets.json"),
+        "{value}"
+    );
     let raw = serde_json::to_string(&value).unwrap();
     assert!(!raw.contains("super-secret-token"), "{raw}");
 }
