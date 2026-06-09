@@ -383,7 +383,9 @@ fn update(
                     style::StatusKind::Neutral,
                     crate::recovery::tui_next_no_change(),
                 ),
-                Err(e) => app.set_message(style::StatusKind::Error, format!("next error: {e}")),
+                Err(e) => {
+                    app.set_message(style::StatusKind::Error, crate::recovery::next_error(&e))
+                }
             }
             return Ok(UpdateEffect::Reload);
         }
@@ -396,7 +398,9 @@ fn update(
                     style::StatusKind::Neutral,
                     crate::recovery::tui_no_previous(),
                 ),
-                Err(e) => app.set_message(style::StatusKind::Error, format!("prev error: {e}")),
+                Err(e) => {
+                    app.set_message(style::StatusKind::Error, crate::recovery::prev_error(&e))
+                }
             }
             return Ok(UpdateEffect::Reload);
         }
@@ -3827,6 +3831,34 @@ mod tests {
             "{}",
             app.message
         );
+    }
+
+    #[test]
+    fn prev_action_reports_missing_history_file_with_recovery() {
+        let mut app = test_app();
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let original = app.ctx.paths.cache_dir.join("current.jpg");
+        let missing = app.ctx.paths.cache_dir.join("missing-previous.jpg");
+        fs::create_dir_all(&app.ctx.paths.cache_dir).expect("cache dir");
+        fs::write(&original, b"current").expect("current image");
+        set_current_wall(&mut app, &original, &original);
+        app.ctx.state.history = vec![
+            original.display().to_string(),
+            missing.display().to_string(),
+        ];
+        app.ctx.state.history_index = 0;
+        app.ctx.save_state().expect("save missing previous state");
+
+        assert_eq!(
+            update(&mut app, UiAction::Prev, rt.handle()).expect("prev"),
+            UpdateEffect::Reload
+        );
+
+        assert!(app
+            .message
+            .contains("prev error: previous wallpaper file is missing"));
+        assert!(app.message.contains("missing-previous.jpg"));
+        assert!(app.message.contains("walls apply <path>"));
     }
 
     #[test]
