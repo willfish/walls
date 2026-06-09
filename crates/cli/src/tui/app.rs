@@ -11,8 +11,8 @@ use walls_core::config::{
     default_wallhaven_source, normalize_source_entry, persist_config, reddit_sort_needs_time,
     reddit_sort_value, reddit_time_value, source_editable_fields as core_source_editable_fields,
     source_wallhaven_prefer, source_wallhaven_search, ApplyBackendSetting, Config, CosmicMethod,
-    SelectionStrategy, SourceEntry, TuiKeyProfile, WallhavenPrefer, WallhavenSearch,
-    REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
+    SelectionStrategy, SourceEntry, TuiKeyProfile, WallhavenCollection, WallhavenPrefer,
+    WallhavenSearch, REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
 };
 use walls_core::validate::{
     validate_config_diagnostics, validate_source_edit, validate_wallhaven_edit,
@@ -333,6 +333,53 @@ fn parse_wallhaven_prefer(s: &str) -> Option<WallhavenPrefer> {
     }
 }
 
+fn format_wallhaven_collections(collections: &[WallhavenCollection]) -> String {
+    collections
+        .iter()
+        .map(|collection| {
+            let base = format!("{}/{}", collection.username, collection.id);
+            collection
+                .label
+                .as_deref()
+                .filter(|label| !label.trim().is_empty())
+                .map_or(base.clone(), |label| format!("{base}:{label}"))
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn parse_wallhaven_collections(value: &str) -> Vec<WallhavenCollection> {
+    value
+        .split(',')
+        .filter_map(|entry| {
+            let entry = entry.trim();
+            if entry.is_empty() {
+                return None;
+            }
+            let (identity, label) =
+                entry
+                    .split_once(':')
+                    .map_or((entry, None), |(identity, label)| {
+                        let label = label.trim();
+                        (
+                            identity.trim(),
+                            (!label.is_empty()).then(|| label.to_string()),
+                        )
+                    });
+            let (username, id) = identity
+                .split_once('/')
+                .map_or((identity.trim(), 0), |(username, id)| {
+                    (username.trim(), id.trim().parse::<u32>().unwrap_or(0))
+                });
+            Some(WallhavenCollection {
+                username: username.to_string(),
+                id,
+                label,
+            })
+        })
+        .collect()
+}
+
 pub(crate) fn block_field_label(block: usize, key: &str) -> String {
     match block {
         CONFIG_BLOCK_ROTATION => match key {
@@ -531,6 +578,7 @@ pub(crate) fn source_field_label(src: &SourceEntry, name: &str) -> String {
             "ratios" => "Aspect ratio".into(),
             "atleast" => "Minimum resolution".into(),
             "prefer" => "Prefer".into(),
+            "collections" => "Collections".into(),
             other => other.into(),
         };
     }
@@ -2282,6 +2330,7 @@ impl App {
             "ratios" => src.ratios.clone().unwrap_or_default(),
             "atleast" => src.atleast.clone().unwrap_or_default(),
             "prefer" => src.prefer.map(wallhaven_prefer_label).unwrap_or_default(),
+            "collections" => format_wallhaven_collections(&src.collections),
             "time" => {
                 if reddit_sort_needs_time(reddit_sort_value(src)) {
                     reddit_time_value(src).to_string()
@@ -2343,6 +2392,9 @@ impl App {
                 if let Some(prefer) = parse_wallhaven_prefer(trimmed) {
                     draft.prefer = Some(prefer);
                 }
+            }
+            "collections" => {
+                draft.collections = parse_wallhaven_collections(buf);
             }
             "sort" if !trimmed.is_empty() && REDDIT_SORT_CHOICES.contains(&trimmed) => {
                 draft.sort = Some(trimmed.to_string());
