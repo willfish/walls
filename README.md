@@ -229,7 +229,7 @@ you already have a symptom.
 | `walls config sync [--dry-run]` | Reconcile tray autostart desktop entry with `config.json`; preview file changes with `--dry-run` |
 | `walls pause` / `walls resume` / `walls toggle-pause` | Works |
 | `walls next [--manual] [--refresh <level>] [--verbose] [--json]` / `walls prev [--json]` | Works (auto `next` respects pause/rotation-off; `--manual` for explicit changes; `--verbose` prints provider attempts/skips/retries/fallbacks; refresh levels: `all`, `filters-and-texts`, `texts`, `clock-only`) |
-| `walls tui` | Works — tabs: Config/Now/History/Browse/Search/Logs; `?` key help; `/` or `i` search; `:` commands; `f` favorite; `d` requests trash confirmation; Now-tab image preview in terminals supporting Kitty graphics (Ghostty/Kitty) or iTerm2 inline images, with metadata-only fallback otherwise |
+| `walls tui` | Works — tabs: Config/Now/History/Browse/Search/Logs; `?` key help; `/` or `i` search; `:` commands; `f` favorite; `d` requests trash confirmation; image preview for Now and selected History/Browse items in terminals supporting Kitty graphics (Ghostty/Kitty) or iTerm2 inline images, with metadata-only fallback otherwise |
 | `WALLS_TUI_PREVIEW=0 walls tui` | Force metadata-only TUI preview mode when inline image rendering is not wanted |
 | `walls-tray` | Works (prev/next/favorite/pause, Open TUI, brand tray icon from `assets/icons/walls-tray.svg`; StatusNotifier wheel down/up runs next/previous) |
 

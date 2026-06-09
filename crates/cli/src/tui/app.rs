@@ -1020,6 +1020,15 @@ impl App {
         }
     }
 
+    pub fn selected_history_preview_path(&self) -> Option<PathBuf> {
+        self.ctx
+            .state
+            .history
+            .get(self.cursor)
+            .map(PathBuf::from)
+            .filter(|path| path.is_file())
+    }
+
     pub fn browse_lines(&self) -> Vec<String> {
         self.browse_items()
             .into_iter()
@@ -1106,6 +1115,28 @@ impl App {
             }
         }
         items
+    }
+
+    pub fn selected_browse_preview_path(&self) -> Option<PathBuf> {
+        let items = self.browse_items();
+        let line = items.get(self.cursor)?;
+        Self::browse_preview_path_for_line(line, &self.ctx.paths.cache_dir)
+    }
+
+    fn browse_preview_path_for_line(line: &str, cache_dir: &std::path::Path) -> Option<PathBuf> {
+        if let Some(path) = line
+            .strip_prefix("local: ")
+            .or_else(|| line.strip_prefix("history: "))
+        {
+            let path = PathBuf::from(path);
+            return path.is_file().then_some(path);
+        }
+
+        let id = line.strip_prefix("queue: ")?;
+        if let Some(photo_id) = walls_core::unsplash::queue_photo_id(id) {
+            return walls_core::unsplash::cached_photo_path(cache_dir, photo_id);
+        }
+        walls_core::wallhaven::cached_wallpaper_path(cache_dir, id)
     }
 
     pub fn apply_history_selection(&mut self) -> Option<PathBuf> {
