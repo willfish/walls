@@ -11,6 +11,10 @@ use crate::autostart::{
 };
 use crate::config::{secrets_credential_present, source_secrets_key, SourceKind};
 use crate::ctx::WallsCtx;
+use crate::providers::{
+    configured_providers, provider_for_source, ProviderAttempt, ProviderNoCandidateReason,
+    ProviderOperation, ProviderStatus,
+};
 use crate::sources::list_images_with_paths;
 use crate::tray::{decide_tray_action_from_env, TrayAction};
 use crate::validate::{secrets_file_permission_warnings, validate_config_diagnostics};
@@ -115,6 +119,7 @@ impl DoctorCheck {
 pub struct DoctorReport {
     pub ready: bool,
     pub checks: Vec<DoctorCheck>,
+    pub provider_attempts: Vec<ProviderAttempt>,
 }
 
 impl DoctorReport {
@@ -149,12 +154,60 @@ pub fn run_doctor(ctx: &WallsCtx, options: &DoctorOptions) -> DoctorReport {
     check_providers(ctx, &mut checks);
     check_storage_cache(ctx, &mut checks);
     check_tui(options, &mut checks);
+    let provider_attempts = provider_doctor_attempts(ctx);
     DoctorReport {
         ready: !checks
             .iter()
             .any(|check| check.status == DoctorStatus::Fail),
         checks,
+        provider_attempts,
     }
+}
+
+fn provider_doctor_attempts(ctx: &WallsCtx) -> Vec<ProviderAttempt> {
+    let mut attempts = Vec::new();
+    for source in &ctx.config.sources {
+        let provider = provider_for_source(source);
+        let source_kind = SourceKind::parse(&source.source_type);
+        let mut attempt = provider.attempt(ProviderOperation::DoctorCheck);
+        if !source.enabled {
+            attempt = attempt
+                .with_status(ProviderStatus::Disabled)
+                .skipped(ProviderNoCandidateReason::Disabled);
+        } else if !source_kind.is_local() && !ctx.config.change.internet_enabled {
+            attempt = attempt
+                .with_status(ProviderStatus::OfflineDisabled)
+                .skipped(ProviderNoCandidateReason::OfflineDisabled);
+        } else if let Some(key) = source_secrets_key(&source.source_type) {
+            if !secrets_credential_present(key, &ctx.secrets) {
+                attempt = attempt
+                    .with_status(ProviderStatus::CredentialMissing)
+                    .skipped(ProviderNoCandidateReason::CredentialMissing);
+            }
+        } else if source_kind == SourceKind::Unknown {
+            attempt = attempt.no_candidates(ProviderNoCandidateReason::Unsupported, None);
+        }
+        attempts.push(attempt);
+    }
+
+    let configured = configured_providers(&ctx.config, &ctx.secrets);
+    if let Some(wallhaven) = configured
+        .iter()
+        .find(|provider| provider.kind == crate::providers::ProviderKind::Wallhaven)
+    {
+        let mut attempt = wallhaven.attempt(ProviderOperation::DoctorCheck);
+        if !ctx.config.wallhaven.enabled {
+            attempt = attempt
+                .with_status(ProviderStatus::Disabled)
+                .skipped(ProviderNoCandidateReason::Disabled);
+        } else if !ctx.config.change.internet_enabled {
+            attempt = attempt
+                .with_status(ProviderStatus::OfflineDisabled)
+                .skipped(ProviderNoCandidateReason::OfflineDisabled);
+        }
+        attempts.push(attempt);
+    }
+    attempts
 }
 
 fn check_config(ctx: &WallsCtx, checks: &mut Vec<DoctorCheck>) {

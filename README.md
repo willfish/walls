@@ -192,7 +192,7 @@ walls-tray         # tray menu → walls prev/next/toggle-pause
 | `walls config validate [--json]` | Works |
 | `walls config sync` | Reconcile tray autostart desktop entry with `config.json` |
 | `walls pause` / `walls resume` / `walls toggle-pause` | Works |
-| `walls next [--manual] [--refresh <level>] [--json]` / `walls prev [--json]` | Works (auto `next` respects pause/rotation-off; `--manual` for explicit changes; refresh levels: `all`, `filters-and-texts`, `texts`, `clock-only`) |
+| `walls next [--manual] [--refresh <level>] [--verbose] [--json]` / `walls prev [--json]` | Works (auto `next` respects pause/rotation-off; `--manual` for explicit changes; `--verbose` prints provider attempts/skips/retries/fallbacks; refresh levels: `all`, `filters-and-texts`, `texts`, `clock-only`) |
 | `walls tui` | Works — tabs: Config/Now/History/Browse/Search/Logs; `?` key help; `/` or `i` search; `:` commands; `f` favorite; `d` requests trash confirmation |
 | `walls tui` with `--features tui-preview` | Optional Now-tab image preview in terminals supporting Kitty graphics (Ghostty/Kitty) or iTerm2 inline images; metadata-only fallback otherwise; set `WALLS_TUI_PREVIEW=0` to force metadata-only |
 | `walls-tray` | Works (prev/next/pause, Open TUI, brand tray icon from `assets/icons/walls-tray.svg`) |
@@ -251,6 +251,14 @@ Structured command results use a stable envelope:
 - `exit_code_reason` is `null` on normal success and a stable reason string for no-op or failure-like outcomes that scripts may branch on.
 
 `walls current --json` exits non-zero with `status: "missing_current"` when no wallpaper is recorded. `walls next --json` and `walls prev --json` keep the existing successful no-op behavior for `no_change` and `no_previous`, while making the reason explicit.
+
+`walls next --verbose` prints the provider attempt report in human form after
+the normal path/no-op line. `walls next --json` includes the same data as
+`provider_attempts`, including skipped providers, missing credentials, offline
+providers, no-candidate results, retries/backoff, request status codes, and the
+fallback provider tried next. `walls doctor --json` includes provider
+`doctor_check` attempts for configured provider readiness without performing a
+live fetch.
 
 Cache commands use the same envelope and add cache-specific fields such as
 `queue`, `cache`, `downloads`, `quota`, `plan`, and remove counts. Mutating cache

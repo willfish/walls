@@ -33,13 +33,7 @@ pub async fn try_reddit(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
         return Ok(None);
     };
 
-    match try_reddit_inner(ctx, &src).await {
-        Ok(path) => Ok(path),
-        Err(error) => {
-            tracing::warn!(error = %error, "reddit: fetch failed, trying next source");
-            Ok(None)
-        }
-    }
+    try_reddit_inner(ctx, &src).await
 }
 
 async fn try_reddit_inner(

@@ -119,6 +119,38 @@ pub enum ProviderFailureKind {
     Unknown,
 }
 
+impl ProviderFailureKind {
+    pub fn classify(error: &anyhow::Error) -> (Self, Option<u16>) {
+        for cause in error.chain() {
+            if let Some(reqwest) = cause.downcast_ref::<reqwest::Error>() {
+                let status = reqwest.status().map(|status| status.as_u16());
+                if status == Some(429) {
+                    return (Self::RateLimited, status);
+                }
+                if reqwest.is_timeout() {
+                    return (Self::Timeout, status);
+                }
+                if reqwest.is_connect() {
+                    return (Self::Connect, status);
+                }
+                if status.is_some() || reqwest.is_request() {
+                    return (Self::Request, status);
+                }
+                if reqwest.is_decode() {
+                    return (Self::Decode, status);
+                }
+            }
+            if cause.downcast_ref::<std::io::Error>().is_some() {
+                return (Self::Io, None);
+            }
+            if cause.downcast_ref::<serde_json::Error>().is_some() {
+                return (Self::Decode, None);
+            }
+        }
+        (Self::Unknown, None)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderRetryReason {
@@ -214,6 +246,12 @@ impl ProviderAttempt {
     #[must_use]
     pub fn with_retry(mut self, retry: ProviderRetry) -> Self {
         self.retries.push(retry);
+        self
+    }
+
+    #[must_use]
+    pub fn with_retries(mut self, retries: impl IntoIterator<Item = ProviderRetry>) -> Self {
+        self.retries.extend(retries);
         self
     }
 
