@@ -10,7 +10,7 @@ fn loads_example_config() {
     let cfg = load_config(&root).expect("example config should parse");
     assert!(cfg.change.enabled);
     assert_eq!(cfg.paths.cache_dir, "~/.local/share/walls/cache");
-    assert_eq!(cfg.tui.key_profile, TuiKeyProfile::Default);
+    assert_eq!(cfg.tui.key_profile, TuiKeyProfile::Emacs);
 
     // Feature test for defaults: the example must include working configs for all
     // providers so new users can get started. Prove via the public API that they
