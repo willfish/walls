@@ -28,7 +28,13 @@ struct TerminalHints {
 pub struct ImagePreview {
     picker: Option<Picker>,
     cached: Option<CachedPreview>,
-    status: String,
+    status: PreviewFallback,
+}
+
+#[derive(Debug, Clone)]
+struct PreviewFallback {
+    kind: style::StateKind,
+    message: String,
 }
 
 struct CachedPreview {
@@ -44,14 +50,20 @@ impl ImagePreview {
                 return Self {
                     picker: None,
                     cached: None,
-                    status: "preview disabled; showing metadata".into(),
+                    status: PreviewFallback::new(
+                        style::StateKind::Disabled,
+                        "preview disabled; showing metadata",
+                    ),
                 };
             }
             PreviewCapability::Unsupported => {
                 return Self {
                     picker: None,
                     cached: None,
-                    status: "preview unsupported; showing metadata".into(),
+                    status: PreviewFallback::new(
+                        style::StateKind::Unavailable,
+                        "preview unsupported; showing metadata",
+                    ),
                 };
             }
             PreviewCapability::ProbeProtocol => {}
@@ -68,22 +80,28 @@ impl ImagePreview {
                 Self {
                     picker: Some(picker),
                     cached: None,
-                    status,
+                    status: PreviewFallback::new(style::StateKind::Loading, status),
                 }
             }
             Ok(picker) => Self {
                 picker: None,
                 cached: None,
-                status: format!(
-                    "preview unsupported ({:?}); showing metadata",
-                    picker.protocol_type()
-                )
-                .to_lowercase(),
+                status: PreviewFallback::new(
+                    style::StateKind::Unavailable,
+                    format!(
+                        "preview unsupported ({:?}); showing metadata",
+                        picker.protocol_type()
+                    )
+                    .to_lowercase(),
+                ),
             },
             Err(err) => Self {
                 picker: None,
                 cached: None,
-                status: format!("preview unavailable: {err}; showing metadata"),
+                status: PreviewFallback::new(
+                    style::StateKind::Unavailable,
+                    format!("preview unavailable: {err}; showing metadata"),
+                ),
             },
         }
     }
@@ -94,16 +112,28 @@ impl ImagePreview {
         f.render_widget(block, area);
 
         let Some(path) = path else {
-            self.render_fallback(f, inner, "(no current wallpaper)", theme);
+            self.render_fallback(
+                f,
+                inner,
+                style::StateKind::Empty,
+                "no current wallpaper",
+                theme,
+            );
             return;
         };
         if self.picker.is_none() {
             let status = self.status.clone();
-            self.render_fallback(f, inner, &status, theme);
+            self.render_fallback(f, inner, status.kind, &status.message, theme);
             return;
         }
         if inner.width < 8 || inner.height < 4 {
-            self.render_fallback(f, inner, "preview needs more space", theme);
+            self.render_fallback(
+                f,
+                inner,
+                style::StateKind::Unavailable,
+                "preview needs more space",
+                theme,
+            );
             return;
         }
 
@@ -111,9 +141,12 @@ impl ImagePreview {
         if !self.cache_matches(path, size) {
             if let Err(err) = self.load(path, size) {
                 self.cached = None;
-                self.status = format!("preview failed: {err}; showing metadata");
+                self.status = PreviewFallback::new(
+                    style::StateKind::ValidationError,
+                    format!("preview failed: {err}; showing metadata"),
+                );
                 let status = self.status.clone();
-                self.render_fallback(f, inner, &status, theme);
+                self.render_fallback(f, inner, status.kind, &status.message, theme);
                 return;
             }
         }
@@ -121,7 +154,13 @@ impl ImagePreview {
         if let Some(cached) = &self.cached {
             f.render_widget(Image::new(&cached.protocol).allow_clipping(true), inner);
         } else {
-            self.render_fallback(f, inner, "preview unavailable; showing metadata", theme);
+            self.render_fallback(
+                f,
+                inner,
+                style::StateKind::Unavailable,
+                "preview unavailable; showing metadata",
+                theme,
+            );
         }
     }
 
@@ -146,12 +185,27 @@ impl ImagePreview {
         Ok(())
     }
 
-    fn render_fallback(&self, f: &mut Frame, area: Rect, message: &str, theme: style::Theme) {
-        let kind = style::status_kind(message);
+    fn render_fallback(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        kind: style::StateKind,
+        message: &str,
+        theme: style::Theme,
+    ) {
         f.render_widget(
-            Paragraph::new(message.to_string()).style(theme.status(kind)),
+            Paragraph::new(style::state_line(kind, message.to_string(), theme)),
             area,
         );
+    }
+}
+
+impl PreviewFallback {
+    fn new(kind: style::StateKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
     }
 }
 
