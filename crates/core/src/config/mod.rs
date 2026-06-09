@@ -54,6 +54,22 @@ pub struct Config {
     pub wallhaven: WallhavenConfig,
     #[serde(default)]
     pub tray: TrayConfig,
+    #[serde(default)]
+    pub tui: TuiConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct TuiConfig {
+    #[serde(default)]
+    pub key_profile: TuiKeyProfile,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TuiKeyProfile {
+    #[default]
+    Default,
+    Vim,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -309,7 +325,9 @@ fn default_strategy() -> SelectionStrategy {
 
 #[cfg(test)]
 mod tests {
-    use super::{load_config, save_config_atomic, Config, SelectionStrategy, SourceEntry};
+    use super::{
+        load_config, save_config_atomic, Config, SelectionStrategy, SourceEntry, TuiKeyProfile,
+    };
 
     fn test_config() -> Config {
         serde_json::from_value(serde_json::json!({
@@ -357,6 +375,19 @@ mod tests {
         let loaded = load_config(&path).expect("load config");
         assert!(!loaded.change.enabled);
         assert_eq!(loaded.selection.strategy, SelectionStrategy::Sequential);
+    }
+
+    #[test]
+    fn tui_key_profile_defaults_and_round_trips() {
+        let mut config = test_config();
+        assert_eq!(config.tui.key_profile, TuiKeyProfile::Default);
+        config.tui.key_profile = TuiKeyProfile::Vim;
+
+        let value = serde_json::to_value(&config).expect("serialize config");
+        assert_eq!(value["tui"]["key_profile"], "vim");
+
+        let loaded: Config = serde_json::from_value(value).expect("deserialize config");
+        assert_eq!(loaded.tui.key_profile, TuiKeyProfile::Vim);
     }
 
     #[test]

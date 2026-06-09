@@ -51,6 +51,7 @@ async fn refill_uses_collection_endpoint_when_configured() {
             ..WallhavenConfig::default()
         },
         tray: Default::default(),
+        tui: Default::default(),
     };
     let mut state = State::default();
 
