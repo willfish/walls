@@ -60,7 +60,9 @@ fn cli_current_none_exits_nonzero() {
         .arg("current")
         .assert()
         .failure()
-        .stdout(predicate::str::contains("(none)"));
+        .stdout(predicate::str::contains("no current wallpaper"))
+        .stdout(predicate::str::contains("walls apply <path>"))
+        .stdout(predicate::str::contains("walls next --manual"));
 
     let assert = walls_cmd()
         .env("XDG_CONFIG_HOME", &config_home)

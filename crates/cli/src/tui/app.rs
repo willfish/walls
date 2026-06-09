@@ -1932,13 +1932,13 @@ impl App {
             ParsedCommand::Next => {
                 match tokio::task::block_in_place(|| rt.block_on(self.ctx.advance_next_manual())) {
                     Ok(Some(p)) => (format!("next: {}", p.display()), StatusKind::Success),
-                    Ok(None) => ("next: no change".into(), StatusKind::Neutral),
+                    Ok(None) => (crate::recovery::tui_next_no_change(), StatusKind::Neutral),
                     Err(e) => (format!("next error: {e}"), StatusKind::Error),
                 }
             }
             ParsedCommand::Prev => match self.ctx.advance_prev() {
                 Ok(Some(p)) => (format!("prev: {}", p.display()), StatusKind::Success),
-                Ok(None) => ("prev: none".into(), StatusKind::Neutral),
+                Ok(None) => (crate::recovery::tui_no_previous(), StatusKind::Neutral),
                 Err(e) => (format!("prev error: {e}"), StatusKind::Error),
             },
             ParsedCommand::TogglePause => {
@@ -1950,7 +1950,7 @@ impl App {
             }
             ParsedCommand::Favorite => match self.favorite_current() {
                 Ok(msg) => (msg, StatusKind::Success),
-                Err(e) => (format!("favorite error: {e}"), StatusKind::Error),
+                Err(e) => (crate::recovery::favorite_error(&e), StatusKind::Error),
             },
             ParsedCommand::Status => (
                 format!(
