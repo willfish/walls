@@ -208,6 +208,17 @@ pub fn source_secrets_detail_lines(
     secrets: &Secrets,
     internet_enabled: bool,
 ) -> Vec<String> {
+    if SourceKind::parse(&entry.source_type) == SourceKind::Wallhaven {
+        return vec![format!(
+            "wallhaven api key: {}",
+            if secrets.wallhaven_api_key.trim().is_empty() {
+                "missing"
+            } else {
+                "present"
+            }
+        )];
+    }
+
     let Some(key) = source_secrets_key(&entry.source_type) else {
         return Vec::new();
     };
@@ -348,6 +359,29 @@ mod tests {
             source_secrets_key("unsplash"),
             Some(SourceSecretsKey::UnsplashAccessKey)
         );
+        assert_eq!(source_secrets_key("wallhaven"), None);
         assert_eq!(source_secrets_key("bing"), None);
+    }
+
+    #[test]
+    fn wallhaven_source_details_show_optional_api_key_presence() {
+        let source = SourceEntry {
+            enabled: true,
+            source_type: "wallhaven".into(),
+            query: Some("space".into()),
+            ..SourceEntry::default()
+        };
+        let mut secrets = Secrets::default();
+
+        assert_eq!(
+            source_secrets_detail_lines(&source, &secrets, true),
+            ["wallhaven api key: missing"]
+        );
+
+        secrets.wallhaven_api_key = "key".into();
+        assert_eq!(
+            source_secrets_detail_lines(&source, &secrets, true),
+            ["wallhaven api key: present"]
+        );
     }
 }
