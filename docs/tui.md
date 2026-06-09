@@ -108,6 +108,87 @@ Wide (tui-preview): split list-context | form (like Now preview split). Narrow: 
 
 Nested providers: "Sources" block shows full sources vec (all types from config.example), subnav j/k or arrow up/down pick, Home/End jump, PageUp/PageDown page, and `e` edits chosen SourceEntry (type-aware fields like path/query/url/image_path/api_key, designed per schema). Reuses atomic save + Reload + existing validation.
 
+### Config tab field coverage matrix
+
+Use this matrix when expanding the Config tab. It inventories the persisted
+`config.json` and `secrets.json` fields, then classifies whether the TUI edits
+the field directly, shows it as read-only context, leaves it to manual file edit,
+or deliberately defers it to a later focused slice.
+
+| Field path | Coverage | Notes |
+| --- | --- | --- |
+| `config.$schema` | Manual | Schema hint for external editors; keep out of the TUI edit flow. |
+| `config.change.enabled` | Editable | Rotation block boolean. |
+| `config.change.on_start` | Editable | Rotation block boolean. |
+| `config.change.interval_secs` | Editable | Rotation block numeric text field. |
+| `config.change.internet_enabled` | Editable | Rotation block boolean. |
+| `config.change.safe_mode` | Editable | Rotation block boolean. |
+| `config.change.change_lock_screen` | Editable | Rotation block boolean. |
+| `config.change.download_preference_ratio` | Editable | Rotation block numeric text field. |
+| `config.paths.cache_dir` | Read-only | Library block context; manual path edits avoid moving user data unexpectedly. |
+| `config.paths.download_dir` | Read-only | Library block context; manual path edits avoid moving user data unexpectedly. |
+| `config.paths.favorites_dir` | Read-only | Library block context; manual path edits avoid moving user data unexpectedly. |
+| `config.paths.fetched_dir` | Read-only | Library block context; manual path edits avoid moving user data unexpectedly. |
+| `config.paths.compose_dir` | Read-only | Display/apply context; manual path edits avoid moving generated wallpaper files unexpectedly. |
+| `config.quota.enabled` | Read-only | Library block shows quota state; editable quota controls are deferred. |
+| `config.quota.size_mb` | Read-only | Library block shows quota limit and validation warnings; editable quota controls are deferred. |
+| `config.apply.backend` | Read-only | Apply block context; backend switching needs focused validation and dry-run copy. |
+| `config.apply.cosmic.method` | Read-only | Apply block context. |
+| `config.apply.cosmic.config_path` | Read-only | Apply block context and validation warnings. |
+| `config.apply.cosmic.use_original_path` | Read-only | Apply block context. |
+| `config.apply.cosmic.entry.rotation_frequency` | Manual | COSMIC-specific low-level patch field. |
+| `config.apply.cosmic.entry.filter_by_theme` | Manual | COSMIC-specific low-level patch field. |
+| `config.apply.custom_script` | Read-only | Apply block context; manual edit keeps trusted script changes explicit. |
+| `config.display.mode` | Read-only | Display block context; editable display controls are deferred. |
+| `config.display.auto_rotate` | Read-only | Display block context. |
+| `config.display.imagemagick_command` | Read-only | Display block context. |
+| `config.display.target_width` | Read-only | Display block context. |
+| `config.display.target_height` | Read-only | Display block context. |
+| `config.display.filters.enabled` | Read-only | Display block context. |
+| `config.display.filters.command` | Read-only | Display block context. |
+| `config.display.filters.filters[].name` | Manual | Multi-row ImageMagick filter editing remains file-based. |
+| `config.display.filters.filters[].args` | Manual | Multi-row ImageMagick filter editing remains file-based. |
+| `config.selection.use_landscape_enabled` | Read-only | Selection block context; editable selection controls are deferred. |
+| `config.selection.avoid_recent` | Read-only | Selection block context. |
+| `config.selection.refetch_when_cache_below` | Read-only | Selection block context. |
+| `config.selection.strategy` | Editable | Config block cycle action persists random/sequential. |
+| `config.tray.accent` | Editable | Rotation edit form choice field. |
+| `config.tray.autostart.desktops.*` | Editable | Rotation edit form toggles the current desktop entry when supported. |
+| `config.tui.key_profile` | Deferred | Schema/config foundation exists; Config tab control belongs to the #241 key-profile UI slice. |
+| `config.sources[].enabled` | Editable | Source edit form boolean. |
+| `config.sources[].type` | Editable | Source edit form choice field for source kinds. |
+| `config.sources[].label` | Editable | Source edit form text field when the source kind persists labels. |
+| `config.sources[].path` | Editable | Folder/image source text field. |
+| `config.sources[].query` | Editable | Reddit, Unsplash, Weighting, and Pixabay text field. |
+| `config.sources[].url` | Editable | JSON, Media RSS, Attribution, Unsplash, and Immich text field. |
+| `config.sources[].collection` | Editable | Unsplash text field. |
+| `config.sources[].user` | Editable | Unsplash text field. |
+| `config.sources[].topic` | Editable | Unsplash text field. |
+| `config.sources[].orientation` | Editable | Unsplash choice field. |
+| `config.sources[].api_key` | Editable | Pixabay/Immich inline source key; secrets-backed providers stay in `secrets.json`. |
+| `config.sources[].image_path` | Editable | JSON source text field. |
+| `config.sources[].title_path` | Deferred | Legacy schema field; source normalization does not persist it from TUI edits. |
+| `config.sources[].sort` | Editable | Reddit choice field. |
+| `config.sources[].time` | Editable | Reddit choice field when the selected sort uses time. |
+| `config.sources[].source` | Deferred | Attribution metadata schema field; source normalization does not persist it from TUI edits yet. |
+| `config.sources[].author` | Deferred | Attribution metadata schema field; source normalization does not persist it from TUI edits yet. |
+| `config.wallhaven.enabled` | Editable | Wallhaven block boolean. |
+| `config.wallhaven.collections[].username` | Manual | Collection management remains file-based. |
+| `config.wallhaven.collections[].id` | Manual | Collection management remains file-based. |
+| `config.wallhaven.collections[].label` | Manual | Collection management remains file-based. |
+| `config.wallhaven.search.q` | Editable | Wallhaven block text field. |
+| `config.wallhaven.search.categories` | Editable | Wallhaven block category booleans write the bit string. |
+| `config.wallhaven.search.purity` | Editable | Wallhaven block purity booleans write the bit string; NSFW depends on API key presence. |
+| `config.wallhaven.search.sorting` | Editable | Wallhaven block choice field. |
+| `config.wallhaven.search.order` | Editable | Wallhaven block choice field. |
+| `config.wallhaven.search.atleast` | Editable | Wallhaven block resolution choice field. |
+| `config.wallhaven.prefer` | Editable | Wallhaven block choice field. |
+| `secrets.$schema` | Manual | Schema hint for external editors. |
+| `secrets.wallhaven_api_key` | Manual | TUI shows presence/hints only; edit `secrets.json` directly. |
+| `secrets.unsplash_access_key` | Manual | TUI shows presence/hints only; edit `secrets.json` directly. |
+| `secrets.reddit_client_id` | Manual | TUI shows presence/hints only; edit `secrets.json` directly. |
+| `secrets.reddit_client_secret` | Manual | TUI shows presence/hints only; edit `secrets.json` directly. |
+
 Normal mode navigation:
 
 - Left/right switch top-level tabs and leave Config Sources subnav.
