@@ -75,10 +75,7 @@ impl Theme {
 
     /// Secondary metadata, unavailable text, hints, and quiet separators.
     pub fn muted(self) -> Style {
-        match self.color_mode {
-            ColorMode::Auto => Style::default().fg(Color::DarkGray),
-            ColorMode::Never => Style::default().add_modifier(Modifier::DIM),
-        }
+        Style::default().add_modifier(Modifier::DIM)
     }
 
     /// Primary hierarchy cue for titles and important labels.
@@ -291,10 +288,11 @@ mod tests {
         assert_eq!(theme.status(StatusKind::Warning).fg, Some(Color::Yellow));
         assert_eq!(theme.status(StatusKind::Error).fg, Some(Color::Red));
         assert_eq!(theme.active_state().fg, Some(Color::Cyan));
-        assert_eq!(theme.inactive_state().fg, Some(Color::DarkGray));
+        assert_eq!(theme.inactive_state().fg, None);
         assert_eq!(theme.boolean_true().fg, Some(Color::Cyan));
-        assert_eq!(theme.boolean_false().fg, Some(Color::DarkGray));
+        assert_eq!(theme.boolean_false().fg, None);
         assert_eq!(theme.unavailable().fg, Some(Color::Yellow));
+        assert!(theme.muted().add_modifier.contains(Modifier::DIM));
         assert_ne!(theme.boolean_false().fg, theme.status(StatusKind::Error).fg);
         assert_ne!(
             theme.boolean_true().fg,
@@ -317,5 +315,23 @@ mod tests {
             state_text(StateKind::ValidationWarning, "API key missing"),
             "[warning] API key missing"
         );
+    }
+
+    #[test]
+    fn state_roles_have_no_colour_mode_fallbacks() {
+        let theme = Theme::new(ColorMode::Never);
+
+        assert!(theme
+            .state(StateKind::Empty)
+            .add_modifier
+            .contains(Modifier::DIM));
+        assert!(theme
+            .state(StateKind::ValidationWarning)
+            .add_modifier
+            .contains(Modifier::BOLD));
+        assert!(theme
+            .state(StateKind::ValidationError)
+            .add_modifier
+            .contains(Modifier::REVERSED));
     }
 }

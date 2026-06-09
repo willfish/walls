@@ -19,6 +19,7 @@ scripts/verify-tui-visual.sh
 
 - Standard terminal, dark background: `walls` (or `walls tui`)
 - Light-background terminal or theme: `WALLS_TUI_COLOR=never walls`
+- No-colour journeys: confirm Config source warnings/missing credentials, Search empty state, edit validation errors, and footer status remain understandable through text labels, markers, and modifiers.
 - Config edit (drill-down): Config tab, j/k to Sources, Enter subnav, j/k pick provider, `e` -> form replaces main content (j/k fields, type, Enter commit, s save with validation flash on error). Wide: split. Narrow: full form. Esc back. Test narrow 50x12, WALLS_TUI_COLOR=never (legible), no stale cells.
 - Narrow terminal around `42x10`: confirm mode/status and `q` remain visible.
 - Wide terminal around `120x32`: confirm the `Now` tab keeps metadata and preview/fallback regions stable.
@@ -28,7 +29,7 @@ scripts/verify-tui-visual.sh
 
 ## Environment Knobs
 
-- `WALLS_TUI_COLOR=never` disables colour and keeps state visible through text and modifiers.
+- `WALLS_TUI_COLOR=never` disables colour and keeps state visible through text, focus markers, and modifiers.
 - `WALLS_TUI_PREVIEW=0`, `false`, `no`, `off`, `never`, or `metadata` forces metadata-only preview mode.
 
 Record the commands and terminal sizes used in the PR when changing layout, colour, key handling, or preview behaviour.
