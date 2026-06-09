@@ -132,8 +132,8 @@ or deliberately defers it to a later focused slice.
 | `config.paths.favorites_dir` | Read-only | Library block context; manual path edits avoid moving user data unexpectedly. |
 | `config.paths.fetched_dir` | Read-only | Library block context; manual path edits avoid moving user data unexpectedly. |
 | `config.paths.compose_dir` | Read-only | Display/apply context; manual path edits avoid moving generated wallpaper files unexpectedly. |
-| `config.quota.enabled` | Read-only | Library block shows quota state; editable quota controls are deferred. |
-| `config.quota.size_mb` | Read-only | Library block shows quota limit and validation warnings; editable quota controls are deferred. |
+| `config.quota.enabled` | Editable | Library edit form boolean. |
+| `config.quota.size_mb` | Editable | Library edit form numeric text field with inline validation. |
 | `config.apply.backend` | Read-only | Apply block context; backend switching needs focused validation and dry-run copy. |
 | `config.apply.cosmic.method` | Read-only | Apply block context. |
 | `config.apply.cosmic.config_path` | Read-only | Apply block context and validation warnings. |
@@ -156,7 +156,7 @@ or deliberately defers it to a later focused slice.
 | `config.selection.strategy` | Editable | Config block cycle action persists random/sequential. |
 | `config.tray.accent` | Editable | Rotation edit form choice field. |
 | `config.tray.autostart.desktops.*` | Editable | Rotation edit form toggles the current desktop entry when supported. |
-| `config.tui.key_profile` | Deferred | Schema/config foundation exists; Config tab control belongs to the #241 key-profile UI slice. |
+| `config.tui.key_profile` | Editable | TUI edit form choice field for Emacs/Vim key profiles. |
 | `config.sources[].enabled` | Editable | Source edit form boolean. |
 | `config.sources[].type` | Editable | Source edit form choice field for source kinds. |
 | `config.sources[].label` | Editable | Source edit form text field when the source kind persists labels. |
