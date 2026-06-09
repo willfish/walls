@@ -49,6 +49,9 @@ enum Command {
         /// Refresh current wallpaper instead of selecting a new one
         #[arg(long, value_enum)]
         refresh: Option<CliRefreshLevel>,
+        /// Show what would be considered without fetching, applying, or mutating state
+        #[arg(long, conflicts_with = "refresh")]
+        dry_run: bool,
         /// Print provider attempts, retries, skips, failures, and fallbacks
         #[arg(long, short = 'v')]
         verbose: bool,
@@ -282,9 +285,10 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Next {
             manual,
             refresh,
+            dry_run,
             verbose,
             json,
-        }) => cmd_next(manual, refresh, verbose, json).await?,
+        }) => cmd_next(manual, refresh, dry_run, verbose, json).await?,
         Some(Command::Prev { json }) => cmd_prev(json)?,
         Some(Command::Undo { json }) => cmd_undo(json)?,
         Some(Command::Status { json }) => cmd_status(json)?,
@@ -1232,9 +1236,18 @@ fn next_result(
 async fn cmd_next(
     manual: bool,
     refresh: Option<CliRefreshLevel>,
+    dry_run: bool,
     verbose: bool,
     json: bool,
 ) -> anyhow::Result<()> {
+    if dry_run {
+        let ctx = WallsCtx::load_without_autostart_sync()?;
+        let plan = next_dry_run_json(&ctx, manual)?;
+        return print_json_or_human(json, plan, || {
+            print_next_dry_run_human(&ctx, manual)?;
+            Ok(())
+        });
+    }
     let mut ctx = WallsCtx::load()?;
     if let Some(level) = refresh {
         match ctx.refresh_current(level.into())? {
@@ -1290,6 +1303,102 @@ async fn cmd_next(
         }
     }
     Ok(())
+}
+
+fn next_dry_run_json(ctx: &WallsCtx, manual: bool) -> anyhow::Result<serde_json::Value> {
+    let skip_reason = next_skip_reason(ctx, manual);
+    let local_candidates = ctx.collect_local_candidates()?;
+    let provider_plan: Vec<_> =
+        walls_core::providers::configured_providers(&ctx.config, &ctx.secrets)
+            .into_iter()
+            .map(|provider| {
+                serde_json::json!({
+                    "id": provider.id,
+                    "kind": provider.kind,
+                    "enabled": provider.enabled,
+                })
+            })
+            .collect();
+    let queue_head = ctx.state.cache_queue.first().cloned();
+    let would_apply =
+        skip_reason.is_none() && (queue_head.is_some() || !local_candidates.is_empty());
+    let status = match (skip_reason, would_apply, queue_head.is_some()) {
+        (Some(_), _, _) => "would_skip",
+        (None, true, true) => "would_try_cached_queue",
+        (None, true, false) => "would_try_sources",
+        (None, false, _) => "no_candidates",
+    };
+    let summary = summarize_apply_environment(&ctx.config.apply);
+    Ok(serde_json::json!({
+        "command": "next",
+        "changed": false,
+        "status": status,
+        "dry_run": true,
+        "manual": manual,
+        "path": serde_json::Value::Null,
+        "exit_code_reason": if status == "no_candidates" {
+            serde_json::Value::String("no_change".into())
+        } else {
+            serde_json::Value::Null
+        },
+        "next": {
+            "skip_reason": skip_reason,
+            "cache_queue_len": ctx.state.cache_queue.len(),
+            "cache_queue_head": queue_head,
+            "local_candidate_count": local_candidates.len(),
+            "sample_local_candidate": local_candidates.first(),
+            "providers": provider_plan,
+            "configured_backend": backend_setting_label(summary.configured_backend),
+            "resolved_backend": backend_setting_label(summary.resolved_backend),
+            "would_fetch_or_download": false,
+            "would_run_backend": would_apply,
+            "would_update_current": would_apply,
+            "would_update_history": would_apply,
+            "would_record_events": would_apply || skip_reason.is_some(),
+        },
+        "provider_attempts": [],
+    }))
+}
+
+fn print_next_dry_run_human(ctx: &WallsCtx, manual: bool) -> anyhow::Result<()> {
+    if let Some(reason) = next_skip_reason(ctx, manual) {
+        println!("would skip next: {reason}");
+        println!("no wallpaper files, state, history, or event journal were changed");
+        return Ok(());
+    }
+    let local_candidates = ctx.collect_local_candidates()?;
+    println!(
+        "would consider cache queue: {} entries",
+        ctx.state.cache_queue.len()
+    );
+    println!(
+        "would consider local candidates: {}",
+        local_candidates.len()
+    );
+    if let Some(path) = local_candidates.first() {
+        println!("sample local candidate: {}", path.display());
+    }
+    println!(
+        "would run backend if a candidate is selected: {}",
+        backend_setting_label(walls_core::apply::resolved_apply_backend(&ctx.config.apply))
+    );
+    println!("would update current wallpaper state and history if a candidate is selected");
+    println!("would record provider/apply events if a candidate is selected");
+    println!("no wallpaper files, state, history, or event journal were changed");
+    Ok(())
+}
+
+fn next_skip_reason(ctx: &WallsCtx, manual: bool) -> Option<&'static str> {
+    if manual {
+        return None;
+    }
+    if ctx.state.paused {
+        return Some("paused");
+    }
+    if !ctx.config.change.enabled {
+        return Some("change_disabled");
+    }
+    None
 }
 
 fn print_provider_attempts_human(verbose: bool, report: &ProviderStatusReport) {

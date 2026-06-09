@@ -468,6 +468,78 @@ fn cli_manual_next_works_when_paused() {
 }
 
 #[test]
+fn cli_next_dry_run_reports_plan_without_mutating_state() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home) = setup_xdg_home(tmp.path());
+
+    let assert = walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["next", "--dry-run", "--json"])
+        .assert()
+        .success();
+    let value: serde_json::Value =
+        serde_json::from_slice(&assert.get_output().stdout).expect("next dry-run json");
+
+    assert_eq!(value["command"], "next");
+    assert_eq!(value["changed"], false);
+    assert_eq!(value["status"], "would_try_sources");
+    assert_eq!(value["dry_run"], true);
+    assert_eq!(value["next"]["local_candidate_count"], 1);
+    assert_eq!(value["next"]["would_run_backend"], true);
+    assert_eq!(value["next"]["would_update_current"], true);
+    assert_eq!(value["next"]["would_update_history"], true);
+    assert!(value["next"]["sample_local_candidate"]
+        .as_str()
+        .expect("sample candidate")
+        .ends_with("images/a.jpg"));
+    assert!(!state_home.join("walls/state.json").exists());
+    assert!(!state_home.join("walls/events.jsonl").exists());
+
+    walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["current", "--json"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("\"status\": \"missing_current\""));
+}
+
+#[test]
+fn cli_next_dry_run_reports_paused_skip_without_recording_events() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home) = setup_xdg_home(tmp.path());
+
+    walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .arg("toggle-pause")
+        .assert()
+        .success();
+    let state_before = fs::read_to_string(state_home.join("walls/state.json")).unwrap();
+
+    let assert = walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["next", "--dry-run", "--json"])
+        .assert()
+        .success();
+    let value: serde_json::Value =
+        serde_json::from_slice(&assert.get_output().stdout).expect("next dry-run json");
+
+    assert_eq!(value["status"], "would_skip");
+    assert_eq!(value["next"]["skip_reason"], "paused");
+    assert_eq!(value["next"]["would_run_backend"], false);
+    assert_eq!(value["next"]["would_update_current"], false);
+    assert_eq!(value["next"]["would_record_events"], true);
+    assert_eq!(
+        fs::read_to_string(state_home.join("walls/state.json")).unwrap(),
+        state_before
+    );
+    assert!(!state_home.join("walls/events.jsonl").exists());
+}
+
+#[test]
 fn cli_next_json_includes_provider_attempts_for_applied_wallpaper() {
     let tmp = tempfile::tempdir().unwrap();
     let (config_home, state_home) = setup_xdg_home(tmp.path());
