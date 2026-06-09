@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
 
+use crate::recovery;
 use walls_core::bin_resolve::{resolve_binary, BinResolveOpts};
 use walls_core::paths::WallsPaths;
 use walls_core::tray::{decide_tray_action, TrayAction};
@@ -62,7 +63,8 @@ impl EnsureTrayOutcome {
         match self {
             Self::Spawned | Self::AlreadyRunning => None,
             Self::Skipped { reason } => Some(format!(
-                "tray: {reason}; TUI will own rotation while the tray is unavailable"
+                "tray: {}; TUI will own rotation while the tray is unavailable",
+                recovery::tray_skip_with_recovery(reason)
             )),
             Self::Failed { reason } => Some(format!(
                 "tray: {reason}; run `walls tui` directly or fix WALLS_TRAY_BIN"
@@ -375,7 +377,7 @@ mod tests {
         assert_eq!(
             outcome.tui_message(),
             Some(
-                "tray: COSMIC has no tray; TUI will own rotation while the tray is unavailable"
+                "tray: COSMIC has no tray; run `walls doctor` to inspect tray readiness; TUI will own rotation while the tray is unavailable"
                     .into()
             )
         );

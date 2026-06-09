@@ -293,6 +293,26 @@ fn cli_config_sync_dry_run_reports_autostart_write_without_mutating() {
 }
 
 #[test]
+fn cli_config_sync_skipped_output_includes_recovery_hint() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home) = setup_xdg_home(tmp.path());
+
+    walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["config", "sync", "--dry-run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "tray autostart: skipped (tray autostart disabled",
+        ))
+        .stdout(predicate::str::contains(
+            "enable a desktop under tray.autostart.desktops",
+        ))
+        .stdout(predicate::str::contains("walls config sync --dry-run"));
+}
+
+#[test]
 fn cli_doctor_json_reports_ready_checks() {
     let tmp = tempfile::tempdir().unwrap();
     let (config_home, state_home) = setup_xdg_home(tmp.path());
