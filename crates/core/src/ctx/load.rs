@@ -13,6 +13,12 @@ impl WallsCtx {
         Self::load_with_paths(paths)
     }
 
+    pub fn load_without_autostart_sync() -> Result<Self> {
+        let paths =
+            WallsPaths::discover().map_err(|source| WallsError::PathDiscovery { source })?;
+        Self::load_with_paths_and_autostart_sync(paths, false)
+    }
+
     /// Load config/state from a test or alternate root directory.
     pub fn load_from(root: &Path) -> Result<Self> {
         let paths = WallsPaths {
@@ -29,7 +35,14 @@ impl WallsCtx {
         Self::load_with_paths(paths)
     }
 
-    pub fn load_with_paths(mut paths: WallsPaths) -> Result<Self> {
+    pub fn load_with_paths(paths: WallsPaths) -> Result<Self> {
+        Self::load_with_paths_and_autostart_sync(paths, true)
+    }
+
+    fn load_with_paths_and_autostart_sync(
+        mut paths: WallsPaths,
+        sync_autostart: bool,
+    ) -> Result<Self> {
         let config =
             load_or_create_config(&paths.config_file).map_err(|source| WallsError::ConfigLoad {
                 path: paths.config_file.clone(),
@@ -57,8 +70,10 @@ impl WallsCtx {
             provider_status_report: ProviderStatusReport::default(),
         };
         crate::validate::warn_validation_issues(&ctx.config, &ctx.secrets, &ctx.paths);
-        if let Err(err) = crate::autostart::sync_tray_autostart(&ctx.config) {
-            tracing::warn!("tray autostart sync failed: {err:#}");
+        if sync_autostart {
+            if let Err(err) = crate::autostart::sync_tray_autostart(&ctx.config) {
+                tracing::warn!("tray autostart sync failed: {err:#}");
+            }
         }
         Ok(ctx)
     }

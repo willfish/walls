@@ -129,7 +129,11 @@ enum ConfigSub {
         json: bool,
     },
     /// Reconcile derived config artifacts (tray autostart)
-    Sync,
+    Sync {
+        /// Show what would change without writing or removing autostart files
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -269,7 +273,7 @@ async fn main() -> anyhow::Result<()> {
         }) => cmd_trash(dry_run, force, json)?,
         Some(Command::Config { sub }) => match sub {
             ConfigSub::Validate { json } => cmd_config_validate(json)?,
-            ConfigSub::Sync => cmd_config_sync()?,
+            ConfigSub::Sync { dry_run } => cmd_config_sync(dry_run)?,
         },
         #[cfg(feature = "tui")]
         Some(Command::Tui) | None => {
@@ -1141,14 +1145,29 @@ fn cmd_config_validate(json: bool) -> anyhow::Result<()> {
     }
 }
 
-fn cmd_config_sync() -> anyhow::Result<()> {
-    let ctx = WallsCtx::load()?;
-    match walls_core::autostart::sync_tray_autostart(&ctx.config)? {
+fn cmd_config_sync(dry_run: bool) -> anyhow::Result<()> {
+    let ctx = if dry_run {
+        WallsCtx::load_without_autostart_sync()?
+    } else {
+        WallsCtx::load()?
+    };
+    let outcome = if dry_run {
+        walls_core::autostart::dry_run_tray_autostart_sync(&ctx.config)?
+    } else {
+        walls_core::autostart::sync_tray_autostart(&ctx.config)?
+    };
+    match outcome {
         walls_core::autostart::AutostartSyncOutcome::Written => {
             println!("tray autostart: updated");
         }
         walls_core::autostart::AutostartSyncOutcome::Removed => {
             println!("tray autostart: removed");
+        }
+        walls_core::autostart::AutostartSyncOutcome::WouldWrite { path } => {
+            println!("tray autostart: would update {}", path.display());
+        }
+        walls_core::autostart::AutostartSyncOutcome::WouldRemove { path } => {
+            println!("tray autostart: would remove {}", path.display());
         }
         walls_core::autostart::AutostartSyncOutcome::Skipped { reason } => {
             println!("tray autostart: skipped ({reason})");
