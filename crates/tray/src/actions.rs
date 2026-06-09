@@ -361,10 +361,15 @@ mod tests {
 
     #[test]
     fn open_tui_error_message_includes_recovery() {
-        let error = anyhow::anyhow!("terminal not found");
+        let error = anyhow::anyhow!(
+            "failed to launch TUI via TERMINAL: ghostty --class=walls -e /opt/walls/bin/walls tui"
+        )
+        .context("terminal not found");
         let message = open_tui_error_message(&error);
 
         assert!(message.contains("terminal not found"), "{message}");
+        assert!(message.contains("via TERMINAL"), "{message}");
+        assert!(message.contains("ghostty --class=walls"), "{message}");
         assert!(message.contains("walls tui"), "{message}");
         assert!(message.contains("WALLS_TUI_CMD"), "{message}");
     }
