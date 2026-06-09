@@ -102,3 +102,39 @@ fn cli_trash_requires_force_and_dry_run_does_not_delete() {
         .stdout(predicate::str::contains("\"status\": \"trashed\""));
     assert!(!image.exists());
 }
+
+#[test]
+fn cli_trash_without_current_reports_recovery() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home, _image) = setup_xdg_home(tmp.path());
+
+    walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["trash", "--dry-run"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "trash error: no current wallpaper",
+        ))
+        .stderr(predicate::str::contains("walls apply <path>"))
+        .stderr(predicate::str::contains("walls next --manual"));
+
+    let assert = walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["trash", "--dry-run", "--json"])
+        .assert()
+        .failure();
+    let value: serde_json::Value =
+        serde_json::from_slice(&assert.get_output().stdout).expect("trash missing current json");
+
+    assert_eq!(value["command"], "trash");
+    assert_eq!(value["changed"], false);
+    assert_eq!(value["status"], "missing_current");
+    assert_eq!(value["exit_code_reason"], "missing_current");
+    assert!(value["message"]
+        .as_str()
+        .expect("message")
+        .contains("walls apply <path>"));
+}
