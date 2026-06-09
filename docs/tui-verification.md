@@ -20,7 +20,7 @@ scripts/verify-tui-visual.sh
 - Standard terminal, dark background: `walls` (or `walls tui`)
 - Light-background terminal or theme: `WALLS_TUI_COLOR=never walls`
 - No-colour journeys: confirm Config source warnings/missing credentials, Search empty state, edit validation errors, and footer status remain understandable through text labels, markers, and modifiers.
-- Config edit (drill-down): Config tab, j/k to Sources, Enter subnav, j/k pick provider, `e` -> form replaces main content (j/k fields, type, Enter commit, s save with validation flash on error). Wide: split. Narrow: full form. Esc back. Test narrow 50x12, WALLS_TUI_COLOR=never (legible), no stale cells.
+- Config edit (drill-down): Config tab, j/k to Sources, Enter subnav, j/k pick provider, `e` -> form replaces main content. In edit mode, arrow up/down move fields, text keys type into text fields, Space or left/right cycle boolean/choice fields, Enter commits/saves, and Esc cancels/back. Test narrow 50x12, WALLS_TUI_COLOR=never (legible), no stale cells.
 - Normal navigation: left/right switch tabs; `/` opens Search input; Home/End and PageUp/PageDown move History, Browse, Search results, Config blocks, and Config Sources subnav without affecting command/search/edit text entry.
 - Narrow terminal around `42x10`: confirm mode/status and `q` remain visible.
 - Wide terminal around `120x32`: confirm the `Now` tab keeps metadata and preview/fallback regions stable.
