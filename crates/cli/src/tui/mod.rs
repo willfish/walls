@@ -1294,6 +1294,10 @@ fn library_details(app: &App) -> Vec<String> {
         format!("queue: {} items", app.ctx.state.cache_queue.len()),
         format!("history: {} entries", app.ctx.state.history.len()),
         format!("selection: {:?}", app.ctx.config.selection.strategy),
+        format!(
+            "landscape filter: {}",
+            app.ctx.config.selection.use_landscape_enabled
+        ),
         format!("avoid recent: {}", app.ctx.config.selection.avoid_recent),
         format!(
             "refetch below: {} cached",
@@ -1350,6 +1354,11 @@ fn library_detail_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>
         key_value_detail_item(
             "strategy",
             format!("{:?}", app.ctx.config.selection.strategy),
+            theme,
+        ),
+        key_value_detail_item(
+            "landscape filter",
+            app.ctx.config.selection.use_landscape_enabled.to_string(),
             theme,
         ),
         key_value_detail_item(
@@ -2243,6 +2252,7 @@ mod tests {
                     "compose_dir": "/tmp/walls-compose"
                 },
                 "quota": { "enabled": true, "size_mb": 0 },
+                "selection": { "use_landscape_enabled": false },
                 "apply": { "backend": "auto" },
                 "display": { "mode": "os" },
                 "sources": []
@@ -2281,6 +2291,7 @@ mod tests {
         assert!(text.contains("─ cache state"), "{text}");
         assert!(text.contains("─ selection"), "{text}");
         assert!(text.contains("strategy            : Random"), "{text}");
+        assert!(text.contains("landscape filter    : false"), "{text}");
         assert!(text.contains("avoid recent        : 50"), "{text}");
         assert!(
             text.contains("! quota.size_mb: must be greater than zero"),
@@ -3816,7 +3827,7 @@ mod tests {
                 "change": { "enabled": true, "interval_secs": 60, "internet_enabled": true },
                 "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
                 "quota": { "enabled": true, "size_mb": 1000 },
-                "selection": { "avoid_recent": 50, "refetch_when_cache_below": 5, "strategy": "random" },
+                "selection": { "use_landscape_enabled": true, "avoid_recent": 50, "refetch_when_cache_below": 5, "strategy": "random" },
                 "sources": []
             }),
             serde_json::json!({}),
@@ -3857,6 +3868,19 @@ mod tests {
             app.message
         );
 
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to landscape");
+        {
+            let editing = app.editing.as_ref().expect("editing");
+            assert_eq!(editing.field_buffer, "true");
+            assert_eq!(app.current_edit_field_kind(), EditFieldKind::Bool);
+        }
+        update(
+            &mut app,
+            UiAction::EditFieldCycle { forward: true },
+            rt.handle(),
+        )
+        .expect("toggle landscape filter");
+
         update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to avoid recent");
         {
             let editing = app.editing.as_mut().expect("editing");
@@ -3873,9 +3897,11 @@ mod tests {
         }
         update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save refetch");
 
+        assert!(!app.ctx.config.selection.use_landscape_enabled);
         assert_eq!(app.ctx.config.selection.avoid_recent, 12);
         assert_eq!(app.ctx.config.selection.refetch_when_cache_below, 2);
         let text = std::fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
+        assert!(text.contains("\"use_landscape_enabled\": false"), "{text}");
         assert!(text.contains("\"avoid_recent\": 12"), "{text}");
         assert!(text.contains("\"refetch_when_cache_below\": 2"), "{text}");
     }
