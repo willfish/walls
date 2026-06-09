@@ -49,6 +49,17 @@ fn walls_cmd() -> Command {
     Command::new(cargo_bin("walls"))
 }
 
+fn write_event_journal(state_home: &std::path::Path, events: &[serde_json::Value]) {
+    let journal = state_home.join("walls").join("events.jsonl");
+    let lines = events
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+        .join("\n");
+    fs::write(journal, format!("{lines}\n")).unwrap();
+}
+
 #[test]
 fn cli_status_json_shows_paused_flag() {
     let tmp = tempfile::tempdir().unwrap();
@@ -101,6 +112,115 @@ fn cli_status_json_includes_desktop_tray_and_apply_diagnostics() {
     );
     assert_eq!(value["desktop"]["tray"]["autostart"]["desktop"], "GNOME");
     assert_eq!(value["desktop"]["tray"]["autostart"]["available"], true);
+}
+
+#[test]
+fn cli_status_surfaces_last_run_summary_in_human_and_json_output() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home) = setup_xdg_home(tmp.path());
+    write_event_journal(
+        &state_home,
+        &[
+            serde_json::json!({
+                "timestamp_unix": 100,
+                "kind": "provider_attempt",
+                "attempt": {
+                    "provider_id": "wallhaven",
+                    "provider_kind": "wallhaven",
+                    "operation": "advance_next",
+                    "status": "enabled",
+                    "retries": [],
+                    "outcome": {
+                        "result": "no_candidates",
+                        "reason": "queue_empty",
+                        "candidate_count": 0
+                    },
+                    "fallback_provider_id": "local"
+                }
+            }),
+            serde_json::json!({
+                "timestamp_unix": 110,
+                "kind": "apply",
+                "trigger": "manual",
+                "original_path": "/walls/one.jpg",
+                "composed_path": "/walls/composed-one.jpg",
+                "provider": "local"
+            }),
+        ],
+    );
+
+    walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "last run: applied manual wallpaper from local at 110",
+        ))
+        .stdout(predicate::str::contains(
+            "last warning: wallhaven: queue empty",
+        ));
+
+    let assert = walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["status", "--json"])
+        .assert()
+        .success();
+    let value: serde_json::Value =
+        serde_json::from_slice(&assert.get_output().stdout).expect("status json");
+
+    assert_eq!(value["last_run"]["status"], "applied");
+    assert_eq!(value["last_run"]["trigger"], "manual");
+    assert_eq!(value["last_run"]["applied_path"], "/walls/one.jpg");
+    assert_eq!(value["last_run"]["warnings"][0], "wallhaven: queue empty");
+}
+
+#[test]
+fn cli_status_reports_last_apply_backend_failure() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home) = setup_xdg_home(tmp.path());
+    write_event_journal(
+        &state_home,
+        &[serde_json::json!({
+            "timestamp_unix": 120,
+            "kind": "apply_failed",
+            "trigger": "manual",
+            "original_path": "/walls/one.jpg",
+            "composed_path": "/walls/composed-one.jpg",
+            "provider": "local",
+            "message": "custom apply script failed"
+        })],
+    );
+
+    walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "last run: failed to apply manual wallpaper at 120",
+        ))
+        .stdout(predicate::str::contains(
+            "last error: apply backend: custom apply script failed",
+        ));
+
+    let assert = walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["status", "--json"])
+        .assert()
+        .success();
+    let value: serde_json::Value =
+        serde_json::from_slice(&assert.get_output().stdout).expect("status json");
+
+    assert_eq!(value["last_run"]["status"], "failed");
+    assert_eq!(
+        value["last_run"]["errors"][0],
+        "apply backend: custom apply script failed"
+    );
 }
 
 #[test]
@@ -241,6 +361,57 @@ fn cli_doctor_fails_with_remediation_for_invalid_config() {
             "[fail] config.validation.sources[0].path",
         ))
         .stdout(predicate::str::contains("fix: create the path"));
+}
+
+#[test]
+fn cli_doctor_reports_recent_last_run_failure_without_leaking_secrets() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home) = setup_xdg_home(tmp.path());
+    write_event_journal(
+        &state_home,
+        &[serde_json::json!({
+            "timestamp_unix": 200,
+            "kind": "provider_attempt",
+            "attempt": {
+                "provider_id": "wallhaven",
+                "provider_kind": "wallhaven",
+                "operation": "advance_next",
+                "status": "enabled",
+                "retries": [],
+                "outcome": {
+                    "result": "failed",
+                    "kind": "request",
+                    "status_code": 401,
+                    "message": "[redacted]"
+                },
+                "fallback_provider_id": "local"
+            }
+        })],
+    );
+
+    let assert = walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .env("WALLS_TRAY", "0")
+        .args(["doctor", "--json"])
+        .assert()
+        .failure();
+    let value: serde_json::Value =
+        serde_json::from_slice(&assert.get_output().stdout).expect("doctor json");
+    let checks = value["checks"].as_array().expect("checks");
+
+    assert!(checks
+        .iter()
+        .any(|check| { check["id"] == "providers.last_run.failed" && check["status"] == "fail" }));
+    assert!(checks.iter().any(|check| {
+        check["id"] == "providers.last_run.error"
+            && check["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("[redacted]"))
+    }));
+    assert!(!serde_json::to_string(&value)
+        .unwrap()
+        .contains("super-secret-token"));
 }
 
 #[test]

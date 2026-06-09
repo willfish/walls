@@ -2139,7 +2139,7 @@ fn render_rich_edit(f: &mut Frame, area: Rect, app: &App, theme: style::Theme, b
 }
 
 fn now_lines(app: &App) -> Vec<String> {
-    match &app.ctx.state.current {
+    let mut lines = match &app.ctx.state.current {
         Some(c) => vec![
             format!("source: {}", c.source_id),
             format!("wallhaven: {:?}", c.wallhaven_id),
@@ -2151,7 +2151,26 @@ fn now_lines(app: &App) -> Vec<String> {
             style::state_text(style::StateKind::Empty, "no current wallpaper"),
             app.message.clone(),
         ],
+    };
+    lines.extend(last_run_lines(app));
+    lines
+}
+
+fn last_run_lines(app: &App) -> Vec<String> {
+    let Ok(events) = walls_core::events::read_events(&app.ctx.paths.event_journal_file) else {
+        return vec!["last run: unavailable".into()];
+    };
+    let Some(summary) = walls_core::events::last_run_summary(&events) else {
+        return vec!["last run: (none)".into()];
+    };
+    let mut lines = vec![format!("last run: {}", summary.message)];
+    if let Some(warning) = summary.warnings.first() {
+        lines.push(format!("last warning: {warning}"));
     }
+    if let Some(error) = summary.errors.first() {
+        lines.push(format!("last error: {error}"));
+    }
+    lines
 }
 
 #[cfg(test)]
@@ -2206,6 +2225,19 @@ mod tests {
         app.ctx.state.history = vec![original.display().to_string()];
         app.ctx.state.cache_queue = vec!["wh-current".into()];
         app.ctx.save_state().expect("save current state");
+    }
+
+    fn write_tui_journal(app: &App, events: &[serde_json::Value]) {
+        if let Some(parent) = app.ctx.paths.event_journal_file.parent() {
+            fs::create_dir_all(parent).expect("journal parent");
+        }
+        let lines = events
+            .iter()
+            .map(serde_json::to_string)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("event json")
+            .join("\n");
+        fs::write(&app.ctx.paths.event_journal_file, format!("{lines}\n")).expect("write journal");
     }
 
     fn test_app_with_sources(tmp: tempfile::TempDir, sources: serde_json::Value) -> App {
@@ -3177,6 +3209,65 @@ mod tests {
         app.tab = Tab::Logs;
         let logs = render_text(&app, 90, 18);
         assert!(logs.contains("[empty] no logs captured yet"), "{logs}");
+    }
+
+    #[test]
+    fn now_tab_surfaces_last_run_summary_without_log_clutter() {
+        let mut app = test_app();
+        app.tab = Tab::Now;
+        write_tui_journal(
+            &app,
+            &[
+                serde_json::json!({
+                    "timestamp_unix": 100,
+                    "kind": "provider_attempt",
+                    "attempt": {
+                        "provider_id": "wallhaven",
+                        "provider_kind": "wallhaven",
+                        "operation": "advance_next",
+                        "status": "enabled",
+                        "retries": [],
+                        "outcome": {
+                            "result": "failed",
+                            "kind": "request",
+                            "status_code": 401,
+                            "message": "[redacted]"
+                        },
+                        "fallback_provider_id": "local"
+                    }
+                }),
+                serde_json::json!({
+                    "timestamp_unix": 110,
+                    "kind": "provider_attempt",
+                    "attempt": {
+                        "provider_id": "local",
+                        "provider_kind": "local",
+                        "operation": "advance_next",
+                        "status": "enabled",
+                        "retries": [],
+                        "outcome": {
+                            "result": "no_candidates",
+                            "reason": "empty_result",
+                            "candidate_count": 0
+                        },
+                        "fallback_provider_id": null
+                    }
+                }),
+            ],
+        );
+
+        let text = render_text(&app, 90, 18);
+
+        assert!(
+            text.contains("last run: failed before applying a wallpaper"),
+            "{text}"
+        );
+        assert!(text.contains("last warning: local: empty result"), "{text}");
+        assert!(
+            text.contains("last error: wallhaven: request failed HTTP 401 ([redacted])"),
+            "{text}"
+        );
+        assert!(!text.contains("super-secret-token"), "{text}");
     }
 
     #[test]

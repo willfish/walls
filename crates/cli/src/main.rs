@@ -8,7 +8,7 @@ use walls_core::apply::ApplyTrigger;
 use walls_core::apply::{backend_setting_label, desktop_display_name, summarize_apply_environment};
 use walls_core::doctor::{DoctorOptions, DoctorReport, DoctorSection, DoctorStatus};
 use walls_core::downloads::{NukeDownloadsMode, NukeDownloadsPlan};
-use walls_core::events::{read_events, EventKind, EventRecord};
+use walls_core::events::{last_run_summary, read_events, EventKind, EventRecord, LastRunSummary};
 use walls_core::providers::{
     ProviderAttempt, ProviderAttemptOutcome, ProviderFailureKind, ProviderKind,
     ProviderNoCandidateReason, ProviderOperation, ProviderRetryReason, ProviderStatus,
@@ -342,6 +342,7 @@ fn cmd_apply(path: PathBuf) -> anyhow::Result<()> {
 
 fn cmd_status(json: bool) -> anyhow::Result<()> {
     let ctx = WallsCtx::load()?;
+    let last_run = read_last_run_summary(&ctx)?;
     if json {
         println!(
             "{}",
@@ -351,6 +352,7 @@ fn cmd_status(json: bool) -> anyhow::Result<()> {
                 "history_len": ctx.state.history.len(),
                 "cache_queue_len": ctx.state.cache_queue.len(),
                 "desktop": desktop_status_json(&ctx),
+                "last_run": last_run,
             }))?
         );
     } else {
@@ -362,8 +364,38 @@ fn cmd_status(json: bool) -> anyhow::Result<()> {
         }
         println!("history: {} entries", ctx.state.history.len());
         println!("cache queue: {} entries", ctx.state.cache_queue.len());
+        print_last_run_human(last_run.as_ref());
     }
     Ok(())
+}
+
+fn read_last_run_summary(ctx: &WallsCtx) -> anyhow::Result<Option<LastRunSummary>> {
+    let events = read_events(&ctx.paths.event_journal_file)
+        .with_context(|| format!("read {}", ctx.paths.event_journal_file.display()))?;
+    Ok(last_run_summary(&events))
+}
+
+fn print_last_run_human(last_run: Option<&LastRunSummary>) {
+    let Some(last_run) = last_run else {
+        println!("last run: (none)");
+        return;
+    };
+    println!(
+        "last run: {} at {}",
+        last_run.message, last_run.timestamp_unix
+    );
+    if let Some(path) = &last_run.applied_path {
+        println!("last applied: {path}");
+    }
+    if let Some(reason) = &last_run.no_change_reason {
+        println!("last no-change reason: {reason}");
+    }
+    for warning in &last_run.warnings {
+        println!("last warning: {warning}");
+    }
+    for error in &last_run.errors {
+        println!("last error: {error}");
+    }
 }
 
 fn cmd_logs(
@@ -430,6 +462,11 @@ fn log_event_provider_labels(event: &EventRecord) -> Vec<String> {
             ..
         } => vec![provider.to_ascii_lowercase()],
         EventKind::Apply { provider: None, .. } => vec!["local".into()],
+        EventKind::ApplyFailed {
+            provider: Some(provider),
+            ..
+        } => vec![provider.to_ascii_lowercase()],
+        EventKind::ApplyFailed { provider: None, .. } => vec!["local".into()],
         EventKind::ProviderAttempt { attempt } => vec![
             attempt.provider_id.to_ascii_lowercase(),
             provider_kind_label(attempt.provider_kind).to_string(),
@@ -440,6 +477,7 @@ fn log_event_provider_labels(event: &EventRecord) -> Vec<String> {
 fn log_event_level(event: &EventRecord) -> CliLogLevel {
     match &event.kind {
         EventKind::Apply { .. } => CliLogLevel::Info,
+        EventKind::ApplyFailed { .. } => CliLogLevel::Error,
         EventKind::ProviderAttempt { attempt } => match &attempt.outcome {
             ProviderAttemptOutcome::Failed { .. } => CliLogLevel::Error,
             ProviderAttemptOutcome::Skipped { .. }
@@ -466,6 +504,22 @@ fn log_event_line(event: &EventRecord) -> String {
             provider.as_deref().unwrap_or("local"),
             original_path,
             composed_path
+        ),
+        EventKind::ApplyFailed {
+            trigger,
+            original_path,
+            composed_path,
+            provider,
+            message,
+        } => format!(
+            "{}\t{}\tapply_failed\ttrigger={}\tprovider={}\toriginal={}\tcomposed={}\terror={}",
+            event.timestamp_unix,
+            log_event_level(event).label(),
+            apply_trigger_label(*trigger),
+            provider.as_deref().unwrap_or("local"),
+            original_path,
+            composed_path.as_deref().unwrap_or("(none)"),
+            message
         ),
         EventKind::ProviderAttempt { attempt } => format!(
             "{}\t{}\tprovider\t{}",
@@ -529,6 +583,13 @@ fn log_event_message(event: &EventRecord) -> String {
             "applied {} wallpaper from {}",
             apply_trigger_label(*trigger),
             original_path
+        ),
+        EventKind::ApplyFailed {
+            trigger, message, ..
+        } => format!(
+            "failed to apply {} wallpaper: {}",
+            apply_trigger_label(*trigger),
+            message
         ),
         EventKind::ProviderAttempt { attempt } => provider_attempt_line(attempt),
     }
