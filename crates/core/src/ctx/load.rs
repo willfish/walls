@@ -2,6 +2,7 @@ use super::WallsCtx;
 use crate::config::{load_or_create_config, load_secrets};
 use crate::error::{Result, WallsError};
 use crate::paths::WallsPaths;
+use crate::providers::ProviderStatusReport;
 use crate::state::State;
 use std::path::Path;
 
@@ -53,6 +54,7 @@ impl WallsCtx {
             config,
             secrets,
             state,
+            provider_status_report: ProviderStatusReport::default(),
         };
         crate::validate::warn_validation_issues(&ctx.config, &ctx.secrets, &ctx.paths);
         if let Err(err) = crate::autostart::sync_tray_autostart(&ctx.config) {

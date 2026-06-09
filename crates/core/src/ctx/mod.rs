@@ -1,5 +1,6 @@
 use crate::config::{Config, Secrets};
 use crate::paths::WallsPaths;
+use crate::providers::ProviderStatusReport;
 use crate::state::State;
 use std::str::FromStr;
 
@@ -52,4 +53,5 @@ pub struct WallsCtx {
     pub config: Config,
     pub secrets: Secrets,
     pub state: State,
+    pub provider_status_report: ProviderStatusReport,
 }

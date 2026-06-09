@@ -1,5 +1,8 @@
 use std::fs;
 
+use walls_core::providers::{
+    ProviderAttemptOutcome, ProviderKind, ProviderNoCandidateReason, ProviderStatus,
+};
 use walls_core::WallsCtx;
 
 fn write_test_config(
@@ -105,6 +108,16 @@ async fn advance_next_skips_when_paused() {
     ctx.set_paused(true).unwrap();
     let applied = ctx.advance_next().await.unwrap();
     assert!(applied.is_none());
+    assert!(ctx
+        .provider_status_report
+        .attempts
+        .iter()
+        .any(|attempt| matches!(
+            attempt.outcome,
+            ProviderAttemptOutcome::Skipped {
+                reason: ProviderNoCandidateReason::Disabled
+            }
+        )));
 }
 
 #[tokio::test]
@@ -127,6 +140,75 @@ async fn advance_next_returns_none_when_local_sources_are_empty() {
     assert!(applied.is_none());
     assert!(ctx.state.current.is_none());
     assert!(ctx.state.history.is_empty());
+    assert!(ctx.provider_status_report.attempts.iter().any(|attempt| {
+        attempt.provider_id == "local"
+            && matches!(
+                attempt.outcome,
+                ProviderAttemptOutcome::NoCandidates {
+                    reason: ProviderNoCandidateReason::EmptyResult,
+                    candidate_count: Some(0)
+                }
+            )
+    }));
+}
+
+#[tokio::test]
+async fn advance_next_reports_missing_unsplash_credentials() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    fs::create_dir_all(&images).unwrap();
+    let noop = root.path().join("noop.sh");
+    fs::write(&noop, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&noop, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let config = serde_json::json!({
+        "change": { "enabled": true, "internet_enabled": true },
+        "paths": {
+            "cache_dir": root.path().join("cache").display().to_string(),
+            "download_dir": root.path().join("downloaded").display().to_string(),
+            "favorites_dir": root.path().join("favorites").display().to_string(),
+            "fetched_dir": root.path().join("fetched").display().to_string(),
+            "compose_dir": root.path().join("wallpaper").display().to_string(),
+        },
+        "apply": {
+            "backend": "custom-script",
+            "custom_script": noop.display().to_string(),
+        },
+        "display": { "mode": "os" },
+        "wallhaven": { "enabled": false },
+        "sources": [
+            { "enabled": true, "type": "unsplash", "query": "forest" }
+        ],
+    });
+    fs::write(
+        root.path().join("config.json"),
+        serde_json::to_string_pretty(&config).unwrap(),
+    )
+    .unwrap();
+    fs::write(root.path().join("secrets.json"), "{}").unwrap();
+
+    let mut ctx = WallsCtx::load_from(root.path()).unwrap();
+    let applied = ctx.advance_next().await.unwrap();
+
+    assert!(applied.is_none());
+    let unsplash = ctx
+        .provider_status_report
+        .attempts
+        .iter()
+        .find(|attempt| attempt.provider_kind == ProviderKind::Unsplash)
+        .expect("unsplash attempt");
+    assert_eq!(unsplash.status, ProviderStatus::CredentialMissing);
+    assert_eq!(unsplash.fallback_provider_id.as_deref(), Some("wallhaven"));
+    assert_eq!(
+        unsplash.outcome,
+        ProviderAttemptOutcome::Skipped {
+            reason: ProviderNoCandidateReason::CredentialMissing
+        }
+    );
 }
 
 #[tokio::test]
