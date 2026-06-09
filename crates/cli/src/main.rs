@@ -397,6 +397,14 @@ fn cmd_apply(path: PathBuf, dry_run: bool, json: bool) -> anyhow::Result<()> {
         }
         return Ok(());
     }
+    if !path.exists() {
+        if json {
+            print_json(apply_missing_original_json(&path))?;
+        } else {
+            eprintln!("{}", recovery::missing_apply_original(&path));
+        }
+        std::process::exit(1);
+    }
     let mut ctx = WallsCtx::load()?;
     ctx.apply_file(&path, ApplyTrigger::Manual)?;
     if json {
@@ -414,6 +422,24 @@ fn cmd_apply(path: PathBuf, dry_run: bool, json: bool) -> anyhow::Result<()> {
         println!("{}", path.display());
     }
     Ok(())
+}
+
+fn apply_missing_original_json(path: &std::path::Path) -> serde_json::Value {
+    serde_json::json!({
+        "command": "apply",
+        "changed": false,
+        "status": "missing_original",
+        "dry_run": false,
+        "apply": {
+            "original_path": path,
+            "original_exists": false,
+            "would_run_backend": false,
+            "would_update_current": false,
+            "would_update_history": false,
+            "would_record_event": false,
+        },
+        "exit_code_reason": "missing_original",
+    })
 }
 
 fn apply_dry_run_json(ctx: &WallsCtx, path: &std::path::Path) -> serde_json::Value {
