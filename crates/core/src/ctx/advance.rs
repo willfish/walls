@@ -1,5 +1,9 @@
 use super::WallsCtx;
 use crate::apply::ApplyTrigger;
+use crate::providers::{
+    ProviderAttempt, ProviderCapability, ProviderDescriptor, ProviderFailureKind, ProviderKind,
+    ProviderNoCandidateReason, ProviderOperation, ProviderStatus, ProviderStatusReport,
+};
 use crate::state::State;
 use rand::RngExt;
 use std::collections::HashSet;
@@ -48,6 +52,7 @@ impl WallsCtx {
     async fn advance_next_mode(&mut self, mode: AdvanceMode) -> anyhow::Result<Option<PathBuf>> {
         let _lock = crate::lock::StateLock::acquire(&self.paths.state_file)?;
         self.state = State::load_or_default(&self.paths.state_file)?;
+        self.provider_status_report = ProviderStatusReport::default();
         AdvanceNext::new(self, mode).run().await
     }
 
@@ -89,6 +94,7 @@ impl<'ctx> AdvanceNext<'ctx> {
     async fn run(&mut self) -> anyhow::Result<Option<PathBuf>> {
         if self.should_skip() {
             tracing::info!("skipped: paused or change disabled");
+            self.record_all_skipped(ProviderNoCandidateReason::Disabled);
             return Ok(None);
         }
 
@@ -146,13 +152,35 @@ impl<'ctx> AdvanceNext<'ctx> {
     }
 
     async fn apply_wallhaven_queue(&mut self) -> anyhow::Result<Option<PathBuf>> {
-        if !self.wallhaven_enabled() {
+        let provider = crate::providers::wallhaven_provider(&self.ctx.config, &self.ctx.secrets);
+        if !provider.enabled {
+            let reason = if self.ctx.config.change.internet_enabled {
+                ProviderNoCandidateReason::Disabled
+            } else {
+                ProviderNoCandidateReason::OfflineDisabled
+            };
+            let status = if reason == ProviderNoCandidateReason::OfflineDisabled {
+                ProviderStatus::OfflineDisabled
+            } else {
+                ProviderStatus::Disabled
+            };
+            self.record(
+                provider
+                    .attempt(ProviderOperation::QueueRefill)
+                    .with_status(status)
+                    .skipped(reason)
+                    .with_fallback("bing"),
+            );
             return Ok(None);
         }
 
-        let provider = crate::providers::wallhaven_provider(&self.ctx.config, &self.ctx.secrets);
         let client = self.wallhaven_client()?;
         if let Some(path) = self.apply_wallhaven_queue_head(&client, &provider).await? {
+            self.record(
+                provider
+                    .attempt(ProviderOperation::AdvanceNext)
+                    .applied(None),
+            );
             return Ok(Some(path));
         }
 
@@ -169,13 +197,34 @@ impl<'ctx> AdvanceNext<'ctx> {
                     error = %error,
                     "wallhaven: queue refill failed, trying next source"
                 );
+                self.record(
+                    provider
+                        .attempt(ProviderOperation::QueueRefill)
+                        .failed(ProviderFailureKind::Unknown, None, Some(error.to_string()))
+                        .with_fallback("bing"),
+                );
             }
         }
-        self.apply_wallhaven_queue_head(&client, &provider).await
-    }
-
-    fn wallhaven_enabled(&self) -> bool {
-        crate::providers::wallhaven_provider(&self.ctx.config, &self.ctx.secrets).enabled
+        let applied = self.apply_wallhaven_queue_head(&client, &provider).await?;
+        if applied.is_some() {
+            self.record(
+                provider
+                    .attempt(ProviderOperation::AdvanceNext)
+                    .applied(None),
+            );
+        } else if !self
+            .ctx
+            .provider_status_report
+            .attempted_provider(&provider.id)
+        {
+            self.record(
+                provider
+                    .attempt(ProviderOperation::QueueRefill)
+                    .no_candidates(ProviderNoCandidateReason::QueueEmpty, Some(0))
+                    .with_fallback("bing"),
+            );
+        }
+        Ok(applied)
     }
 
     fn wallhaven_client(&self) -> anyhow::Result<crate::wallhaven::WallhavenClient> {
@@ -223,12 +272,26 @@ impl<'ctx> AdvanceNext<'ctx> {
     }
 
     async fn apply_unsplash_queue(&mut self) -> anyhow::Result<Option<PathBuf>> {
-        if !self.unsplash_enabled() {
+        let provider = crate::providers::unsplash_provider(&self.ctx.config, &self.ctx.secrets);
+        if !provider.enabled {
+            let (status, reason) = self.unsplash_unavailable_reason();
+            self.record(
+                provider
+                    .attempt(ProviderOperation::QueueRefill)
+                    .with_status(status)
+                    .skipped(reason)
+                    .with_fallback("wallhaven"),
+            );
             return Ok(None);
         }
 
         let client = self.unsplash_client()?;
         if let Some(path) = self.apply_unsplash_queue_head(&client).await? {
+            self.record(
+                provider
+                    .attempt(ProviderOperation::AdvanceNext)
+                    .applied(None),
+            );
             return Ok(Some(path));
         }
 
@@ -241,17 +304,53 @@ impl<'ctx> AdvanceNext<'ctx> {
                     error = %error,
                     "unsplash: queue refill failed, trying next source"
                 );
+                self.record(
+                    provider
+                        .attempt(ProviderOperation::QueueRefill)
+                        .failed(ProviderFailureKind::Unknown, None, Some(error.to_string()))
+                        .with_fallback("wallhaven"),
+                );
             }
         }
-        self.apply_unsplash_queue_head(&client).await
+        let applied = self.apply_unsplash_queue_head(&client).await?;
+        if applied.is_some() {
+            self.record(
+                provider
+                    .attempt(ProviderOperation::AdvanceNext)
+                    .applied(None),
+            );
+        } else if !self
+            .ctx
+            .provider_status_report
+            .attempted_provider(&provider.id)
+        {
+            self.record(
+                provider
+                    .attempt(ProviderOperation::QueueRefill)
+                    .no_candidates(ProviderNoCandidateReason::QueueEmpty, Some(0))
+                    .with_fallback("wallhaven"),
+            );
+        }
+        Ok(applied)
     }
 
-    fn unsplash_enabled(&self) -> bool {
-        self.ctx.config.change.internet_enabled
-            && !self.ctx.secrets.unsplash_access_key.is_empty()
-            && crate::unsplash::enabled_unsplash_sources(&self.ctx.config.sources)
-                .next()
-                .is_some()
+    fn unsplash_unavailable_reason(&self) -> (ProviderStatus, ProviderNoCandidateReason) {
+        if !self.ctx.config.change.internet_enabled {
+            return (
+                ProviderStatus::OfflineDisabled,
+                ProviderNoCandidateReason::OfflineDisabled,
+            );
+        }
+        if self.ctx.secrets.unsplash_access_key.is_empty() {
+            return (
+                ProviderStatus::CredentialMissing,
+                ProviderNoCandidateReason::CredentialMissing,
+            );
+        }
+        (
+            ProviderStatus::Disabled,
+            ProviderNoCandidateReason::NoEnabledSource,
+        )
     }
 
     fn unsplash_client(&self) -> anyhow::Result<crate::unsplash::UnsplashClient> {
@@ -330,19 +429,41 @@ impl<'ctx> AdvanceNext<'ctx> {
     }
 
     fn apply_local_candidate(&mut self) -> anyhow::Result<Option<PathBuf>> {
+        let provider = local_provider();
         let mut picker = LocalCandidatePicker::new(
             &self.ctx.state.history,
             self.ctx.config.selection.avoid_recent,
         );
         self.ctx
             .for_each_local_candidate(|path| picker.consider(path))?;
+        let candidate_count = picker.seen_any;
         let Some(path) = picker.finish() else {
             tracing::info!("no wallpaper candidates");
+            self.record(provider.no_candidates(
+                ProviderNoCandidateReason::EmptyResult,
+                Some(candidate_count),
+            ));
             return Ok(None);
         };
         self.ctx
             .apply_file_inner(&path, ApplyTrigger::Auto, None, true)?;
+        self.record(provider.applied(Some(candidate_count)));
         Ok(Some(path))
+    }
+
+    fn record(&mut self, attempt: ProviderAttempt) {
+        self.ctx.provider_status_report.push(attempt);
+    }
+
+    fn record_all_skipped(&mut self, reason: ProviderNoCandidateReason) {
+        let providers = crate::providers::configured_providers(&self.ctx.config, &self.ctx.secrets);
+        for provider in providers {
+            self.record(
+                provider
+                    .attempt(ProviderOperation::AdvanceNext)
+                    .skipped(reason),
+            );
+        }
     }
 
     fn cached_wallhaven_path(&self, id: &str) -> Option<PathBuf> {
@@ -587,4 +708,14 @@ impl<'recent> LocalCandidatePicker<'recent> {
 fn should_replace_reservoir(seen: usize) -> anyhow::Result<bool> {
     let upper = u64::try_from(seen)?;
     Ok(rand::rng().random_range(0..upper) == 0)
+}
+
+fn local_provider() -> ProviderAttempt {
+    ProviderDescriptor {
+        id: "local".into(),
+        kind: ProviderKind::Local,
+        enabled: true,
+        capabilities: vec![ProviderCapability::ConfigValidation],
+    }
+    .attempt(ProviderOperation::LocalSourceListing)
 }
