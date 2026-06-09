@@ -2,6 +2,7 @@ mod app;
 mod chrome_view;
 mod command;
 mod history_browse_view;
+mod layout_size;
 mod line_view;
 mod logs_view;
 mod now_view;
@@ -19,6 +20,7 @@ use app::{
     App, InputMode, Tab, CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION,
     CONFIG_BLOCK_SOURCES, CONFIG_BLOCK_TUI,
 };
+use layout_size::{terminal_size, TerminalSize};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
 use ratatui::text::{Line, Span};
@@ -156,26 +158,6 @@ enum UpdateEffect {
     None,
     Reload,
     Quit,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TerminalSize {
-    Tiny,
-    Narrow,
-    Standard,
-    Wide,
-}
-
-fn terminal_size(area: Rect) -> TerminalSize {
-    if area.width < 10 || area.height < 6 {
-        TerminalSize::Tiny
-    } else if area.width < 50 || area.height < 12 {
-        TerminalSize::Narrow
-    } else if area.width >= 100 && area.height >= 18 {
-        TerminalSize::Wide
-    } else {
-        TerminalSize::Standard
-    }
 }
 
 fn handle_key(app: &mut App, key: KeyEvent, rt: &tokio::runtime::Handle) -> anyhow::Result<bool> {

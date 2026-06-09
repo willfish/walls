@@ -4,7 +4,11 @@ use ratatui::prelude::*;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use super::{app::App, style, terminal_size, TerminalSize};
+use super::{
+    app::App,
+    layout_size::{terminal_size, TerminalSize},
+    style,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct StartupIntro {
