@@ -10,9 +10,10 @@ mod startup;
 mod style;
 
 use std::io::{stdout, IsTerminal};
+use std::process::Command;
 use std::thread;
 
-use crate::tui::app::EditTarget;
+use crate::tui::app::{EditTarget, OpenTarget};
 use anyhow::Context;
 use app::{
     App, InputMode, Tab, CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION,
@@ -243,6 +244,7 @@ enum UiAction {
     Prev,
     Favorite,
     Trash,
+    OpenSelected,
     TrashConfirm,
     CancelTrash,
     NukeDownloadsRequest,
@@ -421,6 +423,7 @@ fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
         KeyCode::Char('p') => UiAction::Prev,
         KeyCode::Char('f') => UiAction::Favorite,
         KeyCode::Char('d') => UiAction::Trash,
+        KeyCode::Char('o') => UiAction::OpenSelected,
         _ if is_shift_x(key) => UiAction::NukeDownloadsRequest,
         KeyCode::Char(' ') => UiAction::TogglePause,
         KeyCode::Char('t') if app.tab == Tab::Config => UiAction::ToggleConfigValue,
@@ -540,6 +543,14 @@ fn update(
                 style::StatusKind::Error,
                 crate::recovery::favorite_error(&e),
             ),
+        },
+        UiAction::OpenSelected => match open_selected(app) {
+            Ok(Some(message)) => app.set_message(style::StatusKind::Success, message),
+            Ok(None) => app.set_message(
+                style::StatusKind::Warning,
+                "open: nothing openable under cursor",
+            ),
+            Err(error) => app.set_message(style::StatusKind::Error, format!("open error: {error}")),
         },
         UiAction::Trash => {
             let prompt = app.trash_current_prompt();
@@ -747,6 +758,53 @@ fn update(
         UiAction::Ignore => {}
     }
     Ok(UpdateEffect::None)
+}
+
+fn open_selected(app: &App) -> anyhow::Result<Option<String>> {
+    let Some(target) = app.selected_open_target() else {
+        return Ok(None);
+    };
+    spawn_open_target(&target)?;
+    Ok(Some(format!("opened: {}", target.display_value())))
+}
+
+fn spawn_open_target(target: &OpenTarget) -> anyhow::Result<()> {
+    let command = open_command(target);
+    Command::new(&command.program).args(&command.args).spawn()?;
+    Ok(())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct OpenCommand {
+    program: String,
+    args: Vec<String>,
+}
+
+fn open_command(target: &OpenTarget) -> OpenCommand {
+    let value = target.display_value();
+    #[cfg(target_os = "macos")]
+    {
+        OpenCommand {
+            program: "open".into(),
+            args: vec![value],
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        OpenCommand {
+            program: "cmd".into(),
+            args: vec!["/C".into(), "start".into(), "".into(), value],
+        }
+    }
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        OpenCommand {
+            program: "xdg-open".into(),
+            args: vec![value],
+        }
+    }
 }
 
 fn apply_effect(app: &mut App, effect: UpdateEffect) -> anyhow::Result<()> {
@@ -1004,7 +1062,7 @@ fn key_help_lines(app: &App, width: u16) -> Vec<String> {
     let mut lines = vec![
         "Global".into(),
         "  Esc/q close help".into(),
-        "  ? help   q quit   n/p next/prev   Space pause".into(),
+        "  ? help   q quit   o open selected   n/p next/prev   Space pause".into(),
         "  f favorite current   d request trash current   Shift+X reset provider storage".into(),
         "Tabs and lists".into(),
         "  Emacs: 1-6 or ←/→ tabs   j/k or ↑/↓ move".into(),
@@ -2241,8 +2299,9 @@ mod tests {
 
     use super::{
         action_for_key,
-        app::{App, EditFieldKind, SearchHit},
+        app::{App, EditFieldKind, OpenTarget, SearchHit},
         apply_effect, draw_inner, footer_keys, footer_paragraph, handle_key, line_style,
+        open_command,
         startup::{draw_startup_intro, intro_disabled_value, StartupIntro},
         style, update, EditTarget, InputMode, Tab, TerminalSize, UiAction, UpdateEffect,
         CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION,
@@ -3857,6 +3916,141 @@ mod tests {
     }
 
     #[test]
+    fn open_target_follows_current_history_browse_and_search_selection() {
+        let mut app = test_app();
+        let original = app.ctx.paths.config_dir.join("original.jpg");
+        let composed = app.ctx.paths.compose_dir.join("composed.png");
+        fs::create_dir_all(original.parent().expect("original parent")).expect("original parent");
+        fs::create_dir_all(composed.parent().expect("composed parent")).expect("composed parent");
+        fs::write(&original, b"original").expect("original");
+        fs::write(&composed, b"composed").expect("composed");
+        set_current_wall(&mut app, &original, &composed);
+
+        app.tab = Tab::Now;
+        assert_eq!(
+            app.selected_open_target(),
+            Some(OpenTarget::Path(composed.clone()))
+        );
+
+        app.tab = Tab::History;
+        app.cursor = 0;
+        assert_eq!(
+            app.selected_open_target(),
+            Some(OpenTarget::Path(original.clone()))
+        );
+
+        app.tab = Tab::Browse;
+        app.cursor = app
+            .browse_items()
+            .iter()
+            .position(|line| line.starts_with("history: "))
+            .expect("history row");
+        assert_eq!(
+            app.selected_open_target(),
+            Some(OpenTarget::Path(original.clone()))
+        );
+
+        app.ctx.state.cache_queue = vec!["wall-123".into()];
+        app.cursor = app
+            .browse_items()
+            .iter()
+            .position(|line| line == "queue: wall-123")
+            .expect("queue row");
+        assert_eq!(
+            app.selected_open_target(),
+            Some(OpenTarget::Url("https://wallhaven.cc/w/wall-123".into()))
+        );
+
+        app.tab = Tab::Search;
+        app.cursor = 0;
+        app.search_results = vec![SearchHit {
+            id: "abc123".into(),
+            label: "wallhaven image".into(),
+        }];
+        assert_eq!(
+            app.selected_open_target(),
+            Some(OpenTarget::Url("https://wallhaven.cc/w/abc123".into()))
+        );
+    }
+
+    #[test]
+    fn open_target_for_config_sources_uses_selected_or_first_active_source() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "internet_enabled": true },
+                "paths": {
+                    "cache_dir": "/tmp/walls-cache",
+                    "download_dir": "/tmp/walls-downloaded",
+                    "favorites_dir": "/tmp/walls-favorites",
+                    "fetched_dir": "/tmp/walls-fetched",
+                    "compose_dir": "/tmp/walls-compose"
+                },
+                "apply": { "backend": "auto" },
+                "display": { "mode": "os" },
+                "wallhaven": {
+                    "enabled": true,
+                    "search": {
+                        "q": "mountain lake",
+                        "categories": "100",
+                        "purity": "100",
+                        "sorting": "random",
+                        "order": "desc",
+                        "atleast": "1920x1080"
+                    }
+                },
+                "sources": [
+                    { "enabled": false, "type": "folder", "path": "/tmp/disabled" },
+                    { "enabled": true, "type": "reddit", "query": "rust", "sort": "top", "time": "week" },
+                    { "enabled": true, "type": "folder", "path": "/tmp/walls-local" }
+                ]
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
+        app.config_in_subnav = false;
+
+        assert_eq!(
+            app.selected_open_target(),
+            Some(OpenTarget::Url(
+                "https://www.reddit.com/r/rust/top/?sort=top&t=week".into()
+            ))
+        );
+
+        app.config_in_subnav = true;
+        app.config_sub_cursor = 2;
+        assert_eq!(
+            app.selected_open_target(),
+            Some(OpenTarget::Path(std::path::PathBuf::from(
+                "/tmp/walls-local"
+            )))
+        );
+
+        app.config_sub_cursor = app.ctx.config.sources.len();
+        assert_eq!(
+            app.selected_open_target(),
+            Some(OpenTarget::Url(
+                "https://wallhaven.cc/search?q=mountain+lake&categories=100&purity=100&sorting=random&order=desc&atleast=1920x1080".into()
+            ))
+        );
+    }
+
+    #[test]
+    fn open_command_uses_desktop_default_opener() {
+        let target = OpenTarget::Path(std::path::PathBuf::from("/tmp/wall.jpg"));
+        let command = open_command(&target);
+
+        #[cfg(target_os = "macos")]
+        assert_eq!(command.program, "open");
+        #[cfg(target_os = "windows")]
+        assert_eq!(command.program, "cmd");
+        #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+        assert_eq!(command.program, "xdg-open");
+
+        assert!(command.args.iter().any(|arg| arg == "/tmp/wall.jpg"));
+    }
+
+    #[test]
     fn footer_status_uses_explicit_role_not_message_text() {
         let mut app = test_app();
         let theme = style::Theme::new(app.color_mode);
@@ -3984,6 +4178,10 @@ mod tests {
             UiAction::OpenHelp
         );
         assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('o'))),
+            UiAction::OpenSelected
+        );
+        assert_eq!(
             action_for_key(&app, KeyEvent::from(KeyCode::Char('q'))),
             UiAction::Quit
         );
@@ -4000,6 +4198,10 @@ mod tests {
         assert_eq!(
             action_for_key(&app, KeyEvent::from(KeyCode::Char('q'))),
             UiAction::CommandChar('q')
+        );
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('o'))),
+            UiAction::CommandChar('o')
         );
         assert_eq!(
             action_for_key(&app, KeyEvent::from(KeyCode::Esc)),
@@ -4022,6 +4224,10 @@ mod tests {
         assert_eq!(
             action_for_key(&app, KeyEvent::from(KeyCode::Char('q'))),
             UiAction::SearchChar('q')
+        );
+        assert_eq!(
+            action_for_key(&app, KeyEvent::from(KeyCode::Char('o'))),
+            UiAction::SearchChar('o')
         );
         assert_eq!(
             action_for_key(&app, KeyEvent::from(KeyCode::Enter)),
