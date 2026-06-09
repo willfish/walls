@@ -713,6 +713,7 @@ pub struct App {
     pub(crate) config_warnings: Vec<String>,
     pub color_mode: ColorMode,
     pub pending_nuke_confirm: bool,
+    pub pending_trash_confirm: bool,
     pub show_key_help: bool,
 }
 
@@ -768,6 +769,7 @@ impl App {
             config_warnings,
             color_mode: ColorMode::from_env(),
             pending_nuke_confirm: false,
+            pending_trash_confirm: false,
             show_key_help: false,
         };
         app.refresh_local_candidates()?;
@@ -1152,6 +1154,23 @@ impl App {
     pub fn trash_current(&mut self) -> anyhow::Result<String> {
         self.ctx.trash_current()?;
         Ok("trashed current wallpaper".into())
+    }
+
+    pub fn trash_current_prompt(&self) -> String {
+        match self.ctx.plan_trash_current() {
+            Ok(plan) => {
+                let composed = plan
+                    .composed_path
+                    .as_ref()
+                    .map(|path| format!(" + composed {path}"))
+                    .unwrap_or_default();
+                format!(
+                    "trash: current wallpaper original {}{}? d confirm, Esc cancel",
+                    plan.original_path, composed
+                )
+            }
+            Err(e) => format!("trash: {e}"),
+        }
     }
 
     pub fn nuke_downloads_prompt(&self) -> String {
@@ -1979,8 +1998,11 @@ impl App {
             };
             return format!("edit: ↑/↓ fields | {choice_hint} | Enter save | Esc cancel | q");
         }
+        if self.pending_trash_confirm {
+            return "d confirm trash current wallpaper | Esc cancel".into();
+        }
         if self.pending_nuke_confirm {
-            return "Shift+X confirm nuke | Esc cancel | q quit".into();
+            return "Shift+X confirm nuke downloads | Esc cancel".into();
         }
         let keys = match self.input_mode {
             InputMode::Command => format!(":{}_ | Enter run Esc cancel", self.cmd_line),
@@ -2007,7 +2029,7 @@ impl App {
                     }
                 }
                 _ => {
-                    "1-6 tabs ←/→ | j/k Pg Home/End | n/p next/prev | f favorite d trash | Shift+X nuke | space pause | : cmd | ? help"
+                    "1-6 tabs ←/→ | j/k Pg Home/End | n/p next/prev | f favorite d request trash | Shift+X nuke | space pause | : cmd | ? help"
                         .into()
                 }
             },
