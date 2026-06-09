@@ -1,7 +1,9 @@
 use walls_core::config::{Config, SourceEntry};
 use walls_core::providers::{
     configured_providers, configured_source_providers, enabled_local_sources, unsplash_provider,
-    wallhaven_provider, ProviderCapability, ProviderKind,
+    wallhaven_provider, ProviderAttemptOutcome, ProviderCapability, ProviderFailureKind,
+    ProviderKind, ProviderNoCandidateReason, ProviderOperation, ProviderRetry, ProviderRetryReason,
+    ProviderStatus, ProviderStatusReport,
 };
 
 fn test_config(internet_enabled: bool) -> Config {
@@ -532,4 +534,126 @@ fn configured_providers_features_all_new_classified_kinds() {
         assert!(p.capabilities.contains(&ProviderCapability::Download));
         assert!(p.capabilities.contains(&ProviderCapability::Metadata));
     }
+}
+
+#[test]
+fn provider_attempt_reports_offline_skip_with_fallback() {
+    let provider = wallhaven_provider(&test_config(false), &walls_core::config::Secrets::default());
+
+    let attempt = provider
+        .attempt(ProviderOperation::QueueRefill)
+        .with_status(ProviderStatus::OfflineDisabled)
+        .skipped(ProviderNoCandidateReason::OfflineDisabled)
+        .with_fallback("local");
+
+    assert_eq!(attempt.provider_id, "wallhaven");
+    assert_eq!(attempt.provider_kind, ProviderKind::Wallhaven);
+    assert_eq!(attempt.status, ProviderStatus::OfflineDisabled);
+    assert_eq!(
+        attempt.outcome,
+        ProviderAttemptOutcome::Skipped {
+            reason: ProviderNoCandidateReason::OfflineDisabled
+        }
+    );
+    assert_eq!(attempt.fallback_provider_id.as_deref(), Some("local"));
+}
+
+#[test]
+fn provider_attempt_reports_missing_credentials() {
+    let config = test_config_with_sources(
+        true,
+        serde_json::json!([
+            { "enabled": true, "type": "unsplash", "query": "forest" }
+        ]),
+    );
+    let provider = unsplash_provider(&config, &walls_core::config::Secrets::default());
+
+    let attempt = provider
+        .attempt(ProviderOperation::Search)
+        .with_status(ProviderStatus::CredentialMissing)
+        .skipped(ProviderNoCandidateReason::CredentialMissing);
+
+    assert_eq!(provider.kind, ProviderKind::Unsplash);
+    assert!(!provider.enabled);
+    assert_eq!(attempt.status, ProviderStatus::CredentialMissing);
+    assert_eq!(
+        attempt.outcome,
+        ProviderAttemptOutcome::Skipped {
+            reason: ProviderNoCandidateReason::CredentialMissing
+        }
+    );
+}
+
+#[test]
+fn provider_attempt_records_transient_rate_limit_retry() {
+    let provider = wallhaven_provider(&test_config(true), &walls_core::config::Secrets::default());
+
+    let attempt = provider
+        .attempt(ProviderOperation::Search)
+        .with_retry(ProviderRetry::rate_limited(1, 100))
+        .applied(Some(12));
+
+    assert_eq!(attempt.retries.len(), 1);
+    assert_eq!(attempt.retries[0].attempt, 1);
+    assert_eq!(attempt.retries[0].backoff_ms, 100);
+    assert_eq!(attempt.retries[0].reason, ProviderRetryReason::RateLimited);
+    assert_eq!(attempt.retries[0].status_code, Some(429));
+    assert_eq!(
+        attempt.outcome,
+        ProviderAttemptOutcome::Applied {
+            candidate_count: Some(12)
+        }
+    );
+}
+
+#[test]
+fn provider_attempt_reports_terminal_failure_and_next_fallback() {
+    let provider = wallhaven_provider(&test_config(true), &walls_core::config::Secrets::default());
+
+    let attempt = provider
+        .attempt(ProviderOperation::Download)
+        .with_retry(ProviderRetry::server_error(1, 100, 503))
+        .with_retry(ProviderRetry::server_error(2, 200, 503))
+        .failed(
+            ProviderFailureKind::Request,
+            Some(503),
+            Some("provider wallhaven failed during download".into()),
+        )
+        .with_fallback("bing");
+
+    assert_eq!(attempt.retries.len(), 2);
+    assert_eq!(attempt.fallback_provider_id.as_deref(), Some("bing"));
+    assert_eq!(
+        attempt.outcome,
+        ProviderAttemptOutcome::Failed {
+            kind: ProviderFailureKind::Request,
+            status_code: Some(503),
+            message: Some("provider wallhaven failed during download".into())
+        }
+    );
+}
+
+#[test]
+fn provider_status_report_records_no_candidate_attempts() {
+    let sources: Vec<SourceEntry> = serde_json::from_value(serde_json::json!([
+        { "enabled": true, "type": "folder", "label": "Local", "path": "/tmp/walls" }
+    ]))
+    .expect("sources");
+    let provider = configured_source_providers(&sources).remove(0);
+    let mut report = ProviderStatusReport::default();
+
+    report.push(
+        provider
+            .attempt(ProviderOperation::LocalSourceListing)
+            .no_candidates(ProviderNoCandidateReason::EmptyResult, Some(0)),
+    );
+
+    assert!(report.attempted_provider("Local"));
+    assert_eq!(
+        report.attempts[0].outcome,
+        ProviderAttemptOutcome::NoCandidates {
+            reason: ProviderNoCandidateReason::EmptyResult,
+            candidate_count: Some(0)
+        }
+    );
 }
