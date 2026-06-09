@@ -1629,6 +1629,7 @@ fn edit_target_title(app: &App) -> String {
         match &sess.target {
             EditTarget::Block(CONFIG_BLOCK_ROTATION) => "Edit Rotation".to_string(),
             EditTarget::Block(CONFIG_BLOCK_LIBRARY) => "Edit Library".to_string(),
+            EditTarget::Block(CONFIG_BLOCK_APPLY_DISPLAY) => "Edit Apply/display".to_string(),
             EditTarget::Block(CONFIG_BLOCK_TUI) => "Edit TUI".to_string(),
             EditTarget::Wallhaven => "Edit Wallhaven".to_string(),
             EditTarget::SearchFilters => "Edit Search Filters".to_string(),
@@ -1736,6 +1737,7 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
             let keys = match *block {
                 CONFIG_BLOCK_ROTATION => app::ROTATION_BLOCK_FIELDS,
                 CONFIG_BLOCK_LIBRARY => app::LIBRARY_BLOCK_FIELDS,
+                CONFIG_BLOCK_APPLY_DISPLAY => app::APPLY_DISPLAY_BLOCK_FIELDS,
                 CONFIG_BLOCK_TUI => app::TUI_BLOCK_FIELDS,
                 _ => &[],
             };
@@ -1926,7 +1928,7 @@ mod tests {
 
     use super::{
         action_for_key,
-        app::{App, EditFieldKind, SearchHit},
+        app::{App, EditFieldKind, SearchHit, DISPLAY_MODE_CHOICES},
         apply_effect,
         chrome_view::{footer_keys, footer_paragraph},
         draw_inner, handle_key,
@@ -2366,6 +2368,114 @@ mod tests {
             text.contains("! apply.custom_script: is required"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn config_apply_display_block_edits_display_settings() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "internet_enabled": false },
+                "paths": {
+                    "cache_dir": "/tmp/walls-cache",
+                    "download_dir": "/tmp/walls-downloaded",
+                    "favorites_dir": "/tmp/walls-favorites",
+                    "fetched_dir": "/tmp/walls-fetched",
+                    "compose_dir": "/tmp/walls-compose"
+                },
+                "apply": { "backend": "auto" },
+                "display": {
+                    "mode": "os",
+                    "auto_rotate": false,
+                    "imagemagick_command": "magick",
+                    "filters": { "enabled": false, "command": "magick", "filters": [] }
+                },
+                "sources": []
+            }),
+            serde_json::json!({}),
+        );
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        app.tab = Tab::Config;
+        app.config_cursor = CONFIG_BLOCK_APPLY_DISPLAY;
+
+        app.start_edit_for_current();
+        let editing = app.editing.as_ref().expect("editing");
+        assert!(matches!(
+            editing.target,
+            EditTarget::Block(CONFIG_BLOCK_APPLY_DISPLAY)
+        ));
+        assert_eq!(editing.field_buffer, "os");
+        assert_eq!(
+            app.current_edit_field_kind(),
+            EditFieldKind::Choice(DISPLAY_MODE_CHOICES)
+        );
+
+        update(
+            &mut app,
+            UiAction::EditFieldCycle { forward: true },
+            rt.handle(),
+        )
+        .expect("cycle display mode");
+        assert_eq!(app.ctx.config.display.mode, "zoom");
+
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to auto rotate");
+        update(
+            &mut app,
+            UiAction::EditFieldCycle { forward: true },
+            rt.handle(),
+        )
+        .expect("toggle auto rotate");
+        assert!(app.ctx.config.display.auto_rotate);
+
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to imagemagick");
+        {
+            let editing = app.editing.as_mut().expect("editing");
+            assert_eq!(editing.field_buffer, "magick");
+            editing.field_buffer = "convert".into();
+        }
+        update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save imagemagick");
+        assert_eq!(app.ctx.config.display.imagemagick_command, "convert");
+
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to target width");
+        app.editing.as_mut().expect("editing").field_buffer = "1920".into();
+        update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("stage target width");
+        assert_eq!(app.ctx.config.display.target_width, None);
+        assert!(
+            app.message
+                .contains("set both target_width and target_height"),
+            "{}",
+            app.message
+        );
+
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to target height");
+        app.editing.as_mut().expect("editing").field_buffer = "1080".into();
+        update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save target height");
+        assert_eq!(app.ctx.config.display.target_width, Some(1920));
+        assert_eq!(app.ctx.config.display.target_height, Some(1080));
+
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to filters enabled");
+        update(
+            &mut app,
+            UiAction::EditFieldCycle { forward: true },
+            rt.handle(),
+        )
+        .expect("toggle filters");
+        assert!(app.ctx.config.display.filters.enabled);
+
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to filter command");
+        app.editing.as_mut().expect("editing").field_buffer = "gm convert".into();
+        update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save filter command");
+
+        assert_eq!(app.ctx.config.display.filters.command, "gm convert");
+        assert!(
+            app.message.contains("config saved: display"),
+            "{}",
+            app.message
+        );
+        let text = std::fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
+        assert!(text.contains("\"mode\": \"zoom\""), "{text}");
+        assert!(text.contains("\"target_width\": 1920"), "{text}");
+        assert!(text.contains("\"target_height\": 1080"), "{text}");
+        assert!(text.contains("\"command\": \"gm convert\""), "{text}");
     }
 
     #[test]
