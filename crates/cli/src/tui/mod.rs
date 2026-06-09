@@ -7,11 +7,11 @@ mod now_view;
 mod open_target;
 #[cfg(feature = "tui-preview")]
 mod preview;
+mod runtime;
 mod sources_view;
 mod startup;
 mod style;
 
-use std::io::{stdout, IsTerminal};
 use std::thread;
 
 use crate::tui::app::EditTarget;
@@ -20,16 +20,12 @@ use app::{
     App, InputMode, Tab, CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION,
     CONFIG_BLOCK_SOURCES, CONFIG_BLOCK_TUI,
 };
-use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use ratatui::crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-};
-use ratatui::crossterm::ExecutableCommand;
 use ratatui::prelude::*;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, List, ListItem, Tabs};
+pub(crate) use runtime::{log_len, CaptureWriter, ConsoleWriter, LOG_BUFFER};
 use startup::{draw_startup_intro, StartupIntro};
 use walls_core::apply::{
     backend_setting_label, summarize_apply_environment, ApplyEnvironmentSummary,
@@ -37,86 +33,10 @@ use walls_core::apply::{
 use walls_core::config::{ApplyBackendSetting, CosmicMethod, TuiKeyProfile};
 use walls_core::WallsCtx;
 
-use std::io;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Mutex,
-};
-
-pub(crate) static LOG_BUFFER: Mutex<Vec<String>> = Mutex::new(Vec::new());
-static IN_TUI: AtomicBool = AtomicBool::new(false);
-
-const MAX_LOG_LINES: usize = 2000;
-
-pub(crate) fn log_len() -> usize {
-    LOG_BUFFER.lock().unwrap().len()
-}
-
-pub(crate) struct ConsoleWriter;
-
-impl io::Write for ConsoleWriter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if !IN_TUI.load(Ordering::Relaxed) {
-            let _ = io::stderr().write_all(buf);
-        }
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        if !IN_TUI.load(Ordering::Relaxed) {
-            let _ = io::stderr().flush();
-        }
-        Ok(())
-    }
-}
-
-impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for ConsoleWriter {
-    type Writer = ConsoleWriter;
-    fn make_writer(&'a self) -> Self::Writer {
-        ConsoleWriter
-    }
-}
-
-pub(crate) struct CaptureWriter;
-
-impl io::Write for CaptureWriter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if let Ok(s) = std::str::from_utf8(buf) {
-            let mut logs = LOG_BUFFER.lock().unwrap();
-            for line in s.lines() {
-                if !line.trim().is_empty() {
-                    logs.push(line.trim_end().to_string());
-                    if logs.len() > MAX_LOG_LINES {
-                        let to_drain = logs.len() - MAX_LOG_LINES / 2;
-                        logs.drain(0..to_drain);
-                    }
-                }
-            }
-        }
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CaptureWriter {
-    type Writer = CaptureWriter;
-    fn make_writer(&'a self) -> Self::Writer {
-        CaptureWriter
-    }
-}
-
 pub fn run(startup_message: Option<String>, tray_owns_rotation: bool) -> anyhow::Result<()> {
-    require_tty()?;
     let rt = tokio::runtime::Handle::current();
 
-    let mut stdout = stdout();
-    enable_raw_mode().context("failed to enable raw mode (is this an interactive terminal?)")?;
-    stdout
-        .execute(EnterAlternateScreen)
-        .context("failed to enter alternate screen")?;
-    let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
-    let _restore = TerminalRestore;
+    let (mut terminal, _restore) = runtime::enter_terminal()?;
 
     let mut app = App::new(WallsCtx::load().context("failed to load walls config")?)?;
     if let Some(message) = startup_message {
@@ -124,7 +44,7 @@ pub fn run(startup_message: Option<String>, tray_owns_rotation: bool) -> anyhow:
     }
     let mut startup_intro = StartupIntro::from_env();
     let _intro_prewarm = start_intro_preview_prewarm(&app, startup_intro.is_active());
-    IN_TUI.store(true, Ordering::Relaxed);
+    runtime::mark_in_tui();
     #[cfg(feature = "tui-preview")]
     let mut preview = preview::ImagePreview::detect();
     let mut auto_rotator = if tray_owns_rotation {
@@ -204,27 +124,6 @@ fn start_intro_preview_prewarm(app: &App, enabled: bool) -> Option<thread::JoinH
             }
         })
         .ok()
-}
-
-fn require_tty() -> anyhow::Result<()> {
-    use std::io::{stdin, stdout};
-    if !stdin().is_terminal() || !stdout().is_terminal() {
-        anyhow::bail!(
-            "walls tui requires an interactive terminal (stdin and stdout must be a TTY).\n\
-             Try: walls   # (or `walls tui`) from a terminal emulator, not a pipe or IDE task output"
-        );
-    }
-    Ok(())
-}
-
-struct TerminalRestore;
-
-impl Drop for TerminalRestore {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = stdout().execute(LeaveAlternateScreen);
-        IN_TUI.store(false, Ordering::Relaxed);
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
