@@ -163,7 +163,12 @@ pub(crate) const SEARCH_FILTER_FIELDS: &[&str] = &[
 
 pub(crate) const TUI_BLOCK_FIELDS: &[&str] = &["key_profile"];
 pub(crate) const TUI_KEY_PROFILE_CHOICES: &[&str] = &["emacs", "vim"];
-pub(crate) const LIBRARY_BLOCK_FIELDS: &[&str] = &["quota_enabled", "quota_size_mb"];
+pub(crate) const LIBRARY_BLOCK_FIELDS: &[&str] = &[
+    "quota_enabled",
+    "quota_size_mb",
+    "avoid_recent",
+    "refetch_when_cache_below",
+];
 
 fn wallhaven_bit_at(s: &str, idx: usize, default: bool) -> bool {
     s.chars().nth(idx).map(|c| c == '1').unwrap_or(default)
@@ -306,6 +311,8 @@ pub(crate) fn block_field_label(block: usize, key: &str) -> String {
         CONFIG_BLOCK_LIBRARY => match key {
             "quota_enabled" => "Quota enabled".into(),
             "quota_size_mb" => "Quota size (MB)".into(),
+            "avoid_recent" => "Avoid recent count".into(),
+            "refetch_when_cache_below" => "Refetch below cached count".into(),
             other => other.into(),
         },
         WALLHAVEN_FIELDS_BLOCK => match key {
@@ -567,6 +574,8 @@ fn block_field_value_at(
         CONFIG_BLOCK_LIBRARY => match *key {
             "quota_enabled" => config.quota.enabled.to_string(),
             "quota_size_mb" => config.quota.size_mb.to_string(),
+            "avoid_recent" => config.selection.avoid_recent.to_string(),
+            "refetch_when_cache_below" => config.selection.refetch_when_cache_below.to_string(),
             _ => String::new(),
         },
         WALLHAVEN_FIELDS_BLOCK => match *key {
@@ -670,6 +679,14 @@ fn library_block_draft(config: &Config) -> std::collections::HashMap<String, Str
     let mut vals = std::collections::HashMap::new();
     vals.insert("quota_enabled".into(), config.quota.enabled.to_string());
     vals.insert("quota_size_mb".into(), config.quota.size_mb.to_string());
+    vals.insert(
+        "avoid_recent".into(),
+        config.selection.avoid_recent.to_string(),
+    );
+    vals.insert(
+        "refetch_when_cache_below".into(),
+        config.selection.refetch_when_cache_below.to_string(),
+    );
     vals
 }
 
@@ -734,6 +751,16 @@ fn apply_library_block_draft(
     if let Some(v) = draft.get("quota_size_mb") {
         if let Ok(size_mb) = v.parse::<u64>() {
             config.quota.size_mb = size_mb;
+        }
+    }
+    if let Some(v) = draft.get("avoid_recent") {
+        if let Ok(avoid_recent) = v.parse::<usize>() {
+            config.selection.avoid_recent = avoid_recent;
+        }
+    }
+    if let Some(v) = draft.get("refetch_when_cache_below") {
+        if let Ok(refetch_when_cache_below) = v.parse::<usize>() {
+            config.selection.refetch_when_cache_below = refetch_when_cache_below;
         }
     }
 }

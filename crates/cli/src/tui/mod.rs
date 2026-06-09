@@ -3594,6 +3594,7 @@ mod tests {
                 "change": { "enabled": true, "interval_secs": 60, "internet_enabled": true },
                 "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
                 "quota": { "enabled": true, "size_mb": 1000 },
+                "selection": { "avoid_recent": 50, "refetch_when_cache_below": 5, "strategy": "random" },
                 "sources": []
             }),
             serde_json::json!({}),
@@ -3633,6 +3634,28 @@ mod tests {
             "{}",
             app.message
         );
+
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to avoid recent");
+        {
+            let editing = app.editing.as_mut().expect("editing");
+            assert_eq!(editing.field_buffer, "50");
+            editing.field_buffer = "12".into();
+        }
+        update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save avoid recent");
+
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to refetch");
+        {
+            let editing = app.editing.as_mut().expect("editing");
+            assert_eq!(editing.field_buffer, "5");
+            editing.field_buffer = "2".into();
+        }
+        update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save refetch");
+
+        assert_eq!(app.ctx.config.selection.avoid_recent, 12);
+        assert_eq!(app.ctx.config.selection.refetch_when_cache_below, 2);
+        let text = std::fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
+        assert!(text.contains("\"avoid_recent\": 12"), "{text}");
+        assert!(text.contains("\"refetch_when_cache_below\": 2"), "{text}");
     }
 
     #[test]
