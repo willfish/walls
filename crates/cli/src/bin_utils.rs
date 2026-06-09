@@ -61,8 +61,12 @@ impl EnsureTrayOutcome {
     pub fn tui_message(&self) -> Option<String> {
         match self {
             Self::Spawned | Self::AlreadyRunning => None,
-            Self::Skipped { reason } => Some(format!("tray: {reason}")),
-            Self::Failed { reason } => Some(format!("tray: {reason}")),
+            Self::Skipped { reason } => Some(format!(
+                "tray: {reason}; TUI will own rotation while the tray is unavailable"
+            )),
+            Self::Failed { reason } => Some(format!(
+                "tray: {reason}; run `walls tui` directly or fix WALLS_TRAY_BIN"
+            )),
         }
     }
 
@@ -370,8 +374,23 @@ mod tests {
         };
         assert_eq!(
             outcome.tui_message(),
-            Some("tray: COSMIC has no tray".into())
+            Some(
+                "tray: COSMIC has no tray; TUI will own rotation while the tray is unavailable"
+                    .into()
+            )
         );
+    }
+
+    #[test]
+    fn failed_outcome_exposes_recovery_message() {
+        let outcome = EnsureTrayOutcome::Failed {
+            reason: "walls-tray not found".into(),
+        };
+
+        let message = outcome.tui_message().expect("message");
+
+        assert!(message.contains("walls-tray not found"), "{message}");
+        assert!(message.contains("WALLS_TRAY_BIN"), "{message}");
     }
 
     #[test]
