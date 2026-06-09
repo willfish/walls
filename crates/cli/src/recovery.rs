@@ -28,6 +28,26 @@ pub fn fetch_requires_path() -> &'static str {
     "fetch requires at least one image path. Run `walls fetch <path>...` or use `walls next --manual --verbose` to select from configured sources."
 }
 
+pub fn tray_skip_with_recovery(reason: &str) -> String {
+    format!("{reason}; {}", tray_skip_recovery_hint(reason))
+}
+
+fn tray_skip_recovery_hint(reason: &str) -> &'static str {
+    if reason.starts_with("tray disabled (WALLS_TRAY=0)") {
+        "unset WALLS_TRAY or set WALLS_TRAY=1 to force tray startup"
+    } else if reason.starts_with("no graphical session") {
+        "start walls from a Wayland/X11 desktop session, or set WALLS_TRAY=0 when running headless"
+    } else if reason.contains("not supported for walls-tray") {
+        "use `walls tui` for rotation controls on this desktop, or set WALLS_TRAY=1 to force a tray attempt"
+    } else if reason.starts_with("tray autostart disabled") {
+        "enable a desktop under tray.autostart.desktops, then run `walls config sync --dry-run`"
+    } else if reason.starts_with("walls-tray not found at") {
+        "install/build walls-tray or set WALLS_TRAY_BIN=/path/to/walls-tray"
+    } else {
+        "run `walls doctor` to inspect tray readiness"
+    }
+}
+
 pub fn tui_next_no_change() -> String {
     format!("next: {}", next_no_change())
 }
@@ -72,6 +92,19 @@ mod tests {
                 .contains("walls next --manual --verbose")
         );
         assert!(fetch_requires_path().contains("walls fetch <path>"));
+        assert!(
+            tray_skip_with_recovery("tray disabled (WALLS_TRAY=0)").contains("unset WALLS_TRAY")
+        );
+        assert!(
+            tray_skip_with_recovery("no graphical session (tray needs Wayland or X11)")
+                .contains("Wayland/X11")
+        );
+        assert!(tray_skip_with_recovery("tray autostart disabled")
+            .contains("walls config sync --dry-run"));
+        assert!(
+            tray_skip_with_recovery("walls-tray not found at /tmp/walls-tray")
+                .contains("WALLS_TRAY_BIN")
+        );
     }
 
     #[test]
