@@ -110,7 +110,7 @@ pub fn validate_config_diagnostics(
 
     validate_apply_config(config, &mut errors);
     validate_quota_config(config, &mut errors);
-    validate_tray_autostart(config, &mut errors);
+    validate_tray_autostart(config, paths, &mut errors);
 
     errors
 }
@@ -581,10 +581,12 @@ fn validate_wallhaven_ratio(field: &str, value: &str, errors: &mut Vec<Validatio
     );
 }
 
-fn validate_tray_autostart(config: &Config, errors: &mut Vec<ValidationDiagnostic>) {
-    let Ok(config_home) = autostart_config_home() else {
-        return;
-    };
+fn validate_tray_autostart(
+    config: &Config,
+    paths: &WallsPaths,
+    errors: &mut Vec<ValidationDiagnostic>,
+) {
+    let config_home = autostart_config_home_from_paths(paths);
     let tray_bin = crate::bin_resolve::resolve_binary(crate::bin_resolve::BinResolveOpts {
         env_var: std::env::var("WALLS_TRAY_BIN").ok().as_deref(),
         current_exe: std::env::current_exe().ok().as_deref(),
@@ -620,14 +622,17 @@ fn validate_tray_autostart(config: &Config, errors: &mut Vec<ValidationDiagnosti
     }
 }
 
-fn autostart_config_home() -> anyhow::Result<std::path::PathBuf> {
-    if let Ok(dir) = std::env::var("XDG_CONFIG_HOME") {
-        if !dir.is_empty() {
-            return Ok(std::path::PathBuf::from(dir));
+fn autostart_config_home_from_paths(paths: &WallsPaths) -> std::path::PathBuf {
+    if paths
+        .config_dir
+        .file_name()
+        .is_some_and(|name| name == "walls")
+    {
+        if let Some(parent) = paths.config_dir.parent() {
+            return parent.to_path_buf();
         }
     }
-    let home = std::env::var("HOME")?;
-    Ok(std::path::PathBuf::from(home).join(".config"))
+    paths.config_dir.clone()
 }
 
 fn validate_apply_config(config: &Config, errors: &mut Vec<ValidationDiagnostic>) {
