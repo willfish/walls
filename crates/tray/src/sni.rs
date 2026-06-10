@@ -46,6 +46,11 @@ impl WallsSniTray {
         }
     }
 
+    pub fn refresh_external_state(&mut self) {
+        self.feedback = None;
+        self.refresh_state();
+    }
+
     pub fn set_feedback(&mut self, feedback: Option<ActionFeedback>) {
         self.feedback = feedback;
         self.refresh_state();
@@ -165,7 +170,7 @@ pub fn run() -> anyhow::Result<()> {
             prewarm.poll();
         }
         if watcher.as_mut().is_some_and(|watcher| watcher.poll()) {
-            let _ = poll_handle.update(|tray: &mut WallsSniTray| tray.refresh_state());
+            let _ = poll_handle.update(|tray: &mut WallsSniTray| tray.refresh_external_state());
         }
         thread::sleep(Duration::from_millis(200));
     }
@@ -231,6 +236,22 @@ mod tests {
                     .filter(|spec| spec.separator_before)
                     .count()
         );
+    }
+
+    #[test]
+    fn external_state_refresh_clears_stale_action_feedback() {
+        let (tx, _rx) = mpsc::channel();
+        let mut tray = WallsSniTray::new(tx);
+        tray.set_feedback(Some(ActionFeedback {
+            kind: FeedbackKind::Success,
+            message: "Rotation resumed".into(),
+        }));
+
+        assert!(tray.title().contains("Rotation resumed"));
+
+        tray.refresh_external_state();
+
+        assert!(!tray.title().contains("Rotation resumed"));
     }
 
     #[test]

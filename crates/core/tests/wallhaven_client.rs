@@ -69,6 +69,43 @@ async fn wallhaven_search_url_encodes_human_query_text() {
 }
 
 #[tokio::test]
+async fn wallhaven_search_omits_empty_ratio_and_resolution_filters() {
+    let server = MockServer::start().await;
+    let raw_query = Arc::new(Mutex::new(None::<String>));
+    let raw_query_for_responder = Arc::clone(&raw_query);
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/search"))
+        .respond_with(move |request: &Request| {
+            *raw_query_for_responder.lock().expect("raw query lock") =
+                request.url.query().map(str::to_string);
+            ResponseTemplate::new(200).set_body_raw(
+                include_str!("fixtures/wallhaven-search.json"),
+                "application/json",
+            )
+        })
+        .mount(&server)
+        .await;
+
+    let client = WallhavenClient::new(server.uri(), "test-key").unwrap();
+    let params = WallhavenSearch {
+        atleast: String::new(),
+        ratios: String::new(),
+        ..Default::default()
+    };
+
+    client.search(&params, 1).await.unwrap();
+
+    let raw_query = raw_query
+        .lock()
+        .expect("raw query lock")
+        .clone()
+        .expect("request query");
+    assert!(!raw_query.contains("atleast="), "{raw_query}");
+    assert!(!raw_query.contains("ratios="), "{raw_query}");
+}
+
+#[tokio::test]
 async fn wallhaven_search_retries_transient_server_error() {
     let server = MockServer::start().await;
     let attempts = Arc::new(AtomicUsize::new(0));

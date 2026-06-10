@@ -21,7 +21,6 @@ use super::{
 use crate::tui::style::StatusKind;
 
 impl App {
-    #[allow(dead_code)]
     pub fn start_edit_for_current(&mut self) {
         if self.tab != Tab::Config {
             return;
@@ -50,10 +49,7 @@ impl App {
             return;
         };
         self.editing = Some(session);
-        let new_buf = self.current_edit_field_value();
-        if let Some(s) = &mut self.editing {
-            s.field_buffer = new_buf;
-        }
+        self.sync_edit_field_buffer();
         self.clear_message();
     }
 
@@ -62,10 +58,7 @@ impl App {
         self.input_mode = InputMode::Normal;
         self.config_in_subnav = false;
         self.editing = self.edit_session_for_target(EditTarget::SearchFilters);
-        let new_buf = self.current_edit_field_value();
-        if let Some(s) = &mut self.editing {
-            s.field_buffer = new_buf;
-        }
+        self.sync_edit_field_buffer();
         self.clear_message();
     }
 
@@ -93,80 +86,64 @@ impl App {
                 let idx = *i;
                 let mut draft = self.ctx.config.sources[idx].clone();
                 normalize_source_entry(&mut draft);
-                Some(EditSession {
-                    target: target.clone(),
-                    draft_source: Some(draft),
-                    draft_block_values: std::collections::HashMap::new(),
-                    field_cursor: 0,
-                    field_buffer: String::new(),
-                    validation_errors: vec![],
-                })
+                Some(EditSession::new(
+                    target.clone(),
+                    Some(draft),
+                    std::collections::HashMap::new(),
+                ))
             }
-            EditTarget::Block(CONFIG_BLOCK_ROTATION) => Some(EditSession {
-                target: target.clone(),
-                draft_source: None,
-                draft_block_values: config_block_edit::rotation_draft(&self.ctx.config),
-                field_cursor: 0,
-                field_buffer: String::new(),
-                validation_errors: vec![],
-            }),
-            EditTarget::Block(CONFIG_BLOCK_LIBRARY) => Some(EditSession {
-                target: target.clone(),
-                draft_source: None,
-                draft_block_values: config_block_edit::library_draft(&self.ctx.config),
-                field_cursor: 0,
-                field_buffer: String::new(),
-                validation_errors: vec![],
-            }),
-            EditTarget::Block(CONFIG_BLOCK_APPLY_DISPLAY) => Some(EditSession {
-                target: target.clone(),
-                draft_source: None,
-                draft_block_values: config_block_edit::display_draft(&self.ctx.config),
-                field_cursor: 0,
-                field_buffer: String::new(),
-                validation_errors: vec![],
-            }),
-            EditTarget::Block(CONFIG_BLOCK_TUI) => Some(EditSession {
-                target: target.clone(),
-                draft_source: None,
-                draft_block_values: config_block_edit::tui_draft(&self.ctx.config),
-                field_cursor: 0,
-                field_buffer: String::new(),
-                validation_errors: vec![],
-            }),
-            EditTarget::Wallhaven => Some(EditSession {
-                target: target.clone(),
-                draft_source: None,
-                draft_block_values: wallhaven_edit::block_draft(
+            EditTarget::Block(CONFIG_BLOCK_ROTATION) => Some(EditSession::new(
+                target.clone(),
+                None,
+                config_block_edit::rotation_draft(&self.ctx.config),
+            )),
+            EditTarget::Block(CONFIG_BLOCK_LIBRARY) => Some(EditSession::new(
+                target.clone(),
+                None,
+                config_block_edit::library_draft(&self.ctx.config),
+            )),
+            EditTarget::Block(CONFIG_BLOCK_APPLY_DISPLAY) => Some(EditSession::new(
+                target.clone(),
+                None,
+                config_block_edit::display_draft(&self.ctx.config),
+            )),
+            EditTarget::Block(CONFIG_BLOCK_TUI) => Some(EditSession::new(
+                target.clone(),
+                None,
+                config_block_edit::tui_draft(&self.ctx.config),
+            )),
+            EditTarget::Wallhaven => Some(EditSession::new(
+                target.clone(),
+                None,
+                wallhaven_edit::block_draft(
                     &self.ctx.config,
                     wallhaven_edit::api_key_present(&self.ctx.secrets),
                 ),
-                field_cursor: 0,
-                field_buffer: String::new(),
-                validation_errors: vec![],
-            }),
-            EditTarget::SearchFilters => Some(EditSession {
-                target: target.clone(),
-                draft_source: None,
-                draft_block_values: wallhaven_edit::search_draft(
+            )),
+            EditTarget::SearchFilters => Some(EditSession::new(
+                target.clone(),
+                None,
+                wallhaven_edit::search_draft(
                     &self.search_filters,
                     wallhaven_edit::api_key_present(&self.ctx.secrets),
                 ),
-                field_cursor: 0,
-                field_buffer: String::new(),
-                validation_errors: vec![],
-            }),
+            )),
             _ => None,
         }
     }
 
-    #[allow(dead_code)]
+    fn sync_edit_field_buffer(&mut self) {
+        let new_buf = self.current_edit_field_value();
+        if let Some(session) = &mut self.editing {
+            session.field_buffer = new_buf;
+        }
+    }
+
     pub fn cancel_edit(&mut self) {
         self.editing = None;
         self.set_message(StatusKind::Neutral, "edit cancelled");
     }
 
-    #[allow(dead_code)]
     pub fn is_editing(&self) -> bool {
         self.editing.is_some()
     }
@@ -340,12 +317,10 @@ impl App {
         choice_display_value(kind, value)
     }
 
-    #[allow(dead_code)]
     pub fn source_editable_fields(src: &walls_core::config::SourceEntry) -> Vec<String> {
         source_edit::source_editable_fields(src)
     }
 
-    #[allow(dead_code)]
     pub fn get_source_field(src: &walls_core::config::SourceEntry, name: &str) -> String {
         source_edit::get_source_field(src, name)
     }
@@ -354,14 +329,12 @@ impl App {
         source_edit::parse_bool_like(s)
     }
 
-    #[allow(dead_code)]
     pub fn set_source_field(draft: &mut walls_core::config::SourceEntry, name: &str, buf: &str) {
         source_edit::set_source_field(draft, name, buf);
     }
 
     /// Pure value lookup for a field at a given cursor idx for a target (no reliance on live editing sess cursor).
     /// Used by up/down handlers to precompute the *new* position's buffer value without borrow conflicts.
-    #[allow(dead_code)]
     pub fn edit_field_value_at(&self, target: &EditTarget, idx: usize) -> String {
         match target {
             EditTarget::Source(i) if *i < self.ctx.config.sources.len() => {
@@ -415,7 +388,6 @@ impl App {
         }
     }
 
-    #[allow(dead_code)]
     pub fn current_edit_field_value(&self) -> String {
         if let Some(sess) = &self.editing {
             let idx = sess.field_cursor;
@@ -503,7 +475,6 @@ impl App {
         }
     }
 
-    #[allow(dead_code)]
     pub fn enter_config_subnav(&mut self) {
         if self.tab == Tab::Config && self.is_sources_list_block(self.config_cursor) {
             self.config_in_subnav = true;
@@ -532,10 +503,7 @@ impl App {
         self.config_in_subnav = true;
         self.config_sub_cursor = index;
         self.editing = self.edit_session_for_target(EditTarget::Source(index));
-        let new_buf = self.current_edit_field_value();
-        if let Some(session) = &mut self.editing {
-            session.field_buffer = new_buf;
-        }
+        self.sync_edit_field_buffer();
         self.set_message(StatusKind::Success, "source added: Wallhaven query");
         Ok(())
     }
@@ -596,7 +564,6 @@ impl App {
             .is_some_and(|source| !source_removal_protected(source))
     }
 
-    #[allow(dead_code)]
     pub fn refresh_edit_validation(&mut self) {
         if let Some(sess) = &mut self.editing {
             // Build a temp view of the item and validate relevant parts
@@ -658,7 +625,6 @@ impl App {
         }
     }
 
-    #[allow(dead_code)]
     pub fn commit_edit_field_buffer(&mut self) {
         if let Some(sess) = &mut self.editing {
             let buf = std::mem::take(&mut sess.field_buffer);
@@ -705,7 +671,6 @@ impl App {
         }
     }
 
-    #[allow(dead_code)]
     pub fn save_edit_item(&mut self, exit_on_success: bool) -> anyhow::Result<()> {
         // Auto-commit only if there's a pending non-empty buffer (e.g. direct Save action use, or 's' if ever mapped).
         // When caller did explicit commit first (Enter or arrow move), buffer is empty so we avoid re-committing empty
