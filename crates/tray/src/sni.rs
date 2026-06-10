@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ksni::blocking::TrayMethods;
 use ksni::menu::StandardItem;
@@ -17,11 +17,14 @@ use crate::resolve_walls_bin;
 use crate::rotation::RotationLoop;
 use crate::state_watch::StateWatcher;
 
+const SCROLL_ACTION_COOLDOWN: Duration = Duration::from_millis(500);
+
 pub struct WallsSniTray {
     tooltip: String,
     icons: Vec<ksni::Icon>,
     feedback: Option<ActionFeedback>,
     action_tx: Sender<MenuAction>,
+    last_scroll_action: Option<Instant>,
 }
 
 impl WallsSniTray {
@@ -31,6 +34,7 @@ impl WallsSniTray {
             icons: icon::ksni_icons_from_state(),
             feedback: None,
             action_tx,
+            last_scroll_action: None,
         };
         if tray.icons.is_empty() {
             tray.icons = icon::default_ksni_icons();
@@ -83,6 +87,23 @@ impl WallsSniTray {
             tracing::warn!("tray action channel closed");
         }
     }
+
+    fn action_for_scroll_at(
+        &mut self,
+        delta: i32,
+        orientation: Orientation,
+        now: Instant,
+    ) -> Option<MenuAction> {
+        let action = action_for_scroll(delta, orientation)?;
+        if self
+            .last_scroll_action
+            .is_some_and(|last| now.saturating_duration_since(last) < SCROLL_ACTION_COOLDOWN)
+        {
+            return None;
+        }
+        self.last_scroll_action = Some(now);
+        Some(action)
+    }
 }
 
 fn action_for_scroll(delta: i32, orientation: Orientation) -> Option<MenuAction> {
@@ -122,7 +143,7 @@ impl Tray for WallsSniTray {
     }
 
     fn scroll(&mut self, delta: i32, orientation: Orientation) {
-        if let Some(action) = action_for_scroll(delta, orientation) {
+        if let Some(action) = self.action_for_scroll_at(delta, orientation, Instant::now()) {
             self.send_action(action);
         }
     }
@@ -264,7 +285,46 @@ mod tests {
         tray.scroll(1, Orientation::Horizontal);
 
         assert_eq!(rx.recv().expect("next action"), MenuAction::Next);
-        assert_eq!(rx.recv().expect("previous action"), MenuAction::Prev);
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn scroll_action_is_throttled_for_rapid_vertical_events() {
+        let (tx, _rx) = mpsc::channel();
+        let mut tray = WallsSniTray::new(tx);
+        let start = Instant::now();
+
+        assert_eq!(
+            tray.action_for_scroll_at(1, Orientation::Vertical, start),
+            Some(MenuAction::Next)
+        );
+        assert_eq!(
+            tray.action_for_scroll_at(
+                -1,
+                Orientation::Vertical,
+                start + Duration::from_millis(100)
+            ),
+            None
+        );
+        assert_eq!(
+            tray.action_for_scroll_at(-1, Orientation::Vertical, start + SCROLL_ACTION_COOLDOWN),
+            Some(MenuAction::Prev)
+        );
+    }
+
+    #[test]
+    fn ignored_scroll_events_do_not_start_throttle_window() {
+        let (tx, _rx) = mpsc::channel();
+        let mut tray = WallsSniTray::new(tx);
+        let start = Instant::now();
+
+        assert_eq!(
+            tray.action_for_scroll_at(1, Orientation::Horizontal, start),
+            None
+        );
+        assert_eq!(
+            tray.action_for_scroll_at(1, Orientation::Vertical, start + Duration::from_millis(100)),
+            Some(MenuAction::Next)
+        );
     }
 }
