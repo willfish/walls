@@ -33,7 +33,7 @@ impl WallsCtx {
             fetched_dir: root.join("fetched"),
             compose_dir: root.join("wallpaper"),
         };
-        Self::load_with_paths(paths)
+        Self::load_with_paths_and_autostart_sync(paths, false)
     }
 
     pub fn load_with_paths(paths: WallsPaths) -> Result<Self> {

@@ -9,6 +9,28 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-06-10
+
+Consolidated release for the completed v0.10.0, v0.11.0, v0.12.0, and v0.13.0 milestone work.
+
+### Added
+
+- Online provider maturity: configurable source providers, monitor-aware Wallhaven defaults, provider retries/timeouts, provider status reporting, and clearer skip/failure explanations.
+- TUI maturity: complete safe config editing, source editing, key-profile support, preview browsing, search improvements, startup polish, help/discoverability, and safer wallpaper actions.
+- Tray maturity: StatusNotifier and AppIndicator share action dispatch, richer action feedback, favorite/current actions, preview prewarming, TUI launch recovery, and scroll-wheel next/previous support where the tray host forwards SNI scroll events.
+- Observability and recovery: event journal foundation, `walls logs`, last-run summaries, first-run doctor guidance, recovery text for missing current/previous wallpapers, provider failures, and credential/setup issues.
+- Cache and desktop tooling: cache inspect/prune/quota clarity, tray/autostart diagnostics, wrapped terminal desktop identity, and backend diagnostics.
+- Quality infrastructure: config/secrets schemas, benchmark coverage for hot paths, Rust style documentation, stronger CI coverage floor, deterministic TUI smoke coverage, and TUI module extraction.
+
+### Changed
+
+- Bumped workspace and packaged release version metadata to `0.13.0`.
+- Reworked documentation around user journeys, troubleshooting, README positioning, and the TUI-first project experience.
+
+### Fixed
+
+- Multiple TUI consistency, navigation, status-colour, fallback-state, and recovery edge cases from the quality follow-up backlog.
+
 ## [0.8.0] - 2026-06-05
 
 ### Added
@@ -157,7 +179,12 @@ Initial share of the workspace (M1–M5 scaffold).
 - `systemd` user `walls.service` + `walls.timer`; Nix flake; CI (rustfmt, clippy, test, audit/deny, multi-arch Nix)
 - Example `config.json` / `secrets.json` and home-manager timer sketch
 
-[unreleased]: https://github.com/willfish/walls/compare/v0.6.4...HEAD
+[unreleased]: https://github.com/willfish/walls/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/willfish/walls/compare/v0.9.0...v0.13.0
+[0.9.0]: https://github.com/willfish/walls/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/willfish/walls/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/willfish/walls/compare/v0.6.5...v0.7.0
+[0.6.5]: https://github.com/willfish/walls/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/willfish/walls/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/willfish/walls/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/willfish/walls/compare/v0.6.1...v0.6.2
