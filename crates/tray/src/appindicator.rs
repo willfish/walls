@@ -76,9 +76,11 @@ fn build_menu() -> anyhow::Result<(Menu, Vec<(MenuItem, MenuAction)>)> {
         if spec.separator_before {
             menu.append(&PredefinedMenuItem::separator())?;
         }
-        let item = MenuItem::new(spec.label.as_ref(), true, None);
+        let item = MenuItem::new(spec.label.as_ref(), spec.enabled, None);
         menu.append(&item)?;
-        action_items.push((item, spec.action));
+        if let Some(action) = spec.action {
+            action_items.push((item, action));
+        }
     }
     Ok((menu, action_items))
 }
@@ -137,10 +139,16 @@ mod tests {
         let (_menu, items) = build_menu().expect("build menu");
         let specs = menu_actions();
 
-        assert_eq!(items.len(), specs.len());
-        for ((item, action), spec) in items.iter().zip(specs.iter()) {
-            assert_eq!(*action, spec.action);
-            if spec.action != MenuAction::TogglePause {
+        assert_eq!(
+            items.len(),
+            specs.iter().filter(|spec| spec.action.is_some()).count()
+        );
+        for ((item, action), spec) in items
+            .iter()
+            .zip(specs.iter().filter(|spec| spec.action.is_some()))
+        {
+            assert_eq!(Some(*action), spec.action);
+            if !matches!(spec.action, Some(MenuAction::Pause | MenuAction::Resume)) {
                 assert_eq!(item.text(), spec.label);
             }
         }
