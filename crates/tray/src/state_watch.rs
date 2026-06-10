@@ -6,7 +6,7 @@ use std::time::SystemTime;
 use walls_core::config::{load_or_create_config, TrayAccent};
 use walls_core::cosmic_theme;
 use walls_core::paths::{expand_home, WallsPaths};
-use walls_core::rotation::rotation_inactive;
+use walls_core::rotation::{rotation_inactive, RotationAvailability};
 use walls_core::state::State;
 use walls_core::tray_icon::effective_tray_accent;
 
@@ -17,6 +17,7 @@ pub struct TrayVisualState {
     pub tray_accent: TrayAccent,
     pub cosmic_theme_mtime: Option<SystemTime>,
     pub image_mtime: Option<SystemTime>,
+    pub rotation_availability: RotationAvailability,
 }
 
 impl TrayVisualState {
@@ -45,6 +46,7 @@ impl TrayVisualState {
             tray_accent: config.tray.accent,
             cosmic_theme_mtime,
             image_mtime,
+            rotation_availability: RotationAvailability::from_state_config(&state, &config),
         })
     }
 }
@@ -256,6 +258,46 @@ mod tests {
         let mut config = load_or_create_config(&watcher.paths.config_file).unwrap();
         for source in &mut config.sources {
             source.enabled = false;
+        }
+        write_config(&watcher.paths.config_file, &config);
+        assert!(watcher.poll());
+    }
+
+    #[test]
+    fn poll_detects_pause_toggle_when_sources_are_inactive() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = test_paths(root.path());
+        let mut config = load_or_create_config(&paths.config_file).unwrap();
+        for source in &mut config.sources {
+            source.enabled = false;
+        }
+        write_config(&paths.config_file, &config);
+        write_state(&paths.state_file, &sample_state("/tmp/a.jpg", false));
+
+        let last_visual = TrayVisualState::load(&paths).unwrap();
+        let mut watcher = StateWatcher { paths, last_visual };
+
+        write_state(&watcher.paths.state_file, &sample_state("/tmp/a.jpg", true));
+        assert!(watcher.poll());
+    }
+
+    #[test]
+    fn poll_detects_source_activation_while_paused() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = test_paths(root.path());
+        let mut config = load_or_create_config(&paths.config_file).unwrap();
+        for source in &mut config.sources {
+            source.enabled = false;
+        }
+        write_config(&paths.config_file, &config);
+        write_state(&paths.state_file, &sample_state("/tmp/a.jpg", true));
+
+        let last_visual = TrayVisualState::load(&paths).unwrap();
+        let mut watcher = StateWatcher { paths, last_visual };
+
+        let mut config = load_or_create_config(&watcher.paths.config_file).unwrap();
+        if let Some(source) = config.sources.first_mut() {
+            source.enabled = true;
         }
         write_config(&watcher.paths.config_file, &config);
         assert!(watcher.poll());

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::resolve_walls_bin;
 use crate::rotation;
-use walls_core::rotation::any_sources_enabled;
+use walls_core::rotation::RotationAvailability;
 use walls_core::WallsCtx;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,23 +13,18 @@ pub enum MenuAction {
     Next,
     Prev,
     Favorite,
-    TogglePause,
+    Pause,
+    Resume,
     OpenTui,
     Quit,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuActionSpec {
-    pub action: MenuAction,
+    pub action: Option<MenuAction>,
     pub label: Cow<'static, str>,
     pub separator_before: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct MenuLabelState {
-    pub paused: Option<bool>,
-    pub rotation_enabled: Option<bool>,
-    pub active_sources: Option<bool>,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,22 +49,23 @@ pub struct ActionOutcome {
 
 impl MenuAction {
     pub fn label(self) -> Cow<'static, str> {
-        self.label_for_state(MenuLabelState::default())
+        self.label_for_availability(None)
     }
 
-    pub fn label_for_state(self, state: MenuLabelState) -> Cow<'static, str> {
+    pub fn label_for_availability(
+        self,
+        availability: Option<RotationAvailability>,
+    ) -> Cow<'static, str> {
         match self {
             Self::Next => "Next wallpaper".into(),
             Self::Prev => "Previous wallpaper".into(),
             Self::Favorite => "Favorite current wallpaper".into(),
-            Self::TogglePause => match (state.paused, state.active_sources, state.rotation_enabled)
-            {
-                (Some(true), _, _) => "Resume rotation".into(),
-                (Some(false), Some(false), _) => "Pause rotation (no active sources)".into(),
-                (Some(false), _, Some(false)) => "Pause rotation (rotation disabled)".into(),
-                (Some(false), _, _) => "Pause rotation".into(),
-                _ => "Toggle pause".into(),
+            Self::Pause => match availability {
+                Some(state) if !state.active_sources => "Pause rotation (no active sources)".into(),
+                Some(state) if !state.change_enabled => "Pause rotation (rotation disabled)".into(),
+                _ => "Pause rotation".into(),
             },
+            Self::Resume => "Resume rotation".into(),
             Self::OpenTui => "Open TUI".into(),
             Self::Quit => "Quit tray".into(),
         }
@@ -77,7 +73,7 @@ impl MenuAction {
 
     pub fn outcome(self) -> ActionOutcome {
         match self {
-            Self::Next | Self::Prev | Self::Favorite | Self::TogglePause => {
+            Self::Next | Self::Prev | Self::Favorite | Self::Pause | Self::Resume => {
                 ActionOutcome::refreshing(None)
             }
             Self::OpenTui => ActionOutcome {
@@ -128,25 +124,51 @@ impl ActionFeedback {
 }
 
 pub fn menu_actions() -> Vec<MenuActionSpec> {
-    menu_actions_for_state(load_menu_label_state())
+    menu_actions_for_availability(load_rotation_availability())
 }
 
-pub fn menu_actions_for_state(state: MenuLabelState) -> Vec<MenuActionSpec> {
-    [
+pub fn menu_actions_for_availability(
+    availability: Option<RotationAvailability>,
+) -> Vec<MenuActionSpec> {
+    let pause_action = match availability {
+        Some(state) if state.paused => MenuAction::Resume,
+        Some(_) => MenuAction::Pause,
+        None => MenuAction::Pause,
+    };
+    let mut specs = [
         (MenuAction::Next, false),
         (MenuAction::Prev, false),
         (MenuAction::Favorite, false),
-        (MenuAction::TogglePause, false),
+        (pause_action, false),
         (MenuAction::OpenTui, false),
         (MenuAction::Quit, true),
     ]
     .into_iter()
     .map(|(action, separator_before)| MenuActionSpec {
-        action,
-        label: action.label_for_state(state),
+        action: Some(action),
+        label: action.label_for_availability(availability),
         separator_before,
+        enabled: true,
     })
-    .collect()
+    .collect::<Vec<_>>();
+
+    if availability.is_some_and(|state| !state.active_sources) {
+        let quit_index = specs
+            .iter()
+            .position(|spec| spec.action == Some(MenuAction::Quit))
+            .unwrap_or(specs.len());
+        specs.insert(
+            quit_index,
+            MenuActionSpec {
+                action: None,
+                label: "No active Sources".into(),
+                separator_before: true,
+                enabled: false,
+            },
+        );
+    }
+
+    specs
 }
 
 pub fn dispatch(action: MenuAction) -> ActionOutcome {
@@ -155,7 +177,8 @@ pub fn dispatch(action: MenuAction) -> ActionOutcome {
         MenuAction::Next => dispatch_next(),
         MenuAction::Prev => dispatch_prev(),
         MenuAction::Favorite => dispatch_favorite(),
-        MenuAction::TogglePause => dispatch_toggle_pause(),
+        MenuAction::Pause => dispatch_set_paused(true),
+        MenuAction::Resume => dispatch_set_paused(false),
         MenuAction::OpenTui => match crate::tui::spawn_tui(&walls) {
             Ok(()) => ActionOutcome {
                 refresh: false,
@@ -249,32 +272,32 @@ fn dispatch_favorite() -> ActionOutcome {
     }
 }
 
-fn dispatch_toggle_pause() -> ActionOutcome {
+fn dispatch_set_paused(paused: bool) -> ActionOutcome {
     let result: anyhow::Result<bool> = (|| {
         let mut ctx = WallsCtx::load()?;
-        ctx.toggle_pause()?;
+        ctx.set_paused(paused)?;
         Ok(ctx.state.paused)
     })();
     match result {
         Ok(true) => ActionOutcome::refreshing(Some(ActionFeedback::success("Rotation paused"))),
         Ok(false) => ActionOutcome::refreshing(Some(ActionFeedback::success("Rotation resumed"))),
         Err(err) => {
-            let message = format!("Toggle pause failed: {err:#}");
+            let action = if paused { "Pause" } else { "Resume" };
+            let message = format!("{action} rotation failed: {err:#}");
             tracing::warn!("{message}");
             ActionOutcome::refreshing(Some(ActionFeedback::error(message)))
         }
     }
 }
 
-fn load_menu_label_state() -> MenuLabelState {
+fn load_rotation_availability() -> Option<RotationAvailability> {
     let Ok(ctx) = WallsCtx::load() else {
-        return MenuLabelState::default();
+        return None;
     };
-    MenuLabelState {
-        paused: Some(ctx.state.paused),
-        rotation_enabled: Some(ctx.config.change.enabled),
-        active_sources: Some(any_sources_enabled(&ctx.config)),
-    }
+    Some(RotationAvailability::from_state_config(
+        &ctx.state,
+        &ctx.config,
+    ))
 }
 
 fn display_path(path: &Path) -> String {
@@ -291,20 +314,32 @@ fn sanitize_message(message: &str) -> String {
 mod tests {
     use super::*;
 
+    fn availability(
+        paused: bool,
+        change_enabled: bool,
+        active_sources: bool,
+    ) -> RotationAvailability {
+        RotationAvailability {
+            paused,
+            change_enabled,
+            active_sources,
+        }
+    }
+
     #[test]
     fn menu_actions_define_shared_order_labels_and_separator() {
-        let specs = menu_actions_for_state(MenuLabelState {
-            paused: None,
-            ..MenuLabelState::default()
-        });
-        let actions = specs.iter().map(|spec| spec.action).collect::<Vec<_>>();
+        let specs = menu_actions_for_availability(None);
+        let actions = specs
+            .iter()
+            .filter_map(|spec| spec.action)
+            .collect::<Vec<_>>();
         assert_eq!(
             actions,
             vec![
                 MenuAction::Next,
                 MenuAction::Prev,
                 MenuAction::Favorite,
-                MenuAction::TogglePause,
+                MenuAction::Pause,
                 MenuAction::OpenTui,
                 MenuAction::Quit
             ]
@@ -312,63 +347,74 @@ mod tests {
         assert_eq!(specs[0].label, "Next wallpaper");
         assert_eq!(specs[1].label, "Previous wallpaper");
         assert_eq!(specs[2].label, "Favorite current wallpaper");
-        assert_eq!(specs[3].label, "Toggle pause");
+        assert_eq!(specs[3].label, "Pause rotation");
         assert_eq!(specs[4].label, "Open TUI");
         assert_eq!(specs[5].label, "Quit tray");
         assert!(specs[5].separator_before);
         assert!(specs[..5].iter().all(|spec| !spec.separator_before));
+        assert!(specs.iter().all(|spec| spec.enabled));
     }
 
     #[test]
-    fn menu_actions_make_pause_label_state_aware() {
-        assert_eq!(
-            menu_actions_for_state(MenuLabelState {
-                paused: Some(false),
-                rotation_enabled: Some(true),
-                active_sources: Some(true),
-            })[3]
-                .label,
-            "Pause rotation"
-        );
-        assert_eq!(
-            menu_actions_for_state(MenuLabelState {
-                paused: Some(true),
-                rotation_enabled: Some(true),
-                active_sources: Some(true),
-            })[3]
-                .label,
-            "Resume rotation"
-        );
+    fn menu_actions_choose_explicit_pause_or_resume_action() {
+        let pause = menu_actions_for_availability(Some(availability(false, true, true)));
+        assert_eq!(pause[3].action, Some(MenuAction::Pause));
+        assert_eq!(pause[3].label, "Pause rotation");
+
+        let resume = menu_actions_for_availability(Some(availability(true, true, true)));
+        assert_eq!(resume[3].action, Some(MenuAction::Resume));
+        assert_eq!(resume[3].label, "Resume rotation");
     }
 
     #[test]
     fn menu_actions_explain_derived_inactive_rotation() {
+        let paused_without_sources =
+            menu_actions_for_availability(Some(availability(true, true, false)));
+        assert_eq!(paused_without_sources[3].action, Some(MenuAction::Resume));
+        assert_eq!(paused_without_sources[3].label, "Resume rotation");
+
+        let rotation_disabled =
+            menu_actions_for_availability(Some(availability(false, false, true)));
+        assert_eq!(rotation_disabled[3].action, Some(MenuAction::Pause));
         assert_eq!(
-            menu_actions_for_state(MenuLabelState {
-                paused: Some(true),
-                rotation_enabled: Some(true),
-                active_sources: Some(false),
-            })[3]
-                .label,
-            "Resume rotation"
-        );
-        assert_eq!(
-            menu_actions_for_state(MenuLabelState {
-                paused: Some(false),
-                rotation_enabled: Some(false),
-                active_sources: Some(true),
-            })[3]
-                .label,
+            rotation_disabled[3].label,
             "Pause rotation (rotation disabled)"
         );
+
+        let no_sources = menu_actions_for_availability(Some(availability(false, true, false)));
+        assert_eq!(no_sources[3].action, Some(MenuAction::Pause));
+        assert_eq!(no_sources[3].label, "Pause rotation (no active sources)");
+    }
+
+    #[test]
+    fn menu_actions_show_no_active_sources_status_only_when_needed() {
+        let with_sources = menu_actions_for_availability(Some(availability(false, true, true)));
+        assert!(!with_sources.iter().any(|spec| spec.action.is_none()));
         assert_eq!(
-            menu_actions_for_state(MenuLabelState {
-                paused: Some(false),
-                rotation_enabled: Some(true),
-                active_sources: Some(false),
-            })[3]
-                .label,
-            "Pause rotation (no active sources)"
+            with_sources
+                .iter()
+                .filter(|spec| spec.separator_before)
+                .count(),
+            1
+        );
+
+        let without_sources = menu_actions_for_availability(Some(availability(false, true, false)));
+        let status = without_sources
+            .iter()
+            .find(|spec| spec.action.is_none())
+            .expect("no active sources status item");
+
+        assert_eq!(status.label, "No active Sources");
+        assert!(status.separator_before);
+        assert!(!status.enabled);
+        assert_eq!(
+            without_sources
+                .iter()
+                .position(|spec| spec.action.is_none()),
+            without_sources
+                .iter()
+                .position(|spec| spec.action == Some(MenuAction::Quit))
+                .map(|index| index.saturating_sub(1))
         );
     }
 

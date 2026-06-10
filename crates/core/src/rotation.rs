@@ -98,12 +98,38 @@ pub async fn advance_manual(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf
 ///
 /// True when rotation is explicitly paused or disabled, or when no sources are enabled.
 pub fn rotation_inactive(state: &State, config: &Config) -> bool {
-    state.paused || !config.change.enabled || !any_sources_enabled(config)
+    RotationAvailability::from_state_config(state, config).inactive()
 }
 
 /// Any configured source is enabled.
 pub fn any_sources_enabled(config: &Config) -> bool {
     config.sources.iter().any(|source| source.enabled)
+}
+
+/// Domain state that decides whether automatic rotation can run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RotationAvailability {
+    pub paused: bool,
+    pub change_enabled: bool,
+    pub active_sources: bool,
+}
+
+impl RotationAvailability {
+    pub fn from_state_config(state: &State, config: &Config) -> Self {
+        Self {
+            paused: state.paused,
+            change_enabled: config.change.enabled,
+            active_sources: any_sources_enabled(config),
+        }
+    }
+
+    pub fn inactive(self) -> bool {
+        self.paused || !self.change_enabled || !self.active_sources
+    }
+
+    pub fn can_auto_rotate(self) -> bool {
+        !self.paused && self.change_enabled && self.active_sources
+    }
 }
 
 #[cfg(test)]
@@ -203,6 +229,36 @@ mod tests {
         let config = config_with_sources(true);
         assert!(any_sources_enabled(&config));
         assert!(!rotation_inactive(&state(false, 0), &config));
+    }
+
+    #[test]
+    fn rotation_availability_tracks_pause_config_and_sources_separately() {
+        let mut config = config_with_sources(true);
+        let availability = RotationAvailability::from_state_config(&state(false, 0), &config);
+
+        assert_eq!(
+            availability,
+            RotationAvailability {
+                paused: false,
+                change_enabled: true,
+                active_sources: true,
+            }
+        );
+        assert!(availability.can_auto_rotate());
+
+        config.change.enabled = false;
+        config.sources[0].enabled = false;
+        let availability = RotationAvailability::from_state_config(&state(true, 0), &config);
+        assert_eq!(
+            availability,
+            RotationAvailability {
+                paused: true,
+                change_enabled: false,
+                active_sources: false,
+            }
+        );
+        assert!(availability.inactive());
+        assert!(!availability.can_auto_rotate());
     }
 
     #[test]

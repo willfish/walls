@@ -64,6 +64,15 @@ impl WallsSniTray {
         .into()
     }
 
+    fn disabled_item(label: &str) -> MenuItem<Self> {
+        StandardItem {
+            label: label.into(),
+            enabled: false,
+            ..Default::default()
+        }
+        .into()
+    }
+
     fn send_action(&self, action: MenuAction) {
         if self.action_tx.send(action).is_err() {
             tracing::warn!("tray action channel closed");
@@ -99,7 +108,10 @@ impl Tray for WallsSniTray {
             if spec.separator_before {
                 items.push(MenuItem::Separator);
             }
-            items.push(Self::item(&spec.label, spec.action, tx.clone()));
+            match spec.action {
+                Some(action) => items.push(Self::item(&spec.label, action, tx.clone())),
+                None => items.push(Self::disabled_item(&spec.label)),
+            }
         }
         items
     }
