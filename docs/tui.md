@@ -196,8 +196,8 @@ or deliberately defers it to a later focused slice.
 | `config.sources[].collections[].username` | Editable | Parsed from each Wallhaven collection entry before save. |
 | `config.sources[].collections[].id` | Editable | Parsed from each Wallhaven collection entry before save. |
 | `config.sources[].collections[].label` | Editable | Optional suffix parsed from each Wallhaven collection entry. |
-| `config.sources[].source` | Deferred | Attribution metadata schema field; source normalization does not persist it from TUI edits yet. |
-| `config.sources[].author` | Deferred | Attribution metadata schema field; source normalization does not persist it from TUI edits yet. |
+| `config.sources[].source` | Editable | Attribution source edit form text field; stored as current wallpaper description. |
+| `config.sources[].author` | Editable | Attribution source edit form text field; stored as current wallpaper author. |
 | `secrets.$schema` | Manual | Schema hint for external editors. |
 | `secrets.wallhaven_api_key` | Manual | TUI shows presence/hints only; edit `secrets.json` directly. |
 | `secrets.unsplash_access_key` | Manual | TUI shows presence/hints only; edit `secrets.json` directly. |

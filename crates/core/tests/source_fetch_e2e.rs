@@ -500,6 +500,7 @@ async fn e2e_immich_source_fetches_via_mock_api() {
 #[tokio::test]
 async fn e2e_attribution_source_fetches_direct_url() {
     let server = MockServer::start().await;
+    let image_url = format!("{}/wall.jpg", server.uri());
     Mock::given(method("GET"))
         .and(path("/wall.jpg"))
         .respond_with(ResponseTemplate::new(200).set_body_bytes(b"attr-jpeg"))
@@ -513,13 +514,25 @@ async fn e2e_attribution_source_fetches_direct_url() {
             "enabled": true,
             "type": "attribution",
             "label": "Example",
-            "url": format!("{}/wall.jpg", server.uri())
+            "source": "Example archive",
+            "author": "Ada",
+            "url": image_url
         }]),
     ));
     harness.write_secrets(json!({}));
 
-    let applied = advance_expect_applied(harness.load_ctx()).await;
+    let mut ctx = harness.load_ctx();
+    let applied = ctx
+        .advance_next()
+        .await
+        .unwrap()
+        .expect("attribution should apply");
     assert!(applied.ends_with("attribution-fetch.jpg"));
+    let current = ctx.state.current.as_ref().expect("current wallpaper");
+    assert_eq!(current.provider.as_deref(), Some("attribution"));
+    assert_eq!(current.source_url.as_deref(), Some(image_url.as_str()));
+    assert_eq!(current.description.as_deref(), Some("Example archive"));
+    assert_eq!(current.author.as_deref(), Some("Ada"));
 }
 
 #[tokio::test]

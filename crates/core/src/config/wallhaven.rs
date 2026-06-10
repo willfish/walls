@@ -181,6 +181,8 @@ pub fn default_wallhaven_source() -> SourceEntry {
         api_key: None,
         image_path: None,
         title_path: None,
+        source: None,
+        author: None,
         sort: None,
         time: None,
         categories: Some(search.categories),
