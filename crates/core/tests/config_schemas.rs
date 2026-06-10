@@ -87,7 +87,7 @@ fn tui_config_coverage_matrix_classifies_persisted_schema_fields() {
         "docs/tui.md should document Config tab field coverage"
     );
 
-    for coverage in ["Editable", "Read-only", "Manual", "Deferred"] {
+    for coverage in ["Editable", "Read-only", "Manual"] {
         assert!(
             docs.contains(&format!("| {coverage} |")),
             "coverage matrix should include {coverage} rows"

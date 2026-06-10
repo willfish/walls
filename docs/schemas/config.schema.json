@@ -181,7 +181,6 @@
         "orientation": { "type": "string", "enum": ["landscape", "portrait", "squarish"] },
         "api_key": { "type": "string" },
         "image_path": { "type": "string", "pattern": "^\\$(\\..*)?$" },
-        "title_path": { "type": "string" },
         "sort": { "type": "string", "enum": ["hot", "new", "top", "rising", "controversial"] },
         "time": { "type": "string", "enum": ["hour", "day", "week", "month", "year", "all"] },
         "categories": { "type": "string", "pattern": "^[01]{3}$" },

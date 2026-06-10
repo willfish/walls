@@ -182,7 +182,6 @@ or deliberately defers it to a later focused slice.
 | `config.sources[].orientation` | Editable | Unsplash choice field. |
 | `config.sources[].api_key` | Editable | Pixabay/Immich inline source key; secrets-backed providers stay in `secrets.json`. |
 | `config.sources[].image_path` | Editable | JSON source text field. |
-| `config.sources[].title_path` | Deferred | Legacy schema field; source normalization does not persist it from TUI edits. |
 | `config.sources[].sort` | Editable | Reddit choice field. |
 | `config.sources[].time` | Editable | Reddit choice field when the selected sort uses time. |
 | `config.sources[].categories` | Editable | Wallhaven source category booleans write the bit string. |
