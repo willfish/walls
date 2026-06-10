@@ -74,20 +74,25 @@ impl WallhavenClient {
         let url = format!("{}/api/v1/search", self.base_url);
         let page = page.to_string();
         let purity = purity_for_request(&params.purity, &self.api_key);
+        let mut query = vec![
+            ("q", params.q.as_str()),
+            ("categories", params.categories.as_str()),
+            ("purity", purity.as_str()),
+            ("sorting", params.sorting.as_str()),
+            ("order", params.order.as_str()),
+            ("page", page.as_str()),
+        ];
+        if !params.atleast.trim().is_empty() {
+            query.push(("atleast", params.atleast.as_str()));
+        }
+        if !params.ratios.trim().is_empty() {
+            query.push(("ratios", params.ratios.as_str()));
+        }
         let resp = provider_http::send_with_retries(|| {
             self.http
                 .get(&url)
                 .header("X-API-Key", &self.api_key)
-                .query(&[
-                    ("q", params.q.as_str()),
-                    ("categories", params.categories.as_str()),
-                    ("purity", purity.as_str()),
-                    ("sorting", params.sorting.as_str()),
-                    ("order", params.order.as_str()),
-                    ("atleast", params.atleast.as_str()),
-                    ("ratios", params.ratios.as_str()),
-                    ("page", page.as_str()),
-                ])
+                .query(&query)
         })
         .await?;
         Ok(resp.json().await?)

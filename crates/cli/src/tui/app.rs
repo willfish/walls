@@ -1,6 +1,5 @@
 mod commands;
 mod config_block_edit;
-mod config_summary;
 mod edit_fields;
 mod edit_session;
 mod footer;
@@ -9,13 +8,11 @@ mod open_targets;
 mod source_edit;
 mod wallhaven_edit;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use walls_core::apply::ApplyTrigger;
 
-pub use config_summary::LocalSourceSummary;
-
-use config_summary::{is_local_source, summarize_config_warnings, summarize_local_source};
 pub(crate) use edit_fields::{
     block_field_kind, block_field_label, source_field_kind_for, source_field_label, EditFieldKind,
     APPLY_DISPLAY_BLOCK_FIELDS, CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY,
@@ -26,6 +23,7 @@ pub(crate) use edit_fields::{
 #[cfg(test)]
 pub(crate) use edit_fields::{APPLY_BACKEND_CHOICES, DISPLAY_MODE_CHOICES};
 use walls_core::config::{persist_config, SelectionStrategy, SourceEntry, WallhavenSearch};
+use walls_core::validate::validate_config_diagnostics;
 use walls_core::WallsCtx;
 
 use super::history_browse_view;
@@ -87,23 +85,39 @@ pub enum InputMode {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum EditTarget {
     Block(usize),
     Source(usize),
+    #[allow(dead_code)]
     Wallhaven,
     SearchFilters,
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct EditSession {
     pub target: EditTarget,
     pub draft_source: Option<SourceEntry>,
-    pub draft_block_values: std::collections::HashMap<String, String>,
+    pub draft_block_values: HashMap<String, String>,
     pub field_cursor: usize,
     pub field_buffer: String,
     pub validation_errors: Vec<String>,
+}
+
+impl EditSession {
+    pub fn new(
+        target: EditTarget,
+        draft_source: Option<SourceEntry>,
+        draft_block_values: HashMap<String, String>,
+    ) -> Self {
+        Self {
+            target,
+            draft_source,
+            draft_block_values,
+            field_cursor: 0,
+            field_buffer: String::new(),
+            validation_errors: Vec::new(),
+        }
+    }
 }
 
 pub struct SearchHit {
@@ -123,14 +137,12 @@ pub struct App {
     pub message: String,
     pub message_kind: StatusKind,
     pub input_mode: InputMode,
-    #[allow(dead_code)]
     pub editing: Option<EditSession>,
     pub cmd_line: String,
     pub search_query: String,
     pub search_filters: WallhavenSearch,
     pub search_results: Vec<SearchHit>,
     pub(crate) local_candidates: Vec<PathBuf>,
-    pub(crate) local_source_summaries: Vec<LocalSourceSummary>,
     pub(crate) config_warnings: Vec<String>,
     pub color_mode: ColorMode,
     pub pending_nuke_confirm: bool,
@@ -164,7 +176,6 @@ impl App {
             search_filters,
             search_results: Vec::new(),
             local_candidates: Vec::new(),
-            local_source_summaries: Vec::new(),
             config_warnings,
             color_mode: ColorMode::from_env(),
             pending_nuke_confirm: false,
@@ -196,14 +207,6 @@ impl App {
 
     fn refresh_local_candidates(&mut self) -> anyhow::Result<()> {
         self.local_candidates = self.ctx.collect_local_candidates().unwrap_or_default();
-        self.local_source_summaries = self
-            .ctx
-            .config
-            .sources
-            .iter()
-            .filter(|source| is_local_source(source))
-            .map(|source| summarize_local_source(&self.ctx, source))
-            .collect();
         self.config_warnings = summarize_config_warnings(&self.ctx);
         Ok(())
     }
@@ -498,6 +501,19 @@ impl App {
         persist_config(&self.ctx.paths.config_file, &config)?;
         Ok(Some(message))
     }
+}
+
+fn summarize_config_warnings(ctx: &WallsCtx) -> Vec<String> {
+    validate_config_diagnostics(&ctx.config, &ctx.secrets, &ctx.paths)
+        .into_iter()
+        .map(|diagnostic| {
+            let mut warning = format!("warning: {}: {}", diagnostic.path, diagnostic.message);
+            if let Some(hint) = diagnostic.hint {
+                warning.push_str(&format!(" (hint: {hint})"));
+            }
+            warning
+        })
+        .collect()
 }
 
 #[cfg(test)]

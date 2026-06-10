@@ -49,22 +49,15 @@ pub struct ActionOutcome {
 
 impl MenuAction {
     pub fn label(self) -> Cow<'static, str> {
-        self.label_for_availability(None)
+        self.label_text()
     }
 
-    pub fn label_for_availability(
-        self,
-        availability: Option<RotationAvailability>,
-    ) -> Cow<'static, str> {
+    pub fn label_text(self) -> Cow<'static, str> {
         match self {
             Self::Next => "Next wallpaper".into(),
             Self::Prev => "Previous wallpaper".into(),
             Self::Favorite => "Favorite current wallpaper".into(),
-            Self::Pause => match availability {
-                Some(state) if !state.active_sources => "Pause rotation (no active sources)".into(),
-                Some(state) if !state.change_enabled => "Pause rotation (rotation disabled)".into(),
-                _ => "Pause rotation".into(),
-            },
+            Self::Pause => "Pause rotation".into(),
             Self::Resume => "Resume rotation".into(),
             Self::OpenTui => "Open TUI".into(),
             Self::Quit => "Quit tray".into(),
@@ -146,7 +139,7 @@ pub fn menu_actions_for_availability(
     .into_iter()
     .map(|(action, separator_before)| MenuActionSpec {
         action: Some(action),
-        label: action.label_for_availability(availability),
+        label: action.label_text(),
         separator_before,
         enabled: true,
     })
@@ -367,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn menu_actions_explain_derived_inactive_rotation() {
+    fn pause_label_only_reflects_user_pause_state() {
         let paused_without_sources =
             menu_actions_for_availability(Some(availability(true, true, false)));
         assert_eq!(paused_without_sources[3].action, Some(MenuAction::Resume));
@@ -376,14 +369,11 @@ mod tests {
         let rotation_disabled =
             menu_actions_for_availability(Some(availability(false, false, true)));
         assert_eq!(rotation_disabled[3].action, Some(MenuAction::Pause));
-        assert_eq!(
-            rotation_disabled[3].label,
-            "Pause rotation (rotation disabled)"
-        );
+        assert_eq!(rotation_disabled[3].label, "Pause rotation");
 
         let no_sources = menu_actions_for_availability(Some(availability(false, true, false)));
         assert_eq!(no_sources[3].action, Some(MenuAction::Pause));
-        assert_eq!(no_sources[3].label, "Pause rotation (no active sources)");
+        assert_eq!(no_sources[3].label, "Pause rotation");
     }
 
     #[test]

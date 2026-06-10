@@ -429,6 +429,7 @@ mod tests {
     #[test]
     fn monitor_resolution_maps_to_closest_supported_ratio() {
         assert_eq!(wallhaven_ratio_for_monitor(3360, 2100), "16x10");
+        assert_eq!(wallhaven_ratio_for_monitor(2880, 1920), "3x2");
         assert_eq!(wallhaven_ratio_for_monitor(3840, 2160), "16x9");
         assert_eq!(wallhaven_ratio_for_monitor(3440, 1440), "21x9");
         assert_eq!(wallhaven_ratio_for_monitor(1080, 1920), "9x16");

@@ -261,35 +261,6 @@ fn push_config_block(
     }
 }
 
-#[allow(dead_code)]
-fn local_source_details(app: &App) -> Vec<String> {
-    if app.local_source_summaries.is_empty() {
-        return vec!["no local sources configured".into()];
-    }
-
-    app.local_source_summaries
-        .iter()
-        .enumerate()
-        .map(|(index, source)| {
-            let state = if source.enabled { "on" } else { "off" };
-            let plural = if source.candidates == 1 {
-                "candidate"
-            } else {
-                "candidates"
-            };
-            format!(
-                "{}. [{state}] {} ({}) - {} - {} {plural} - {}",
-                index + 1,
-                source.label,
-                source.source_type,
-                source.status,
-                source.candidates,
-                source.path,
-            )
-        })
-        .collect()
-}
-
 fn rotation_details(app: &App) -> Vec<String> {
     vec![
         format!("enabled: {}", app.ctx.config.change.enabled),

@@ -4,6 +4,7 @@ use crate::config::{
 use crate::state::State;
 
 use super::client::WallhavenClient;
+use super::types::SearchResponse;
 
 fn push_ids(state: &mut State, ids: impl IntoIterator<Item = String>) {
     for id in ids {
@@ -11,6 +12,10 @@ fn push_ids(state: &mut State, ids: impl IntoIterator<Item = String>) {
             state.cache_queue.push(id);
         }
     }
+}
+
+fn search_exhausted(resp: &SearchResponse) -> bool {
+    resp.data.is_empty() || resp.meta.current_page >= resp.meta.last_page
 }
 
 pub async fn refill_wallhaven_cache(
@@ -91,15 +96,24 @@ pub async fn refill_wallhaven_cache(
             .max(1);
         let search = source_wallhaven_search(source);
         let resp = client.search(&search, page).await?;
+        let exhausted = search_exhausted(&resp);
         push_ids(state, resp.data.into_iter().map(|wp| wp.id));
         state.wallhaven.source_search_pages.insert(
             key,
-            if resp.meta.current_page < resp.meta.last_page {
-                resp.meta.current_page + 1
-            } else {
+            if exhausted {
                 1
+            } else {
+                resp.meta.current_page + 1
             },
         );
+
+        if exhausted && state.cache_queue.len() < threshold {
+            let mut fallback_search = search.clone();
+            fallback_search.atleast.clear();
+            fallback_search.ratios.clear();
+            let resp = client.search(&fallback_search, 1).await?;
+            push_ids(state, resp.data.into_iter().map(|wp| wp.id));
+        }
     }
 
     Ok(())
