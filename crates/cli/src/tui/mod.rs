@@ -2,6 +2,7 @@ mod app;
 mod chrome_view;
 mod command;
 mod config_detail_view;
+mod config_edit_view;
 mod history_browse_view;
 mod layout_size;
 mod line_view;
@@ -16,7 +17,6 @@ mod sources_view;
 mod startup;
 mod style;
 
-use crate::tui::app::EditTarget;
 use anyhow::Context;
 use app::{
     App, InputMode, Tab, CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION,
@@ -824,10 +824,22 @@ fn render_tab_body(
                 vec!["(use normal view for j/k subnav)".into()],
                 theme,
             );
-            render_rich_edit(f, chunks[1], app, theme, &edit_target_title(app));
+            config_edit_view::render_rich_edit(
+                f,
+                chunks[1],
+                app,
+                theme,
+                &config_edit_view::edit_target_title(app),
+            );
         } else {
             if app.tab == Tab::Config && app.is_editing() {
-                render_rich_edit(f, area, app, theme, &edit_target_title(app));
+                config_edit_view::render_rich_edit(
+                    f,
+                    area,
+                    app,
+                    theme,
+                    &config_edit_view::edit_target_title(app),
+                );
             } else {
                 render_tab_content(f, area, app, theme, area.width);
             }
@@ -867,7 +879,13 @@ fn render_tab_body(
 ) {
     f.render_widget(Clear, area);
     if app.tab == Tab::Config && app.is_editing() {
-        render_rich_edit(f, area, app, theme, &edit_target_title(app));
+        config_edit_view::render_rich_edit(
+            f,
+            area,
+            app,
+            theme,
+            &config_edit_view::edit_target_title(app),
+        );
     } else {
         render_tab_content(f, area, app, theme, area.width);
     }
@@ -1631,291 +1649,6 @@ fn cosmic_method_label(method: CosmicMethod) -> &'static str {
     }
 }
 
-#[allow(dead_code)]
-/// Descriptive title for the edit target (block or specific source with its json label+type).
-/// Used for chrome block titles so "what is being edited" is obvious at a glance (not generic "Config (editing)").
-fn edit_target_title(app: &App) -> String {
-    if let Some(sess) = &app.editing {
-        match &sess.target {
-            EditTarget::Block(CONFIG_BLOCK_ROTATION) => "Edit Rotation".to_string(),
-            EditTarget::Block(CONFIG_BLOCK_LIBRARY) => "Edit Library".to_string(),
-            EditTarget::Block(CONFIG_BLOCK_APPLY_DISPLAY) => "Edit Apply/display".to_string(),
-            EditTarget::Block(CONFIG_BLOCK_TUI) => "Edit TUI".to_string(),
-            EditTarget::Wallhaven => "Edit Wallhaven".to_string(),
-            EditTarget::SearchFilters => "Edit Search Filters".to_string(),
-            EditTarget::Block(b) => format!("Edit block {}", b),
-            EditTarget::Source(i) => {
-                if let Some(ref src) = sess.draft_source {
-                    if src.source_type == "reddit" {
-                        format!("Edit Reddit #{}", i + 1)
-                    } else {
-                        let lab = sources_view::source_display_name(src);
-                        format!("Edit Source #{}: {} ({})", i + 1, lab, src.source_type)
-                    }
-                } else {
-                    format!("Edit source #{}", i + 1)
-                }
-            }
-        }
-    } else {
-        "Config (editing)".to_string()
-    }
-}
-
-#[allow(dead_code)]
-/// Pure form lines for drill-down edit view (replaces blocks list in main content when editing a Config item).
-/// No overlay/Clear/popup - stable layout, reuses render_lines.
-fn config_edit_form_lines(app: &App) -> Vec<String> {
-    if let Some(sess) = &app.editing {
-        let mut lines: Vec<String> = vec![
-            // Modern form header using box-drawing for a contemporary TUI feel (like lazygit, helix, etc.).
-            // No duplicate title (chrome provides "Edit Rotation" etc.).
-            "┄─ EDIT FORM (▸ focus | ↑/↓ | type or Space/←/→ | Enter save | Esc) ─┄".into(),
-        ];
-        // Validation errors inline at top (after marker) so visible immediately, with !! cue for red styling.
-        // This addresses "they have no validation" and "s it just fails" (user sees *why* before or on save).
-        if !sess.validation_errors.is_empty() {
-            lines.push("!! Validation errors:".into());
-            for e in &sess.validation_errors {
-                if let Some((message, hint)) = e.split_once(" (hint: ") {
-                    lines.push(format!("!! - {}", message));
-                    lines.push(format!("!!   hint: {}", hint.trim_end_matches(')')));
-                } else {
-                    lines.push(format!("!! - {}", e));
-                }
-            }
-            lines.push("".into());
-        }
-        // dynamic fields list with cursor + live buffer on current (same logic as before)
-        let mut fields: Vec<(String, String, app::EditFieldKind)> = vec![];
-        if let Some(ref src) = sess.draft_source {
-            // Use the single source of truth for necessary fields per type (no dups, no unused like title_path)
-            for name in app::App::source_editable_fields(src) {
-                let label = app::source_field_label(src, &name);
-                let v = app::App::get_source_field(src, &name);
-                fields.push((label, v, app::source_field_kind_for(src, &name)));
-            }
-            if let Some(key) = walls_core::config::source_secrets_key(&src.source_type) {
-                fields.push((
-                    walls_core::config::secrets_credential_label(key).into(),
-                    walls_core::config::SECRETS_EDIT_HINT.into(),
-                    app::EditFieldKind::Text,
-                ));
-            } else if src.source_type == "wallhaven" {
-                fields.push((
-                    "Wallhaven API key".into(),
-                    walls_core::config::SECRETS_EDIT_HINT.into(),
-                    app::EditFieldKind::Text,
-                ));
-            }
-        } else if matches!(
-            &sess.target,
-            EditTarget::Wallhaven | EditTarget::SearchFilters
-        ) {
-            let keys = if matches!(&sess.target, EditTarget::SearchFilters) {
-                app::SEARCH_FILTER_FIELDS
-            } else {
-                app::WALLHAVEN_BLOCK_FIELDS
-            };
-            for k in keys {
-                if let Some(v) = sess.draft_block_values.get(*k) {
-                    let label = if *k == "purity_nsfw" && !app.wallhaven_block_field_locked(k) {
-                        "Purity: NSFW".to_string()
-                    } else {
-                        app::block_field_label(app::WALLHAVEN_FIELDS_BLOCK, k)
-                    };
-                    fields.push((
-                        label,
-                        v.clone(),
-                        app::block_field_kind(app::WALLHAVEN_FIELDS_BLOCK, k),
-                    ));
-                }
-            }
-            if matches!(&sess.target, EditTarget::Wallhaven) {
-                fields.push((
-                    "API key".into(),
-                    walls_core::config::SECRETS_EDIT_HINT.into(),
-                    app::EditFieldKind::Text,
-                ));
-            }
-        } else if let EditTarget::Block(block) = &sess.target {
-            let keys = match *block {
-                CONFIG_BLOCK_ROTATION => app::ROTATION_BLOCK_FIELDS,
-                CONFIG_BLOCK_LIBRARY => app::LIBRARY_BLOCK_FIELDS,
-                CONFIG_BLOCK_APPLY_DISPLAY => app::APPLY_DISPLAY_BLOCK_FIELDS,
-                CONFIG_BLOCK_TUI => app::TUI_BLOCK_FIELDS,
-                _ => &[],
-            };
-            for k in keys {
-                if let Some(v) = sess.draft_block_values.get(*k) {
-                    fields.push((
-                        app::block_field_label(*block, k),
-                        v.clone(),
-                        app::block_field_kind(*block, k),
-                    ));
-                }
-            }
-        }
-        // Right-aligned labels within a capped column for a tight, modern form look (avoids huge gaps on short labels like "Type").
-        // Values stay in a clean column. Cap prevents sparse layout on small forms.
-        let max_label = fields.iter().map(|(l, _, _)| l.len()).max().unwrap_or(0);
-        let pad = std::cmp::min(max_label, 28);
-        let wallhaven_keys = if matches!(&sess.target, EditTarget::Wallhaven) {
-            app::WALLHAVEN_BLOCK_FIELDS
-        } else if matches!(&sess.target, EditTarget::SearchFilters) {
-            app::SEARCH_FILTER_FIELDS
-        } else {
-            &[] as &[&str]
-        };
-        let source_names = sess
-            .draft_source
-            .as_ref()
-            .map(app::App::source_editable_fields);
-        for (i, (k, v, kind)) in fields.iter().enumerate() {
-            let padded = format!("{:>width$}", k, width = pad);
-            let field_key = source_names
-                .as_ref()
-                .and_then(|names| names.get(i).map(String::as_str))
-                .or_else(|| wallhaven_keys.get(i).copied())
-                .unwrap_or("");
-            let val = if i == sess.field_cursor {
-                match kind {
-                    app::EditFieldKind::Text => format!("{}|", sess.field_buffer),
-                    app::EditFieldKind::Bool | app::EditFieldKind::Choice(_) => format!(
-                        "‹ {} ›",
-                        if let Some(src) = &sess.draft_source {
-                            if src.source_type == "reddit" {
-                                app.reddit_field_display_value(
-                                    src,
-                                    field_key,
-                                    &sess.field_buffer,
-                                    *kind,
-                                )
-                            } else {
-                                app::App::choice_display_for_current_field(
-                                    &sess.field_buffer,
-                                    *kind,
-                                )
-                            }
-                        } else if field_key.is_empty() {
-                            app::App::choice_display_for_current_field(&sess.field_buffer, *kind)
-                        } else {
-                            app.wallhaven_field_display_value(field_key, &sess.field_buffer, *kind)
-                        }
-                    ),
-                }
-            } else if let Some(src) = &sess.draft_source {
-                if src.source_type == "reddit" {
-                    app.reddit_field_display_value(src, field_key, v, *kind)
-                } else {
-                    app::App::choice_display_for_current_field(v, *kind)
-                }
-            } else if field_key.is_empty() {
-                app::App::choice_display_for_current_field(v, *kind)
-            } else {
-                app.wallhaven_field_display_value(field_key, v, *kind)
-            };
-            if i == sess.field_cursor {
-                lines.push(format!("▸ {}: {}", padded, val));
-            } else {
-                lines.push(format!("  {}: {}", padded, val));
-            }
-        }
-        lines
-    } else {
-        vec![]
-    }
-}
-
-/// Build rich ListItems for the edit form using Spans for per-segment styling.
-/// This enables modern form aesthetics: accent/cyan labels for hierarchy, normal values,
-/// strong selected highlight on the current row (▸ ), red errors, etc.
-/// Keeps the plain text content the same for tests/pty inspection.
-fn build_rich_edit_form_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
-    let plain_lines = config_edit_form_lines(app);
-    let mut items = Vec::new();
-    for line in plain_lines {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("┄")
-            || trimmed.starts_with("───")
-            || trimmed.starts_with("─ ")
-            || trimmed.starts_with("===")
-        {
-            // Modern header/separator
-            let l = Line::from(Span::styled(
-                line,
-                theme.accent().add_modifier(Modifier::BOLD),
-            ));
-            items.push(ListItem::new(l));
-            continue;
-        }
-        if trimmed.starts_with("!!") {
-            let err_st = theme.status(style::StatusKind::Error);
-            let l = Line::from(vec![
-                Span::styled("!! ", err_st),
-                Span::styled(line[3..].to_string(), err_st),
-            ]);
-            items.push(ListItem::new(l));
-            continue;
-        }
-        if trimmed.starts_with("▸ ") || trimmed.starts_with("  ") {
-            // Field: split for rich modern styling.
-            // - Current row: high-contrast black-on-cyan (edit_focus_*) so labels stay readable.
-            // - Non-current: labels muted. Bool values use state styles, not success/error.
-            if let Some(colon_pos) = line.find(": ") {
-                let label_part = &line[..colon_pos];
-                let value_part = &line[colon_pos + 2..];
-                let is_cur = trimmed.starts_with("▸ ");
-                let label_st = if is_cur {
-                    theme.edit_focus_label()
-                } else {
-                    theme.muted()
-                };
-                let val_st = if is_cur {
-                    theme.edit_focus_value()
-                } else if value_part == "true" {
-                    theme.boolean_true()
-                } else if value_part == "false" {
-                    theme.boolean_false()
-                } else if value_part.starts_with("unavailable") {
-                    theme.unavailable()
-                } else {
-                    theme.normal()
-                };
-                let l = Line::from(vec![
-                    Span::styled(label_part.to_string(), label_st),
-                    Span::styled(
-                        ": ",
-                        if is_cur {
-                            theme.edit_focus_row()
-                        } else {
-                            theme.normal()
-                        },
-                    ),
-                    Span::styled(value_part.to_string(), val_st),
-                ]);
-                items.push(ListItem::new(l));
-                continue;
-            }
-        }
-        // Fallback to plain + line_style
-        let st = line_view::line_style(&line, theme);
-        items.push(ListItem::new(line).style(st));
-    }
-    items
-}
-
-/// Render the edit form with rich per-segment Spans (labels in accent/muted for hierarchy,
-/// values normal, current row with selected highlight). This makes the form feel more modern
-/// and "designed" (visual distinction, scannable) while reusing the string builder for tests.
-fn render_rich_edit(f: &mut Frame, area: Rect, app: &App, theme: style::Theme, block_title: &str) {
-    let items = build_rich_edit_form_items(app, theme);
-    let list = List::new(items)
-        .block(theme.content_block(block_title))
-        .style(theme.normal());
-    f.render_widget(list, area);
-}
-
 #[cfg(test)]
 mod tests {
     use std::{fs, sync::Mutex};
@@ -1933,14 +1666,16 @@ mod tests {
 
     use super::{
         action_for_key,
-        app::{App, EditFieldKind, SearchHit, APPLY_BACKEND_CHOICES, DISPLAY_MODE_CHOICES},
+        app::{
+            App, EditFieldKind, EditTarget, SearchHit, APPLY_BACKEND_CHOICES, DISPLAY_MODE_CHOICES,
+        },
         apply_effect,
         chrome_view::{footer_keys, footer_paragraph},
         draw_inner, handle_key,
         line_view::line_style,
         open_target::{open_command, OpenTarget},
         startup::{draw_startup_intro, intro_disabled_value, StartupIntro},
-        style, update, EditTarget, InputMode, Tab, TerminalSize, UiAction, UpdateEffect,
+        style, update, InputMode, Tab, TerminalSize, UiAction, UpdateEffect,
         CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION,
         CONFIG_BLOCK_SOURCES, CONFIG_BLOCK_TUI,
     };
