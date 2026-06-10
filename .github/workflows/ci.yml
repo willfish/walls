@@ -43,6 +43,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: cachix/install-nix-action@v31
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: "true"
       - run: nix develop -c cargo clippy --workspace --all-targets -- -D warnings
 
   test:
@@ -52,6 +55,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: cachix/install-nix-action@v31
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: "true"
       - run: nix develop -c cargo test --workspace
 
   coverage:
@@ -61,6 +67,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: cachix/install-nix-action@v31
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: "true"
       - name: Run cargo llvm-cov
         run: |
           mkdir -p target/llvm-cov
@@ -90,6 +99,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: cachix/install-nix-action@v31
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: "true"
       - run: nix develop -c cargo clippy -p walls --features tui-preview --all-targets -- -D warnings
       - run: nix develop -c cargo test -p walls --features tui-preview
 
@@ -101,6 +113,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: cachix/install-nix-action@v31
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: "true"
       - run: nix develop -c cargo build --release -p walls -p walls-tray
       - name: Verify binaries
         run: |
@@ -128,7 +143,6 @@ jobs:
 
   nix:
     name: Nix (${{ matrix.system }})
-    needs: [fmt, clippy, test, tui-preview]
     timeout-minutes: 90
     strategy:
       fail-fast: false
