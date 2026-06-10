@@ -185,6 +185,10 @@ pub struct SourceEntry {
     pub image_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
     /// Reddit listing sort (`hot`, `new`, `top`, `rising`, `controversial`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sort: Option<String>,
