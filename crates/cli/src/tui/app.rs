@@ -1,4 +1,5 @@
 mod config_summary;
+mod wallhaven_edit;
 
 use std::path::PathBuf;
 
@@ -10,8 +11,7 @@ use config_summary::{is_local_source, summarize_config_warnings, summarize_local
 use walls_core::config::{
     default_wallhaven_source, normalize_source_entry, persist_config, reddit_sort_needs_time,
     reddit_sort_value, reddit_time_value, source_editable_fields as core_source_editable_fields,
-    source_wallhaven_prefer, source_wallhaven_search, ApplyBackendSetting, Config, CosmicMethod,
-    SelectionStrategy, SourceEntry, TuiKeyProfile, WallhavenCollection, WallhavenPrefer,
+    ApplyBackendSetting, Config, CosmicMethod, SelectionStrategy, SourceEntry, TuiKeyProfile,
     WallhavenSearch, REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
 };
 use walls_core::validate::{
@@ -212,14 +212,6 @@ pub(crate) const APPLY_DISPLAY_BLOCK_FIELDS: &[&str] = &[
     "filters_command",
 ];
 
-fn wallhaven_bit_at(s: &str, idx: usize, default: bool) -> bool {
-    s.chars().nth(idx).map(|c| c == '1').unwrap_or(default)
-}
-
-fn wallhaven_bits_from_bools(a: bool, b: bool, c: bool) -> String {
-    format!("{}{}{}", u8::from(a), u8::from(b), u8::from(c))
-}
-
 fn rotation_block_draft(config: &Config) -> std::collections::HashMap<String, String> {
     let mut vals = std::collections::HashMap::new();
     vals.insert("enabled".into(), config.change.enabled.to_string());
@@ -251,134 +243,6 @@ fn rotation_block_draft(config: &Config) -> std::collections::HashMap<String, St
         walls_core::autostart::tray_autostart_enabled_for_desktop(config, desktop).to_string(),
     );
     vals
-}
-
-fn wallhaven_api_key_present(secrets: &walls_core::config::Secrets) -> bool {
-    !secrets.wallhaven_api_key.trim().is_empty()
-}
-
-fn wallhaven_block_draft(
-    config: &Config,
-    api_key_present: bool,
-) -> std::collections::HashMap<String, String> {
-    let source = first_wallhaven_source(config);
-    let search = source.map(source_wallhaven_search).unwrap_or_default();
-    let mut vals = std::collections::HashMap::new();
-    vals.insert(
-        "enabled".into(),
-        source.is_some_and(|source| source.enabled).to_string(),
-    );
-    vals.insert(
-        "prefer".into(),
-        wallhaven_prefer_label(source.map(source_wallhaven_prefer).unwrap_or_default()),
-    );
-    vals.extend(wallhaven_search_draft(&search, api_key_present));
-    vals
-}
-
-fn wallhaven_search_draft(
-    search: &WallhavenSearch,
-    api_key_present: bool,
-) -> std::collections::HashMap<String, String> {
-    let mut vals = std::collections::HashMap::new();
-    vals.insert("search_q".into(), search.q.clone());
-    vals.insert(
-        "category_general".into(),
-        wallhaven_bit_at(&search.categories, 0, true).to_string(),
-    );
-    vals.insert(
-        "category_anime".into(),
-        wallhaven_bit_at(&search.categories, 1, false).to_string(),
-    );
-    vals.insert(
-        "category_people".into(),
-        wallhaven_bit_at(&search.categories, 2, false).to_string(),
-    );
-    vals.insert(
-        "purity_sfw".into(),
-        wallhaven_bit_at(&search.purity, 0, true).to_string(),
-    );
-    vals.insert(
-        "purity_sketchy".into(),
-        wallhaven_bit_at(&search.purity, 1, false).to_string(),
-    );
-    vals.insert(
-        "purity_nsfw".into(),
-        if api_key_present {
-            wallhaven_bit_at(&search.purity, 2, false).to_string()
-        } else {
-            "false".into()
-        },
-    );
-    vals.insert("sorting".into(), search.sorting.clone());
-    vals.insert("order".into(), search.order.clone());
-    vals.insert("ratios".into(), search.ratios.clone());
-    vals.insert("atleast".into(), search.atleast.clone());
-    vals
-}
-
-fn wallhaven_prefer_label(prefer: WallhavenPrefer) -> String {
-    match prefer {
-        WallhavenPrefer::CollectionsThenSearch => "collections_then_search".into(),
-        WallhavenPrefer::SearchOnly => "search_only".into(),
-        WallhavenPrefer::CollectionsOnly => "collections_only".into(),
-    }
-}
-
-fn parse_wallhaven_prefer(s: &str) -> Option<WallhavenPrefer> {
-    match s.trim().to_ascii_lowercase().as_str() {
-        "collections_then_search" => Some(WallhavenPrefer::CollectionsThenSearch),
-        "search_only" => Some(WallhavenPrefer::SearchOnly),
-        "collections_only" => Some(WallhavenPrefer::CollectionsOnly),
-        _ => None,
-    }
-}
-
-fn format_wallhaven_collections(collections: &[WallhavenCollection]) -> String {
-    collections
-        .iter()
-        .map(|collection| {
-            let base = format!("{}/{}", collection.username, collection.id);
-            collection
-                .label
-                .as_deref()
-                .filter(|label| !label.trim().is_empty())
-                .map_or(base.clone(), |label| format!("{base}:{label}"))
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn parse_wallhaven_collections(value: &str) -> Vec<WallhavenCollection> {
-    value
-        .split(',')
-        .filter_map(|entry| {
-            let entry = entry.trim();
-            if entry.is_empty() {
-                return None;
-            }
-            let (identity, label) =
-                entry
-                    .split_once(':')
-                    .map_or((entry, None), |(identity, label)| {
-                        let label = label.trim();
-                        (
-                            identity.trim(),
-                            (!label.is_empty()).then(|| label.to_string()),
-                        )
-                    });
-            let (username, id) = identity
-                .split_once('/')
-                .map_or((identity.trim(), 0), |(username, id)| {
-                    (username.trim(), id.trim().parse::<u32>().unwrap_or(0))
-                });
-            Some(WallhavenCollection {
-                username: username.to_string(),
-                id,
-                label,
-            })
-        })
-        .collect()
 }
 
 pub(crate) fn block_field_label(block: usize, key: &str) -> String {
@@ -719,37 +583,43 @@ fn block_field_value_at(
             _ => String::new(),
         },
         WALLHAVEN_FIELDS_BLOCK => match *key {
-            "enabled" => first_wallhaven_source(config)
+            "enabled" => wallhaven_edit::first_source(config)
                 .is_some_and(|source| source.enabled)
                 .to_string(),
-            "prefer" => wallhaven_prefer_label(
-                first_wallhaven_source(config)
-                    .map(source_wallhaven_prefer)
+            "prefer" => wallhaven_edit::prefer_label(
+                wallhaven_edit::first_source(config)
+                    .map(walls_core::config::source_wallhaven_prefer)
                     .unwrap_or_default(),
             ),
-            "search_q" => first_wallhaven_search(config).q,
+            "search_q" => wallhaven_edit::first_search(config).q,
             "category_general" => {
-                wallhaven_bit_at(&first_wallhaven_search(config).categories, 0, true).to_string()
+                wallhaven_edit::bit_at(&wallhaven_edit::first_search(config).categories, 0, true)
+                    .to_string()
             }
             "category_anime" => {
-                wallhaven_bit_at(&first_wallhaven_search(config).categories, 1, false).to_string()
+                wallhaven_edit::bit_at(&wallhaven_edit::first_search(config).categories, 1, false)
+                    .to_string()
             }
             "category_people" => {
-                wallhaven_bit_at(&first_wallhaven_search(config).categories, 2, false).to_string()
+                wallhaven_edit::bit_at(&wallhaven_edit::first_search(config).categories, 2, false)
+                    .to_string()
             }
             "purity_sfw" => {
-                wallhaven_bit_at(&first_wallhaven_search(config).purity, 0, true).to_string()
+                wallhaven_edit::bit_at(&wallhaven_edit::first_search(config).purity, 0, true)
+                    .to_string()
             }
             "purity_sketchy" => {
-                wallhaven_bit_at(&first_wallhaven_search(config).purity, 1, false).to_string()
+                wallhaven_edit::bit_at(&wallhaven_edit::first_search(config).purity, 1, false)
+                    .to_string()
             }
             "purity_nsfw" => {
-                wallhaven_bit_at(&first_wallhaven_search(config).purity, 2, false).to_string()
+                wallhaven_edit::bit_at(&wallhaven_edit::first_search(config).purity, 2, false)
+                    .to_string()
             }
-            "sorting" => first_wallhaven_search(config).sorting,
-            "order" => first_wallhaven_search(config).order,
-            "ratios" => first_wallhaven_search(config).ratios,
-            "atleast" => first_wallhaven_search(config).atleast,
+            "sorting" => wallhaven_edit::first_search(config).sorting,
+            "order" => wallhaven_edit::first_search(config).order,
+            "ratios" => wallhaven_edit::first_search(config).ratios,
+            "atleast" => wallhaven_edit::first_search(config).atleast,
             _ => String::new(),
         },
         CONFIG_BLOCK_TUI => match *key {
@@ -773,12 +643,12 @@ fn search_filter_field_value_at(
     }
     match *key {
         "search_q" => search.q.clone(),
-        "category_general" => wallhaven_bit_at(&search.categories, 0, true).to_string(),
-        "category_anime" => wallhaven_bit_at(&search.categories, 1, false).to_string(),
-        "category_people" => wallhaven_bit_at(&search.categories, 2, false).to_string(),
-        "purity_sfw" => wallhaven_bit_at(&search.purity, 0, true).to_string(),
-        "purity_sketchy" => wallhaven_bit_at(&search.purity, 1, false).to_string(),
-        "purity_nsfw" => wallhaven_bit_at(&search.purity, 2, false).to_string(),
+        "category_general" => wallhaven_edit::bit_at(&search.categories, 0, true).to_string(),
+        "category_anime" => wallhaven_edit::bit_at(&search.categories, 1, false).to_string(),
+        "category_people" => wallhaven_edit::bit_at(&search.categories, 2, false).to_string(),
+        "purity_sfw" => wallhaven_edit::bit_at(&search.purity, 0, true).to_string(),
+        "purity_sketchy" => wallhaven_edit::bit_at(&search.purity, 1, false).to_string(),
+        "purity_nsfw" => wallhaven_edit::bit_at(&search.purity, 2, false).to_string(),
         "sorting" => search.sorting.clone(),
         "order" => search.order.clone(),
         "ratios" => search.ratios.clone(),
@@ -1143,153 +1013,6 @@ fn apply_rotation_block_draft(
     }
 }
 
-fn apply_wallhaven_block_draft(
-    config: &mut Config,
-    draft: &std::collections::HashMap<String, String>,
-    api_key_present: bool,
-) {
-    if !config
-        .sources
-        .iter()
-        .any(|source| source.source_type == "wallhaven")
-    {
-        config.sources.push(default_wallhaven_source());
-    }
-    let Some(source) = first_wallhaven_source_mut(config) else {
-        return;
-    };
-    if let Some(v) = draft.get("enabled") {
-        source.enabled = App::parse_bool_like(v).unwrap_or(source.enabled);
-    }
-    if let Some(v) = draft.get("prefer") {
-        if let Some(prefer) = parse_wallhaven_prefer(v) {
-            source.prefer = Some(prefer);
-        }
-    }
-    apply_wallhaven_search_draft_to_source(source, draft, api_key_present);
-}
-
-fn first_wallhaven_source(config: &Config) -> Option<&SourceEntry> {
-    config
-        .sources
-        .iter()
-        .find(|source| source.source_type == "wallhaven")
-}
-
-fn first_wallhaven_source_mut(config: &mut Config) -> Option<&mut SourceEntry> {
-    config
-        .sources
-        .iter_mut()
-        .find(|source| source.source_type == "wallhaven")
-}
-
-fn first_wallhaven_search(config: &Config) -> WallhavenSearch {
-    first_wallhaven_source(config)
-        .map(source_wallhaven_search)
-        .unwrap_or_default()
-}
-
-fn apply_wallhaven_search_draft(
-    search: &mut WallhavenSearch,
-    draft: &std::collections::HashMap<String, String>,
-    api_key_present: bool,
-) {
-    if let Some(v) = draft.get("search_q") {
-        search.q = v.clone();
-    }
-    let category_general = draft
-        .get("category_general")
-        .and_then(|v| App::parse_bool_like(v))
-        .unwrap_or(wallhaven_bit_at(&search.categories, 0, true));
-    let category_anime = draft
-        .get("category_anime")
-        .and_then(|v| App::parse_bool_like(v))
-        .unwrap_or(wallhaven_bit_at(&search.categories, 1, false));
-    let category_people = draft
-        .get("category_people")
-        .and_then(|v| App::parse_bool_like(v))
-        .unwrap_or(wallhaven_bit_at(&search.categories, 2, false));
-    search.categories =
-        wallhaven_bits_from_bools(category_general, category_anime, category_people);
-
-    let purity_sfw = draft
-        .get("purity_sfw")
-        .and_then(|v| App::parse_bool_like(v))
-        .unwrap_or(wallhaven_bit_at(&search.purity, 0, true));
-    let purity_sketchy = draft
-        .get("purity_sketchy")
-        .and_then(|v| App::parse_bool_like(v))
-        .unwrap_or(wallhaven_bit_at(&search.purity, 1, false));
-    let mut purity_nsfw = draft
-        .get("purity_nsfw")
-        .and_then(|v| App::parse_bool_like(v))
-        .unwrap_or(wallhaven_bit_at(&search.purity, 2, false));
-    if !api_key_present {
-        purity_nsfw = false;
-    }
-    search.purity = wallhaven_bits_from_bools(purity_sfw, purity_sketchy, purity_nsfw);
-    if let Some(v) = draft.get("sorting") {
-        search.sorting = v.clone();
-    }
-    if let Some(v) = draft.get("order") {
-        search.order = v.clone();
-    }
-    if let Some(v) = draft.get("ratios") {
-        search.ratios = v.clone();
-    }
-    if let Some(v) = draft.get("atleast") {
-        search.atleast = v.clone();
-    }
-}
-
-fn apply_wallhaven_search_draft_to_source(
-    source: &mut SourceEntry,
-    draft: &std::collections::HashMap<String, String>,
-    api_key_present: bool,
-) {
-    let mut search = source_wallhaven_search(source);
-    apply_wallhaven_search_draft(&mut search, draft, api_key_present);
-    source.query = Some(search.q);
-    source.categories = Some(search.categories);
-    source.purity = Some(search.purity);
-    source.sorting = Some(search.sorting);
-    source.order = Some(search.order);
-    source.ratios = Some(search.ratios);
-    source.atleast = Some(search.atleast);
-}
-
-fn set_wallhaven_category_bit(source: &mut SourceEntry, index: usize, value: &str) {
-    let Some(enabled) = App::parse_bool_like(value) else {
-        return;
-    };
-    let search = source_wallhaven_search(source);
-    let mut bits = [
-        wallhaven_bit_at(&search.categories, 0, true),
-        wallhaven_bit_at(&search.categories, 1, false),
-        wallhaven_bit_at(&search.categories, 2, false),
-    ];
-    if let Some(bit) = bits.get_mut(index) {
-        *bit = enabled;
-    }
-    source.categories = Some(wallhaven_bits_from_bools(bits[0], bits[1], bits[2]));
-}
-
-fn set_wallhaven_purity_bit(source: &mut SourceEntry, index: usize, value: &str) {
-    let Some(enabled) = App::parse_bool_like(value) else {
-        return;
-    };
-    let search = source_wallhaven_search(source);
-    let mut bits = [
-        wallhaven_bit_at(&search.purity, 0, true),
-        wallhaven_bit_at(&search.purity, 1, false),
-        wallhaven_bit_at(&search.purity, 2, false),
-    ];
-    if let Some(bit) = bits.get_mut(index) {
-        *bit = enabled;
-    }
-    source.purity = Some(wallhaven_bits_from_bools(bits[0], bits[1], bits[2]));
-}
-
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct EditSession {
@@ -1338,7 +1061,7 @@ impl App {
     const NORMAL_TAB_NAV_HINT: &'static str = "1-6/←/→ tabs";
 
     pub fn new(ctx: WallsCtx) -> anyhow::Result<Self> {
-        let search_filters = first_wallhaven_search(&ctx.config);
+        let search_filters = wallhaven_edit::first_search(&ctx.config);
         let search_query = search_filters.q.clone();
         let config_warnings = summarize_config_warnings(&ctx);
         let mut app = Self {
@@ -1666,9 +1389,9 @@ impl App {
                 .sources
                 .get(*index)
                 .and_then(|source| open_target::source(&self.ctx, source)),
-            EditTarget::Wallhaven => Some(open_target::wallhaven_search(&first_wallhaven_search(
-                &self.ctx.config,
-            ))),
+            EditTarget::Wallhaven => Some(open_target::wallhaven_search(
+                &wallhaven_edit::first_search(&self.ctx.config),
+            )),
             _ => None,
         }
     }
@@ -2064,9 +1787,9 @@ impl App {
             EditTarget::Wallhaven => Some(EditSession {
                 target: target.clone(),
                 draft_source: None,
-                draft_block_values: wallhaven_block_draft(
+                draft_block_values: wallhaven_edit::block_draft(
                     &self.ctx.config,
-                    wallhaven_api_key_present(&self.ctx.secrets),
+                    wallhaven_edit::api_key_present(&self.ctx.secrets),
                 ),
                 field_cursor: 0,
                 field_buffer: String::new(),
@@ -2075,9 +1798,9 @@ impl App {
             EditTarget::SearchFilters => Some(EditSession {
                 target: target.clone(),
                 draft_source: None,
-                draft_block_values: wallhaven_search_draft(
+                draft_block_values: wallhaven_edit::search_draft(
                     &self.search_filters,
-                    wallhaven_api_key_present(&self.ctx.secrets),
+                    wallhaven_edit::api_key_present(&self.ctx.secrets),
                 ),
                 field_cursor: 0,
                 field_buffer: String::new(),
@@ -2171,7 +1894,7 @@ impl App {
     }
 
     pub(crate) fn wallhaven_block_field_locked(&self, key: &str) -> bool {
-        key == "purity_nsfw" && !wallhaven_api_key_present(&self.ctx.secrets)
+        key == "purity_nsfw" && !wallhaven_edit::api_key_present(&self.ctx.secrets)
     }
 
     pub(crate) fn current_edit_field_locked(&self) -> bool {
@@ -2293,30 +2016,51 @@ impl App {
             "topic" => src.topic.clone().unwrap_or_default(),
             "orientation" => src.orientation.clone().unwrap_or_default(),
             "sort" => reddit_sort_value(src).to_string(),
-            "category_general" => {
-                wallhaven_bit_at(&source_wallhaven_search(src).categories, 0, true).to_string()
-            }
-            "category_anime" => {
-                wallhaven_bit_at(&source_wallhaven_search(src).categories, 1, false).to_string()
-            }
-            "category_people" => {
-                wallhaven_bit_at(&source_wallhaven_search(src).categories, 2, false).to_string()
-            }
-            "purity_sfw" => {
-                wallhaven_bit_at(&source_wallhaven_search(src).purity, 0, true).to_string()
-            }
-            "purity_sketchy" => {
-                wallhaven_bit_at(&source_wallhaven_search(src).purity, 1, false).to_string()
-            }
-            "purity_nsfw" => {
-                wallhaven_bit_at(&source_wallhaven_search(src).purity, 2, false).to_string()
-            }
+            "category_general" => wallhaven_edit::bit_at(
+                &walls_core::config::source_wallhaven_search(src).categories,
+                0,
+                true,
+            )
+            .to_string(),
+            "category_anime" => wallhaven_edit::bit_at(
+                &walls_core::config::source_wallhaven_search(src).categories,
+                1,
+                false,
+            )
+            .to_string(),
+            "category_people" => wallhaven_edit::bit_at(
+                &walls_core::config::source_wallhaven_search(src).categories,
+                2,
+                false,
+            )
+            .to_string(),
+            "purity_sfw" => wallhaven_edit::bit_at(
+                &walls_core::config::source_wallhaven_search(src).purity,
+                0,
+                true,
+            )
+            .to_string(),
+            "purity_sketchy" => wallhaven_edit::bit_at(
+                &walls_core::config::source_wallhaven_search(src).purity,
+                1,
+                false,
+            )
+            .to_string(),
+            "purity_nsfw" => wallhaven_edit::bit_at(
+                &walls_core::config::source_wallhaven_search(src).purity,
+                2,
+                false,
+            )
+            .to_string(),
             "sorting" => src.sorting.clone().unwrap_or_default(),
             "order" => src.order.clone().unwrap_or_default(),
             "ratios" => src.ratios.clone().unwrap_or_default(),
             "atleast" => src.atleast.clone().unwrap_or_default(),
-            "prefer" => src.prefer.map(wallhaven_prefer_label).unwrap_or_default(),
-            "collections" => format_wallhaven_collections(&src.collections),
+            "prefer" => src
+                .prefer
+                .map(wallhaven_edit::prefer_label)
+                .unwrap_or_default(),
+            "collections" => wallhaven_edit::format_collections(&src.collections),
             "time" => {
                 if reddit_sort_needs_time(reddit_sort_value(src)) {
                     reddit_time_value(src).to_string()
@@ -2330,7 +2074,7 @@ impl App {
 
     /// Lenient bool parser for edit buffers (user may type t/f/1/0/yes/no/on/off/true/false).
     /// Prevents "I set false, s just fails" from strict parse only accepting "true"/"false".
-    fn parse_bool_like(s: &str) -> Option<bool> {
+    pub(super) fn parse_bool_like(s: &str) -> Option<bool> {
         let t = s.trim().to_ascii_lowercase();
         match t.as_str() {
             "true" | "t" | "1" | "yes" | "y" | "on" => Some(true),
@@ -2366,23 +2110,23 @@ impl App {
             "user" => draft.user = v,
             "topic" => draft.topic = v,
             "orientation" => draft.orientation = v,
-            "category_general" => set_wallhaven_category_bit(draft, 0, trimmed),
-            "category_anime" => set_wallhaven_category_bit(draft, 1, trimmed),
-            "category_people" => set_wallhaven_category_bit(draft, 2, trimmed),
-            "purity_sfw" => set_wallhaven_purity_bit(draft, 0, trimmed),
-            "purity_sketchy" => set_wallhaven_purity_bit(draft, 1, trimmed),
-            "purity_nsfw" => set_wallhaven_purity_bit(draft, 2, trimmed),
+            "category_general" => wallhaven_edit::set_category_bit(draft, 0, trimmed),
+            "category_anime" => wallhaven_edit::set_category_bit(draft, 1, trimmed),
+            "category_people" => wallhaven_edit::set_category_bit(draft, 2, trimmed),
+            "purity_sfw" => wallhaven_edit::set_purity_bit(draft, 0, trimmed),
+            "purity_sketchy" => wallhaven_edit::set_purity_bit(draft, 1, trimmed),
+            "purity_nsfw" => wallhaven_edit::set_purity_bit(draft, 2, trimmed),
             "sorting" => draft.sorting = v,
             "order" => draft.order = v,
             "ratios" => draft.ratios = v,
             "atleast" => draft.atleast = v,
             "prefer" => {
-                if let Some(prefer) = parse_wallhaven_prefer(trimmed) {
+                if let Some(prefer) = wallhaven_edit::parse_prefer(trimmed) {
                     draft.prefer = Some(prefer);
                 }
             }
             "collections" => {
-                draft.collections = parse_wallhaven_collections(buf);
+                draft.collections = wallhaven_edit::parse_collections(buf);
             }
             "sort" if !trimmed.is_empty() && REDDIT_SORT_CHOICES.contains(&trimmed) => {
                 draft.sort = Some(trimmed.to_string());
@@ -2673,10 +2417,10 @@ impl App {
                     apply_tui_block_draft(&mut temp, &sess.draft_block_values);
                 }
                 EditTarget::Wallhaven => {
-                    apply_wallhaven_block_draft(
+                    wallhaven_edit::apply_block_draft(
                         &mut temp,
                         &sess.draft_block_values,
-                        wallhaven_api_key_present(&self.ctx.secrets),
+                        wallhaven_edit::api_key_present(&self.ctx.secrets),
                     );
                 }
                 EditTarget::SearchFilters => {}
@@ -2808,19 +2552,19 @@ impl App {
                 success_msg = "config saved: tui preferences".into();
             }
             EditTarget::Wallhaven => {
-                apply_wallhaven_block_draft(
+                wallhaven_edit::apply_block_draft(
                     &mut config,
                     &sess.draft_block_values,
-                    wallhaven_api_key_present(&self.ctx.secrets),
+                    wallhaven_edit::api_key_present(&self.ctx.secrets),
                 );
                 success_msg = "config saved: wallhaven".into();
             }
             EditTarget::SearchFilters => {
                 let mut search = self.search_filters.clone();
-                apply_wallhaven_search_draft(
+                wallhaven_edit::apply_search_draft(
                     &mut search,
                     &sess.draft_block_values,
-                    wallhaven_api_key_present(&self.ctx.secrets),
+                    wallhaven_edit::api_key_present(&self.ctx.secrets),
                 );
                 let mut temp = config.clone();
                 let mut source = default_wallhaven_source();
