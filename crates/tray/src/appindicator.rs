@@ -131,4 +131,18 @@ mod tests {
         );
         assert_eq!(action_for_menu_id("missing", &items), None);
     }
+
+    #[test]
+    fn build_menu_uses_shared_action_order_and_labels() {
+        let (_menu, items) = build_menu().expect("build menu");
+        let specs = menu_actions();
+
+        assert_eq!(items.len(), specs.len());
+        for ((item, action), spec) in items.iter().zip(specs.iter()) {
+            assert_eq!(*action, spec.action);
+            if spec.action != MenuAction::TogglePause {
+                assert_eq!(item.text(), spec.label);
+            }
+        }
+    }
 }

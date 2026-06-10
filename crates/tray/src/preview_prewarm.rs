@@ -97,4 +97,23 @@ mod tests {
         assert_ne!(empty, with_queue);
         assert_ne!(with_queue, with_history);
     }
+
+    #[test]
+    fn preview_fingerprint_ignores_unrelated_state_fields() {
+        let mut state = State {
+            paused: true,
+            no_effects_on: Some("2026-06-10".into()),
+            history_index: 2,
+            last_change_unix: 42,
+            ..State::default()
+        };
+        let fingerprint = preview_fingerprint(&state);
+
+        state.paused = false;
+        state.no_effects_on = None;
+        state.history_index = 0;
+        state.last_change_unix = 0;
+
+        assert_eq!(preview_fingerprint(&state), fingerprint);
+    }
 }
