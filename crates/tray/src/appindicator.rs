@@ -134,6 +134,10 @@ mod tests {
         assert_eq!(action_for_menu_id("missing", &items), None);
     }
 
+    #[cfg_attr(
+        target_os = "macos",
+        ignore = "muda::Menu must be created on the macOS main thread"
+    )]
     #[test]
     fn build_menu_uses_shared_action_order_and_labels() {
         let (_menu, items) = build_menu().expect("build menu");
