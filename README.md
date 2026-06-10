@@ -1,5 +1,16 @@
 # walls
 
+<img width="2870" height="1920" alt="image" src="https://github.com/user-attachments/assets/995f1803-10be-44a1-ba58-39bcc058da1e" />
+
+<img width="2424" height="1684" alt="image" src="https://github.com/user-attachments/assets/b8bf7f3c-0cbf-4f77-a953-8d7d6bedcb9b" />
+
+<img width="2880" height="1920" alt="image" src="https://github.com/user-attachments/assets/b30a5f8c-d6de-46c9-87d4-0b3598a20ad9" />
+
+<img width="2196" height="1532" alt="image" src="https://github.com/user-attachments/assets/0e891b52-9dec-40ff-b276-2d57a60360b9" />
+
+<img width="2192" height="1538" alt="image" src="https://github.com/user-attachments/assets/701f884c-442d-47a2-8857-8823e3505ff2" />
+
+
 `walls` is a Rust wallpaper manager for Linux desktops: local folders, Wallhaven
 search/cache, a keyboard-first TUI, tray controls, and automatic rotation from a
 small JSON config under `~/.config/walls`.
