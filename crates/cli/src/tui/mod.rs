@@ -11,6 +11,7 @@ mod open_target;
 #[cfg(feature = "tui-preview")]
 mod preview;
 mod runtime;
+mod search_view;
 mod sources_view;
 mod startup;
 mod style;
