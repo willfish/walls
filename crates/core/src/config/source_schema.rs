@@ -65,7 +65,8 @@ pub fn source_config_fields(source_type: &str) -> &'static [&'static str] {
         SourceKind::Reddit => &["enabled", "type", "label", "query", "sort", "time"],
         SourceKind::Folder | SourceKind::Image => &["enabled", "type", "label", "path"],
         SourceKind::Json => &["enabled", "type", "label", "url", "image_path"],
-        SourceKind::MediaRss | SourceKind::Attribution => &["enabled", "type", "label", "url"],
+        SourceKind::MediaRss => &["enabled", "type", "label", "url"],
+        SourceKind::Attribution => &["enabled", "type", "label", "url", "source", "author"],
         SourceKind::Unsplash => &[
             "enabled",
             "type",
@@ -110,7 +111,8 @@ pub fn source_editable_fields(entry: &SourceEntry) -> Vec<&'static str> {
             fields
         }
         SourceKind::Json => vec!["enabled", "label", "url", "image_path"],
-        SourceKind::MediaRss | SourceKind::Attribution => vec!["enabled", "label", "url"],
+        SourceKind::MediaRss => vec!["enabled", "label", "url"],
+        SourceKind::Attribution => vec!["enabled", "label", "url", "source", "author"],
         SourceKind::Unsplash => vec![
             "enabled",
             "label",
@@ -166,6 +168,8 @@ pub fn normalize_source_entry(entry: &mut SourceEntry) {
     normalize_optional_field(&allowed, "orientation", &mut entry.orientation);
     normalize_optional_field(&allowed, "api_key", &mut entry.api_key);
     normalize_optional_field(&allowed, "image_path", &mut entry.image_path);
+    normalize_optional_field(&allowed, "source", &mut entry.source);
+    normalize_optional_field(&allowed, "author", &mut entry.author);
     normalize_optional_field(&allowed, "sort", &mut entry.sort);
     normalize_optional_field(&allowed, "time", &mut entry.time);
     normalize_optional_field(&allowed, "categories", &mut entry.categories);
@@ -327,6 +331,8 @@ mod tests {
             orientation: None,
             image_path: None,
             title_path: None,
+            source: None,
+            author: None,
             categories: Some("000".into()),
             purity: Some("000".into()),
             sorting: Some("date".into()),
@@ -353,6 +359,35 @@ mod tests {
         assert!(entry.url.is_none());
         assert!(entry.api_key.is_none());
         assert!(entry.sort.is_none());
+    }
+
+    #[test]
+    fn normalize_attribution_keeps_source_and_author_metadata() {
+        let mut entry = SourceEntry {
+            enabled: true,
+            source_type: "attribution".into(),
+            label: Some("Daily image".into()),
+            url: Some("https://example.com/wall.jpg".into()),
+            source: Some("NASA Image Library".into()),
+            author: Some("Hubble".into()),
+            query: Some("should drop".into()),
+            path: Some("/nope".into()),
+            title_path: Some("$.title".into()),
+            ..SourceEntry::default()
+        };
+        normalize_source_entry(&mut entry);
+        assert_eq!(entry.label.as_deref(), Some("Daily image"));
+        assert_eq!(entry.url.as_deref(), Some("https://example.com/wall.jpg"));
+        assert_eq!(entry.source.as_deref(), Some("NASA Image Library"));
+        assert_eq!(entry.author.as_deref(), Some("Hubble"));
+        assert!(entry.query.is_none());
+        assert!(entry.path.is_none());
+        assert!(entry.title_path.is_none());
+
+        entry.source_type = "json".into();
+        normalize_source_entry(&mut entry);
+        assert!(entry.source.is_none());
+        assert!(entry.author.is_none());
     }
 
     #[test]

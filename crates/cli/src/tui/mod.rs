@@ -4620,6 +4620,74 @@ mod tests {
     }
 
     #[test]
+    fn attribution_source_edit_persists_source_and_author_metadata() {
+        let mut app = test_app_with_config(
+            serde_json::json!({
+                "change": { "enabled": true, "internet_enabled": true },
+                "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+                "sources": [
+                    {
+                        "enabled": true,
+                        "type": "attribution",
+                        "label": "Daily image",
+                        "url": "https://example.com/wall.jpg",
+                        "source": "Example archive",
+                        "author": "Ada"
+                    }
+                ]
+            }),
+            serde_json::json!({}),
+        );
+        app.tab = Tab::Config;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
+        app.start_edit_for_current();
+
+        let fields = app
+            .editing
+            .as_ref()
+            .and_then(|session| session.draft_source.as_ref())
+            .map(App::source_editable_fields)
+            .expect("draft source fields");
+        assert_eq!(fields, vec!["enabled", "label", "url", "source", "author"]);
+        let text = render_text(&app, 100, 28);
+        assert!(text.contains("Source"), "{text}");
+        assert!(text.contains("Example archive"), "{text}");
+        assert!(text.contains("Author"), "{text}");
+        assert!(text.contains("Ada"), "{text}");
+
+        let source_idx = fields
+            .iter()
+            .position(|field| field == "source")
+            .expect("source field");
+        {
+            let editing = app.editing.as_mut().expect("editing");
+            editing.field_cursor = source_idx;
+            editing.field_buffer = "Updated archive".into();
+        }
+        app.commit_edit_field_buffer();
+
+        let author_idx = fields
+            .iter()
+            .position(|field| field == "author")
+            .expect("author field");
+        {
+            let editing = app.editing.as_mut().expect("editing");
+            editing.field_cursor = author_idx;
+            editing.field_buffer = "Grace Hopper".into();
+        }
+        app.commit_edit_field_buffer();
+        app.save_edit_item(false)
+            .expect("save attribution metadata edit");
+
+        let source = &app.ctx.config.sources[0];
+        assert_eq!(source.source.as_deref(), Some("Updated archive"));
+        assert_eq!(source.author.as_deref(), Some("Grace Hopper"));
+        let text = fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
+        assert!(text.contains("\"source\": \"Updated archive\""), "{text}");
+        assert!(text.contains("\"author\": \"Grace Hopper\""), "{text}");
+    }
+
+    #[test]
     fn wallhaven_subnav_shows_api_key_presence() {
         let mut app = test_app_with_config(
             serde_json::json!({

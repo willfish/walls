@@ -31,6 +31,11 @@ pub async fn try_attribution(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBu
     write_file_atomic(&dest, &bytes).await?;
 
     let label = src.label.clone().unwrap_or_else(|| "attribution".into());
+    let description = src
+        .source
+        .clone()
+        .filter(|source| !source.trim().is_empty())
+        .unwrap_or_else(|| label.clone());
     ctx.apply_file_inner_with_metadata(
         &dest,
         ApplyTrigger::Auto,
@@ -38,8 +43,8 @@ pub async fn try_attribution(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBu
         CurrentWallMetadata {
             provider: Some("attribution".into()),
             source_url: Some(image_url.to_string()),
-            author: None,
-            description: Some(label),
+            author: src.author.clone(),
+            description: Some(description),
         },
         true,
     )?;
