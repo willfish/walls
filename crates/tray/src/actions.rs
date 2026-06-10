@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::resolve_walls_bin;
 use crate::rotation;
+use walls_core::rotation::any_sources_enabled;
 use walls_core::WallsCtx;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +28,8 @@ pub struct MenuActionSpec {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct MenuLabelState {
     pub paused: Option<bool>,
+    pub rotation_enabled: Option<bool>,
+    pub active_sources: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,10 +62,13 @@ impl MenuAction {
             Self::Next => "Next wallpaper".into(),
             Self::Prev => "Previous wallpaper".into(),
             Self::Favorite => "Favorite current wallpaper".into(),
-            Self::TogglePause => match state.paused {
-                Some(true) => "Resume rotation".into(),
-                Some(false) => "Pause rotation".into(),
-                None => "Toggle pause".into(),
+            Self::TogglePause => match (state.paused, state.active_sources, state.rotation_enabled)
+            {
+                (Some(true), _, _) => "Resume rotation".into(),
+                (Some(false), Some(false), _) => "Pause rotation (no active sources)".into(),
+                (Some(false), _, Some(false)) => "Pause rotation (rotation disabled)".into(),
+                (Some(false), _, _) => "Pause rotation".into(),
+                _ => "Toggle pause".into(),
             },
             Self::OpenTui => "Open TUI".into(),
             Self::Quit => "Quit tray".into(),
@@ -261,8 +267,13 @@ fn dispatch_toggle_pause() -> ActionOutcome {
 }
 
 fn load_menu_label_state() -> MenuLabelState {
+    let Ok(ctx) = WallsCtx::load() else {
+        return MenuLabelState::default();
+    };
     MenuLabelState {
-        paused: WallsCtx::load().ok().map(|ctx| ctx.state.paused),
+        paused: Some(ctx.state.paused),
+        rotation_enabled: Some(ctx.config.change.enabled),
+        active_sources: Some(any_sources_enabled(&ctx.config)),
     }
 }
 
@@ -282,7 +293,10 @@ mod tests {
 
     #[test]
     fn menu_actions_define_shared_order_labels_and_separator() {
-        let specs = menu_actions_for_state(MenuLabelState { paused: None });
+        let specs = menu_actions_for_state(MenuLabelState {
+            paused: None,
+            ..MenuLabelState::default()
+        });
         let actions = specs.iter().map(|spec| spec.action).collect::<Vec<_>>();
         assert_eq!(
             actions,
@@ -309,14 +323,52 @@ mod tests {
     fn menu_actions_make_pause_label_state_aware() {
         assert_eq!(
             menu_actions_for_state(MenuLabelState {
-                paused: Some(false)
+                paused: Some(false),
+                rotation_enabled: Some(true),
+                active_sources: Some(true),
             })[3]
                 .label,
             "Pause rotation"
         );
         assert_eq!(
-            menu_actions_for_state(MenuLabelState { paused: Some(true) })[3].label,
+            menu_actions_for_state(MenuLabelState {
+                paused: Some(true),
+                rotation_enabled: Some(true),
+                active_sources: Some(true),
+            })[3]
+                .label,
             "Resume rotation"
+        );
+    }
+
+    #[test]
+    fn menu_actions_explain_derived_inactive_rotation() {
+        assert_eq!(
+            menu_actions_for_state(MenuLabelState {
+                paused: Some(true),
+                rotation_enabled: Some(true),
+                active_sources: Some(false),
+            })[3]
+                .label,
+            "Resume rotation"
+        );
+        assert_eq!(
+            menu_actions_for_state(MenuLabelState {
+                paused: Some(false),
+                rotation_enabled: Some(false),
+                active_sources: Some(true),
+            })[3]
+                .label,
+            "Pause rotation (rotation disabled)"
+        );
+        assert_eq!(
+            menu_actions_for_state(MenuLabelState {
+                paused: Some(false),
+                rotation_enabled: Some(true),
+                active_sources: Some(false),
+            })[3]
+                .label,
+            "Pause rotation (no active sources)"
         );
     }
 
