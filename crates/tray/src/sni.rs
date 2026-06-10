@@ -165,6 +165,7 @@ pub fn run() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::FeedbackKind;
 
     #[test]
     fn vertical_scroll_maps_to_next_and_previous_actions() {
@@ -191,5 +192,46 @@ mod tests {
         assert_eq!(action_for_scroll(0, Orientation::Vertical), None);
         assert_eq!(action_for_scroll(1, Orientation::Horizontal), None);
         assert_eq!(action_for_scroll(-1, Orientation::Horizontal), None);
+    }
+
+    #[test]
+    fn tray_trait_exposes_stable_identity_title_icon_and_menu() {
+        let (tx, _rx) = mpsc::channel();
+        let mut tray = WallsSniTray::new(tx);
+
+        assert_eq!(tray.id(), "walls");
+        assert!(!tray.title().is_empty());
+        assert!(!tray.icon_pixmap().is_empty());
+
+        tray.set_feedback(Some(ActionFeedback {
+            kind: FeedbackKind::Success,
+            message: "Changed wallpaper".into(),
+        }));
+
+        assert!(tray.title().contains("Changed wallpaper"));
+
+        let menu = tray.menu();
+        assert_eq!(
+            menu.len(),
+            menu_actions().len()
+                + menu_actions()
+                    .iter()
+                    .filter(|spec| spec.separator_before)
+                    .count()
+        );
+    }
+
+    #[test]
+    fn scroll_sends_actions_through_tray_channel() {
+        let (tx, rx) = mpsc::channel();
+        let mut tray = WallsSniTray::new(tx);
+
+        tray.scroll(1, Orientation::Vertical);
+        tray.scroll(-1, Orientation::Vertical);
+        tray.scroll(1, Orientation::Horizontal);
+
+        assert_eq!(rx.recv().expect("next action"), MenuAction::Next);
+        assert_eq!(rx.recv().expect("previous action"), MenuAction::Prev);
+        assert!(rx.try_recv().is_err());
     }
 }
