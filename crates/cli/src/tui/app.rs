@@ -23,7 +23,8 @@ use super::command::{self, ParsedCommand};
 use super::history_browse_view;
 use super::logs_view;
 use super::open_target::{self, OpenTarget};
-use super::style::{self, ColorMode, StateKind, StatusKind};
+use super::search_view;
+use super::style::{ColorMode, StatusKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -1595,31 +1596,12 @@ impl App {
     }
 
     pub fn search_lines(&self) -> Vec<String> {
-        let mut lines = vec![
-            format!("provider: Wallhaven | query: {}", self.search_query),
-            format!(
-                "filters: purity {} | categories {} | ratio {} | sorting {} {} | minimum {}",
-                self.search_filters.purity,
-                self.search_filters.categories,
-                self.search_filters.ratios,
-                self.search_filters.sorting,
-                self.search_filters.order,
-                self.search_filters.atleast
-            ),
-            "edit: / or i query | e filters".into(),
-        ];
-        if self.search_results.is_empty() {
-            lines.push(style::state_text(
-                StateKind::Empty,
-                "no results; press / or i to edit query, Enter to search",
-            ));
-        } else {
-            for (i, hit) in self.search_results.iter().enumerate() {
-                let mark = if i == self.cursor { ">" } else { " " };
-                lines.push(format!("{mark} Wallhaven {} — {}", hit.id, hit.label));
-            }
-        }
-        lines
+        search_view::lines(
+            &self.search_query,
+            &self.search_filters,
+            &self.search_results,
+            self.cursor,
+        )
     }
 
     pub fn logs_lines(&self, width: u16, height: u16) -> Vec<String> {
