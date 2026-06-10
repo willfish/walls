@@ -1,0 +1,3446 @@
+use std::{fs, sync::Mutex};
+
+use ratatui::backend::TestBackend;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::layout::Rect;
+use ratatui::prelude::{Color, Style};
+use ratatui::Terminal;
+use walls_core::config::{ApplyBackendSetting, CosmicMethod, TuiKeyProfile};
+use walls_core::state::CurrentWall;
+use walls_core::WallsCtx;
+
+static TUI_LOG_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+use super::{
+    action_for_key,
+    app::{App, EditFieldKind, EditTarget, SearchHit, APPLY_BACKEND_CHOICES, DISPLAY_MODE_CHOICES},
+    apply_effect,
+    chrome_view::{footer_keys, footer_paragraph},
+    draw_inner, handle_key,
+    line_view::line_style,
+    open_target::{open_command, OpenTarget},
+    startup::{draw_startup_intro, intro_disabled_value, StartupIntro},
+    style, update, InputMode, Tab, TerminalSize, UiAction, UpdateEffect,
+    CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION, CONFIG_BLOCK_SOURCES,
+    CONFIG_BLOCK_TUI,
+};
+
+fn test_app() -> App {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let image_dir = tmp.path().join("images");
+    fs::create_dir_all(&image_dir).expect("images dir");
+    fs::write(image_dir.join("a.jpg"), b"x").expect("image");
+
+    test_app_with_sources(
+        tmp,
+        serde_json::json!([{ "enabled": true, "type": "folder", "path": image_dir.display().to_string() }]),
+    )
+}
+
+fn set_current_wall(app: &mut App, original: &std::path::Path, composed: &std::path::Path) {
+    if let Some(parent) = app.ctx.paths.state_file.parent() {
+        fs::create_dir_all(parent).expect("state parent");
+    }
+    app.ctx.state.current = Some(CurrentWall {
+        source_id: "test".into(),
+        wallhaven_id: Some("wh-current".into()),
+        provider: Some("test".into()),
+        source_url: None,
+        author: None,
+        description: None,
+        original_path: original.display().to_string(),
+        composed_path: composed.display().to_string(),
+        post_filter_path: None,
+    });
+    app.ctx.state.history = vec![original.display().to_string()];
+    app.ctx.state.cache_queue = vec!["wh-current".into()];
+    app.ctx.save_state().expect("save current state");
+}
+
+fn write_tui_journal(app: &App, events: &[serde_json::Value]) {
+    if let Some(parent) = app.ctx.paths.event_journal_file.parent() {
+        fs::create_dir_all(parent).expect("journal parent");
+    }
+    let lines = events
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("event json")
+        .join("\n");
+    fs::write(&app.ctx.paths.event_journal_file, format!("{lines}\n")).expect("write journal");
+}
+
+fn test_app_with_sources(tmp: tempfile::TempDir, sources: serde_json::Value) -> App {
+    fs::create_dir_all(tmp.path().join("favorites")).expect("favorites dir");
+    fs::create_dir_all(tmp.path().join("fetched")).expect("fetched dir");
+    fs::write(tmp.path().join("favorites").join("fav.jpg"), b"x").expect("favorite image");
+    fs::write(tmp.path().join("fetched").join("fetch.jpg"), b"x").expect("fetched image");
+
+    let noop = tmp.path().join("noop.sh");
+    fs::write(&noop, "#!/bin/sh\nexit 0\n").expect("noop");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&noop, fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
+
+    let config = serde_json::json!({
+        "change": { "enabled": true, "internet_enabled": false },
+        "paths": {
+            "cache_dir": tmp.path().join("cache").display().to_string(),
+            "download_dir": tmp.path().join("downloaded").display().to_string(),
+            "favorites_dir": tmp.path().join("favorites").display().to_string(),
+            "fetched_dir": tmp.path().join("fetched").display().to_string(),
+            "compose_dir": tmp.path().join("wallpaper").display().to_string(),
+        },
+        "apply": { "backend": "custom-script", "custom_script": noop.display().to_string() },
+        "display": { "mode": "os" },
+        "sources": sources,
+    });
+    fs::write(
+        tmp.path().join("config.json"),
+        serde_json::to_string_pretty(&config).expect("config json"),
+    )
+    .expect("write config");
+    fs::write(tmp.path().join("secrets.json"), "{}").expect("write secrets");
+
+    App::new(WallsCtx::load_from(tmp.path()).expect("ctx")).expect("app")
+}
+
+fn test_app_with_config(config: serde_json::Value, secrets: serde_json::Value) -> App {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    fs::create_dir_all(tmp.path().join("favorites")).expect("favorites dir");
+    fs::create_dir_all(tmp.path().join("fetched")).expect("fetched dir");
+    fs::write(
+        tmp.path().join("config.json"),
+        serde_json::to_string_pretty(&config).expect("config json"),
+    )
+    .expect("write config");
+    fs::write(
+        tmp.path().join("secrets.json"),
+        serde_json::to_string_pretty(&secrets).expect("secrets json"),
+    )
+    .expect("write secrets");
+
+    App::new(WallsCtx::load_from(tmp.path()).expect("ctx")).expect("app")
+}
+
+fn render_text(app: &App, width: u16, height: u16) -> String {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            #[cfg(feature = "tui-preview")]
+            draw_inner(frame, app, None);
+            #[cfg(not(feature = "tui-preview"))]
+            draw_inner(frame, app);
+        })
+        .expect("draw");
+
+    let buffer = terminal.backend().buffer();
+    let mut text = String::new();
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width {
+            text.push_str(buffer[(x, y)].symbol());
+        }
+        text.push('\n');
+    }
+    text
+}
+
+fn render_intro_text(app: &App, intro: &StartupIntro, width: u16, height: u16) -> String {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| draw_startup_intro(frame, app, intro))
+        .expect("draw intro");
+
+    let buffer = terminal.backend().buffer();
+    let mut text = String::new();
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width {
+            text.push_str(buffer[(x, y)].symbol());
+        }
+        text.push('\n');
+    }
+    text
+}
+
+fn rendered_footer_status_style(app: &App) -> Style {
+    let theme = style::Theme::new(app.color_mode);
+    let backend = TestBackend::new(80, 4);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let footer = footer_paragraph(app, 80, theme);
+            frame.render_widget(footer, frame.area());
+        })
+        .expect("draw footer");
+
+    let mode_len = match app.input_mode {
+        InputMode::Normal => "normal ".len(),
+        InputMode::Command => "command ".len(),
+        InputMode::SearchInput => "search ".len(),
+    };
+    terminal.backend().buffer()[(1 + mode_len as u16, 1)].style()
+}
+
+fn assert_same_status_role(actual: Style, expected: Style) {
+    assert_eq!(normalized_fg(actual.fg), normalized_fg(expected.fg));
+    assert_eq!(actual.add_modifier, expected.add_modifier);
+    assert_eq!(actual.sub_modifier, expected.sub_modifier);
+}
+
+fn normalized_fg(color: Option<Color>) -> Option<Color> {
+    match color {
+        Some(Color::Reset) | None => None,
+        other => other,
+    }
+}
+
+#[test]
+fn default_config_screen_renders_blocks_and_footer_status() {
+    let app = test_app();
+    let text = render_text(&app, 80, 24);
+
+    assert!(text.contains("walls"), "{text}");
+    assert!(text.contains("Config"), "{text}");
+    assert!(text.contains("> [on] Sources"), "{text}");
+    assert!(text.contains("  [on] Rotation"), "{text}");
+    assert!(!text.contains("  [off] Wallhaven"), "{text}");
+    assert!(text.contains("  [on] Library"), "{text}");
+    assert!(text.contains("  [on] Apply/display"), "{text}");
+    assert!(text.contains("local only"), "{text}");
+    assert!(!text.contains("paused:"), "{text}");
+    assert!(text.contains("normal"), "{text}");
+    assert!(
+        text.contains("ready | paused=false | queue=0 | history=0"),
+        "{text}"
+    );
+}
+
+#[test]
+fn focused_config_block_expands_concrete_settings() {
+    let mut app = test_app();
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+
+    let text = render_text(&app, 80, 24);
+
+    assert!(
+        text.contains("> [on] Sources - 1 active · 1 total"),
+        "{text}"
+    );
+    assert!(text.contains("Local folder"), "{text}");
+    assert!(!text.contains("on start: false"), "{text}");
+}
+
+#[test]
+fn local_source_block_renders_enabled_disabled_and_missing_sources() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let image_dir = tmp.path().join("images");
+    fs::create_dir_all(&image_dir).expect("images dir");
+    fs::write(image_dir.join("a.jpg"), b"x").expect("folder image");
+    let image_file = tmp.path().join("single.jpg");
+    fs::write(&image_file, b"x").expect("single image");
+    let missing = tmp.path().join("missing");
+
+    let mut app = test_app_with_sources(
+        tmp,
+        serde_json::json!([
+            { "enabled": true, "type": "favorites", "label": "Favorites" },
+            { "enabled": true, "type": "fetched", "label": "Fetched" },
+            { "enabled": true, "type": "folder", "label": "Wallpapers", "path": image_dir.display().to_string() },
+            { "enabled": true, "type": "image", "label": "Single", "path": image_file.display().to_string() },
+            { "enabled": false, "type": "folder", "label": "Disabled", "path": image_dir.display().to_string() },
+            { "enabled": true, "type": "folder", "label": "Missing", "path": missing.display().to_string() }
+        ]),
+    );
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+
+    let text = render_text(&app, 120, 30);
+
+    assert!(text.contains("5 active · 6 total"), "{text}");
+    assert!(text.contains("Favorites"), "{text}");
+    assert!(text.contains("Fetched"), "{text}");
+    assert!(text.contains("Wallpapers"), "{text}");
+    assert!(text.contains("Single"), "{text}");
+    assert!(text.contains("Missing"), "{text}");
+    assert!(!text.contains("Disabled"), "{text}");
+    assert!(text.contains("1 disabled source"), "{text}");
+}
+
+#[test]
+fn rotation_block_renders_full_change_settings_without_pause_duplication() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": {
+                "enabled": true,
+                "on_start": true,
+                "interval_secs": 42,
+                "internet_enabled": true,
+                "safe_mode": true,
+                "change_lock_screen": true,
+                "download_preference_ratio": 0.35
+            },
+            "paths": {
+                "cache_dir": "/tmp/walls-cache",
+                "download_dir": "/tmp/walls-downloaded",
+                "favorites_dir": "/tmp/walls-favorites",
+                "fetched_dir": "/tmp/walls-fetched",
+                "compose_dir": "/tmp/walls-compose"
+            },
+            "apply": { "backend": "auto" },
+            "display": { "mode": "os" },
+            "sources": []
+        }),
+        serde_json::json!({}),
+    );
+    app.config_cursor = CONFIG_BLOCK_ROTATION;
+
+    let text = render_text(&app, 100, 28);
+
+    assert!(
+        text.contains("> [on] Rotation - every 42s, online, 35% online"),
+        "{text}"
+    );
+    assert!(text.contains("─ configured"), "{text}");
+    assert!(text.contains("enabled             : true"), "{text}");
+    assert!(text.contains("on start            : true"), "{text}");
+    assert!(text.contains("interval            : 42s"), "{text}");
+    assert!(text.contains("internet            : true"), "{text}");
+    assert!(text.contains("safe mode           : true"), "{text}");
+    assert!(text.contains("lock screen         : true"), "{text}");
+    assert!(text.contains("download preference : 35% online"), "{text}");
+    assert!(text.contains("tray icon           : white"), "{text}");
+    assert!(!text.contains("paused:"), "{text}");
+}
+
+#[test]
+fn library_block_renders_paths_counts_quota_and_validation_warnings() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": false },
+            "paths": {
+                "cache_dir": "/tmp/walls-cache",
+                "download_dir": "/tmp/walls-downloaded",
+                "favorites_dir": "/tmp/walls-favorites",
+                "fetched_dir": "/tmp/walls-fetched",
+                "compose_dir": "/tmp/walls-compose"
+            },
+            "quota": { "enabled": true, "size_mb": 0 },
+            "selection": { "use_landscape_enabled": false },
+            "apply": { "backend": "auto" },
+            "display": { "mode": "os" },
+            "sources": []
+        }),
+        serde_json::json!({}),
+    );
+    app.config_cursor = CONFIG_BLOCK_LIBRARY;
+
+    let text = render_text(&app, 120, 32);
+
+    assert!(
+        text.contains("> [on] Library - 0 queued, 0 history, quota 0 MB"),
+        "{text}"
+    );
+    assert!(text.contains("─ paths"), "{text}");
+    assert!(
+        text.contains("cache               : /tmp/walls-cache"),
+        "{text}"
+    );
+    assert!(
+        text.contains("downloaded          : /tmp/walls-downloaded"),
+        "{text}"
+    );
+    assert!(
+        text.contains("favorites           : /tmp/walls-favorites"),
+        "{text}"
+    );
+    assert!(
+        text.contains("fetched             : /tmp/walls-fetched"),
+        "{text}"
+    );
+    assert!(
+        text.contains("compose             : /tmp/walls-compose"),
+        "{text}"
+    );
+    assert!(text.contains("─ cache state"), "{text}");
+    assert!(text.contains("─ selection"), "{text}");
+    assert!(text.contains("strategy            : Random"), "{text}");
+    assert!(text.contains("landscape filter    : false"), "{text}");
+    assert!(text.contains("avoid recent        : 50"), "{text}");
+    assert!(
+        text.contains("! quota.size_mb: must be greater than zero"),
+        "{text}"
+    );
+}
+
+#[test]
+fn apply_display_block_renders_backend_display_and_validation_warnings() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": false },
+            "paths": {
+                "cache_dir": "/tmp/walls-cache",
+                "download_dir": "/tmp/walls-downloaded",
+                "favorites_dir": "/tmp/walls-favorites",
+                "fetched_dir": "/tmp/walls-fetched",
+                "compose_dir": "/tmp/walls-compose"
+            },
+            "apply": {
+                "backend": "custom-script",
+                "cosmic": {
+                    "method": "cosmic-ext-bg-ctl",
+                    "config_path": "/tmp/missing-cosmic-config",
+                    "use_original_path": true
+                }
+            },
+            "display": {
+                "mode": "fill",
+                "auto_rotate": true,
+                "target_width": 3840,
+                "target_height": 2160,
+                "imagemagick_command": "magick",
+                "filters": {
+                    "enabled": true,
+                    "command": "magick",
+                    "filters": [{ "name": "soften", "args": ["-blur", "0x1"] }]
+                }
+            },
+            "sources": []
+        }),
+        serde_json::json!({}),
+    );
+    app.config_cursor = CONFIG_BLOCK_APPLY_DISPLAY;
+
+    let text = render_text(&app, 120, 34);
+
+    assert!(
+        text.contains("> [on] Apply/display - custom-script backend, fill mode, 3840x2160 target"),
+        "{text}"
+    );
+    assert!(text.contains("─ configured"), "{text}");
+    assert!(text.contains("─ detected this session"), "{text}");
+    assert!(
+        text.contains("backend             : custom-script"),
+        "{text}"
+    );
+    assert!(text.contains("custom script       : (not set)"), "{text}");
+    assert!(
+        text.contains("cosmic method       : cosmic-ext-bg-ctl"),
+        "{text}"
+    );
+    assert!(
+        text.contains("cosmic config       : /tmp/missing-cosmic-config"),
+        "{text}"
+    );
+    assert!(text.contains("cosmic original     : true"), "{text}");
+    assert!(text.contains("display mode        : fill"), "{text}");
+    assert!(text.contains("EXIF auto-rotate    : true"), "{text}");
+    assert!(
+        text.contains("target              : 3840x2160 target"),
+        "{text}"
+    );
+    assert!(
+        text.contains("resolved backend    : custom-script"),
+        "{text}"
+    );
+    assert!(
+        text.contains("filters             : 1 configured, enabled=true"),
+        "{text}"
+    );
+    assert!(
+        text.contains("! apply.custom_script: is required"),
+        "{text}"
+    );
+}
+
+#[test]
+fn config_apply_display_block_edits_display_settings() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": false },
+            "paths": {
+                "cache_dir": "/tmp/walls-cache",
+                "download_dir": "/tmp/walls-downloaded",
+                "favorites_dir": "/tmp/walls-favorites",
+                "fetched_dir": "/tmp/walls-fetched",
+                "compose_dir": "/tmp/walls-compose"
+            },
+            "apply": { "backend": "auto" },
+            "display": {
+                "mode": "os",
+                "auto_rotate": false,
+                "imagemagick_command": "magick",
+                "filters": { "enabled": false, "command": "magick", "filters": [] }
+            },
+            "sources": []
+        }),
+        serde_json::json!({}),
+    );
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_APPLY_DISPLAY;
+
+    app.start_edit_for_current();
+    let editing = app.editing.as_ref().expect("editing");
+    assert!(matches!(
+        editing.target,
+        EditTarget::Block(CONFIG_BLOCK_APPLY_DISPLAY)
+    ));
+    assert_eq!(editing.field_buffer, "auto");
+    assert_eq!(
+        app.current_edit_field_kind(),
+        EditFieldKind::Choice(APPLY_BACKEND_CHOICES)
+    );
+
+    for _ in 0..5 {
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to display field");
+    }
+    let editing = app.editing.as_ref().expect("editing");
+    assert_eq!(editing.field_buffer, "os");
+    assert_eq!(
+        app.current_edit_field_kind(),
+        EditFieldKind::Choice(DISPLAY_MODE_CHOICES)
+    );
+
+    update(
+        &mut app,
+        UiAction::EditFieldCycle { forward: true },
+        rt.handle(),
+    )
+    .expect("cycle display mode");
+    assert_eq!(app.ctx.config.display.mode, "zoom");
+
+    update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to auto rotate");
+    update(
+        &mut app,
+        UiAction::EditFieldCycle { forward: true },
+        rt.handle(),
+    )
+    .expect("toggle auto rotate");
+    assert!(app.ctx.config.display.auto_rotate);
+
+    update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to imagemagick");
+    {
+        let editing = app.editing.as_mut().expect("editing");
+        assert_eq!(editing.field_buffer, "magick");
+        editing.field_buffer = "convert".into();
+    }
+    update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save imagemagick");
+    assert_eq!(app.ctx.config.display.imagemagick_command, "convert");
+
+    update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to target width");
+    app.editing.as_mut().expect("editing").field_buffer = "1920".into();
+    update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("stage target width");
+    assert_eq!(app.ctx.config.display.target_width, None);
+    assert!(
+        app.message
+            .contains("set both target_width and target_height"),
+        "{}",
+        app.message
+    );
+
+    update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to target height");
+    app.editing.as_mut().expect("editing").field_buffer = "1080".into();
+    update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save target height");
+    assert_eq!(app.ctx.config.display.target_width, Some(1920));
+    assert_eq!(app.ctx.config.display.target_height, Some(1080));
+
+    update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to filters enabled");
+    update(
+        &mut app,
+        UiAction::EditFieldCycle { forward: true },
+        rt.handle(),
+    )
+    .expect("toggle filters");
+    assert!(app.ctx.config.display.filters.enabled);
+
+    update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to filter command");
+    app.editing.as_mut().expect("editing").field_buffer = "gm convert".into();
+    update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save filter command");
+
+    assert_eq!(app.ctx.config.display.filters.command, "gm convert");
+    assert!(
+        app.message.contains("config saved: display"),
+        "{}",
+        app.message
+    );
+    let text = std::fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
+    assert!(text.contains("\"mode\": \"zoom\""), "{text}");
+    assert!(text.contains("\"target_width\": 1920"), "{text}");
+    assert!(text.contains("\"target_height\": 1080"), "{text}");
+    assert!(text.contains("\"command\": \"gm convert\""), "{text}");
+}
+
+#[test]
+fn config_apply_display_block_edits_apply_settings() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let script = tmp.path().join("set-wallpaper");
+    fs::write(&script, "#!/bin/sh\nexit 0\n").expect("script");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&script).expect("metadata").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script, perms).expect("chmod");
+    }
+
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": false },
+            "paths": {
+                "cache_dir": "/tmp/walls-cache",
+                "download_dir": "/tmp/walls-downloaded",
+                "favorites_dir": "/tmp/walls-favorites",
+                "fetched_dir": "/tmp/walls-fetched",
+                "compose_dir": "/tmp/walls-compose"
+            },
+            "apply": {
+                "backend": "auto",
+                "cosmic": {
+                    "method": "cosmic-config",
+                    "config_path": "~/.config/cosmic/com.system76.CosmicBackground/v1/all",
+                    "use_original_path": false
+                }
+            },
+            "display": { "mode": "os" },
+            "sources": []
+        }),
+        serde_json::json!({}),
+    );
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_APPLY_DISPLAY;
+
+    app.start_edit_for_current();
+    let editing = app.editing.as_ref().expect("editing");
+    assert_eq!(editing.field_buffer, "auto");
+    assert_eq!(
+        app.current_edit_field_kind(),
+        EditFieldKind::Choice(APPLY_BACKEND_CHOICES)
+    );
+
+    app.editing.as_mut().expect("editing").field_buffer = "custom-script".into();
+    update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("reject missing custom script");
+    assert_eq!(app.ctx.config.apply.backend, ApplyBackendSetting::Auto);
+    assert!(
+        app.message.contains("apply.custom_script: is required"),
+        "{}",
+        app.message
+    );
+
+    update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to custom script");
+    app.editing.as_mut().expect("editing").field_buffer = script.display().to_string();
+    update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save custom script");
+    assert_eq!(
+        app.ctx.config.apply.backend,
+        ApplyBackendSetting::CustomScript
+    );
+    assert_eq!(
+        app.ctx.config.apply.custom_script.as_deref(),
+        Some(script.to_str().expect("script path"))
+    );
+
+    update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to cosmic method");
+    app.editing.as_mut().expect("editing").field_buffer = "cosmic-ext-bg-ctl".into();
+    update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save cosmic method");
+    assert_eq!(
+        app.ctx.config.apply.cosmic.method,
+        CosmicMethod::CosmicExtBgCtl
+    );
+
+    update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to cosmic path");
+    app.editing.as_mut().expect("editing").field_buffer = "/tmp/cosmic-all".into();
+    update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save cosmic path");
+    assert_eq!(app.ctx.config.apply.cosmic.config_path, "/tmp/cosmic-all");
+
+    update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to original toggle");
+    update(
+        &mut app,
+        UiAction::EditFieldCycle { forward: true },
+        rt.handle(),
+    )
+    .expect("toggle original");
+    assert!(app.ctx.config.apply.cosmic.use_original_path);
+
+    let text = std::fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
+    assert!(text.contains("\"backend\": \"custom-script\""), "{text}");
+    assert!(text.contains("\"method\": \"cosmic-ext-bg-ctl\""), "{text}");
+    assert!(
+        text.contains("\"config_path\": \"/tmp/cosmic-all\""),
+        "{text}"
+    );
+    assert!(text.contains("\"use_original_path\": true"), "{text}");
+}
+
+#[test]
+fn narrow_config_screen_keeps_focused_block_and_navigation_visible() {
+    let mut app = test_app();
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.enter_config_subnav();
+    app.config_sub_cursor = 0;
+
+    let text = render_text(&app, 42, 14);
+
+    assert!(text.contains("Config"), "{text}");
+    assert!(text.contains("▸ Local folder"), "{text}");
+    assert!(text.contains("←/→ tabs"), "{text}");
+    assert!(text.contains("j/k Pg"), "{text}");
+}
+
+#[test]
+fn source_subnav_t_key_toggles_enabled_without_validating_other_sources() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let image_dir = tmp.path().join("images");
+    fs::create_dir_all(&image_dir).expect("images dir");
+    let missing = tmp.path().join("missing");
+
+    let mut app = test_app_with_sources(
+        tmp,
+        serde_json::json!([
+            { "enabled": true, "type": "favorites", "label": "Favorites" },
+            {
+                "enabled": true,
+                "type": "folder",
+                "label": "Missing",
+                "path": missing.display().to_string()
+            }
+        ]),
+    );
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.enter_config_subnav();
+    app.config_sub_cursor = 0;
+
+    let rt = tokio::runtime::Runtime::new().expect("rt");
+    update(&mut app, UiAction::ToggleConfigValue, rt.handle()).expect("toggle favorites enabled");
+    app.reload_ctx().expect("reload");
+
+    assert!(!app.ctx.config.sources[0].enabled);
+    let text = render_text(&app, 120, 30);
+    assert!(text.contains("Favorites"), "{text}");
+    assert!(text.contains(" off · "), "{text}");
+}
+
+#[test]
+fn top_level_sources_e_edits_first_enabled_configured_source() {
+    use crate::tui::app::EditTarget;
+
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [
+                { "enabled": false, "type": "folder", "path": "/tmp" },
+                { "enabled": true, "type": "json", "label": "active json", "url": "https://example.test/feed.json", "image_path": "$.image" }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.config_in_subnav = false;
+
+    app.start_edit_for_current();
+
+    let editing = app.editing.as_ref().expect("top-level e should edit");
+    assert!(
+        matches!(editing.target, EditTarget::Source(1)),
+        "top-level Sources e should pick first enabled configured source, got {:?}",
+        editing.target
+    );
+}
+
+#[test]
+fn top_level_sources_e_explains_when_no_source_is_active() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [
+                { "enabled": false, "type": "folder", "path": "/tmp" }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+
+    app.start_edit_for_current();
+
+    assert!(
+        app.editing.is_none(),
+        "no active source should leave edit mode closed"
+    );
+    assert!(
+        app.message
+            .contains("no active sources to edit; enable or add a source first"),
+        "{}",
+        app.message
+    );
+    assert_eq!(app.message_kind, style::StatusKind::Warning);
+}
+
+#[test]
+fn edit_form_space_toggles_bool_field_without_typing() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "on_start": false, "interval": 3600 },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": []
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_ROTATION;
+    app.start_edit_for_current();
+    let rt = tokio::runtime::Runtime::new().expect("rt");
+
+    assert_eq!(
+        app.editing.as_ref().unwrap().field_buffer,
+        "true",
+        "enabled field should prefill"
+    );
+    update(
+        &mut app,
+        UiAction::EditFieldCycle { forward: true },
+        rt.handle(),
+    )
+    .ok();
+    assert_eq!(
+        app.editing.as_ref().unwrap().field_buffer,
+        "false",
+        "Space should toggle enabled to false"
+    );
+    let text = render_text(&app, 100, 24);
+    assert!(
+        text.contains("Space toggle") || text.contains("Space/"),
+        "footer should hint choice controls: {text}"
+    );
+}
+
+#[test]
+fn config_focus_does_not_share_list_cursor_state() {
+    let mut app = test_app();
+    app.cursor = 7;
+
+    app.move_down();
+    app.move_down();
+
+    assert_eq!(app.config_cursor, 2);
+    assert_eq!(app.cursor, 7);
+
+    app.tab = Tab::History;
+    app.move_up();
+
+    assert_eq!(app.config_cursor, 2);
+    assert_eq!(app.cursor, 6);
+}
+
+#[test]
+fn command_mode_footer_shows_mode_command_and_cancel_path() {
+    let mut app = test_app();
+    app.input_mode = InputMode::Command;
+    app.cmd_line = "next".into();
+    app.set_message(style::StatusKind::Success, "applied: /tmp/wall.jpg");
+
+    let text = render_text(&app, 80, 12);
+
+    assert!(text.contains("command"), "{text}");
+    assert!(text.contains(":next_"), "{text}");
+    assert!(text.contains("Esc cancel"), "{text}");
+    assert!(text.contains("applied: /tmp/wall.jpg"), "{text}");
+}
+
+#[test]
+fn narrow_search_screen_keeps_mode_query_and_actions_visible() {
+    let mut app = test_app();
+    app.tab = Tab::Search;
+    app.search_query = "mountains".into();
+
+    let text = render_text(&app, 42, 10);
+
+    assert!(text.contains("Search"), "{text}");
+    assert!(text.contains("provider: Wallhaven"), "{text}");
+    assert!(text.contains("query: mountains"), "{text}");
+    assert!(text.contains("normal"), "{text}");
+    assert!(text.contains("←/→"), "{text}");
+    assert!(text.contains("/i"), "{text}");
+    assert!(text.contains("Enter search"), "{text}");
+    assert!(text.contains("j/k"), "{text}");
+    assert!(text.contains(":?q"), "{text}");
+
+    app.search_results.push(SearchHit {
+        id: "id-1".into(),
+        label: "hit-1".into(),
+    });
+    let text = render_text(&app, 42, 10);
+    assert!(text.contains("Enter apply"), "{text}");
+
+    let text = render_text(&app, 90, 18);
+    assert!(text.contains("Wallhaven id-1"), "{text}");
+}
+
+#[test]
+fn search_filter_editor_updates_local_filters_without_persisting_config() {
+    let mut app = test_app();
+    app.tab = Tab::Search;
+    let original_config = app.ctx.config.clone();
+    assert!(!app.ctx.paths.config_file.exists());
+
+    app.start_search_filter_edit();
+    assert!(matches!(
+        app.editing.as_ref().map(|session| &session.target),
+        Some(EditTarget::SearchFilters)
+    ));
+    assert_eq!(app.current_edit_field_value(), app.search_query);
+
+    app.editing.as_mut().unwrap().field_buffer = "city night".into();
+    app.commit_edit_field_buffer();
+    app.save_edit_item(false)
+        .expect("save search query locally");
+    assert_eq!(app.search_query, "city night");
+    assert_eq!(app.search_filters.q, "city night");
+
+    {
+        let session = app.editing.as_mut().unwrap();
+        session.field_cursor = 7;
+        session.field_buffer = "random".into();
+    }
+    assert_eq!(app.current_edit_field_value(), "random");
+    app.cycle_current_edit_field(true);
+    assert_eq!(app.search_filters.sorting, "views");
+
+    assert!(!app.ctx.paths.config_file.exists());
+    let current_wallhaven: Vec<_> = app
+        .ctx
+        .config
+        .sources
+        .iter()
+        .filter(|source| source.source_type == "wallhaven")
+        .map(walls_core::config::source_wallhaven_search)
+        .map(|search| (search.q, search.sorting))
+        .collect();
+    let original_wallhaven: Vec<_> = original_config
+        .sources
+        .iter()
+        .filter(|source| source.source_type == "wallhaven")
+        .map(walls_core::config::source_wallhaven_search)
+        .map(|search| (search.q, search.sorting))
+        .collect();
+    assert_eq!(current_wallhaven, original_wallhaven);
+
+    let text = render_text(&app, 90, 18);
+    assert!(text.contains("query: city night"), "{text}");
+    assert!(text.contains("sorting views desc"), "{text}");
+}
+
+#[test]
+fn normal_footer_uses_shared_tab_navigation_vocabulary() {
+    let mut app = test_app();
+    let tabs = [
+        Tab::Config,
+        Tab::Now,
+        Tab::History,
+        Tab::Browse,
+        Tab::Search,
+        Tab::Logs,
+    ];
+
+    for tab in tabs {
+        app.tab = tab;
+        app.config_cursor = CONFIG_BLOCK_SOURCES;
+        app.config_in_subnav = false;
+
+        let footer = app.footer_keys();
+
+        assert!(footer.starts_with("1-6/←/→ tabs"), "{tab:?}: {footer}");
+        assert!(!footer.starts_with("1 Config"), "{tab:?}: {footer}");
+        assert!(!footer.starts_with("5 Search"), "{tab:?}: {footer}");
+        assert!(!footer.starts_with("6 Logs"), "{tab:?}: {footer}");
+    }
+
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    let footer = app.footer_keys();
+    assert!(footer.contains("e first active"), "{footer}");
+
+    app.tab = Tab::Search;
+    app.search_results.clear();
+    let footer = app.footer_keys();
+    assert!(footer.contains("/ or i query"), "{footer}");
+    assert!(footer.contains("e filters"), "{footer}");
+    assert!(footer.contains("Enter search"), "{footer}");
+
+    app.search_results.push(SearchHit {
+        id: "id-1".into(),
+        label: "hit-1".into(),
+    });
+    let footer = app.footer_keys();
+    assert!(footer.contains("Enter apply"), "{footer}");
+
+    app.tab = Tab::Logs;
+    let footer = app.footer_keys();
+    assert!(footer.contains("newest first"), "{footer}");
+}
+
+#[test]
+fn narrow_normal_footer_keeps_same_key_group_ordering() {
+    let mut app = test_app();
+
+    for tab in [Tab::Config, Tab::Now, Tab::Search, Tab::Logs] {
+        app.tab = tab;
+        let footer = footer_keys(&app, 42);
+
+        assert!(footer.starts_with("1-6/←/→ tabs"), "{tab:?}: {footer}");
+        assert!(!footer.starts_with("1 Config"), "{tab:?}: {footer}");
+        assert!(!footer.starts_with("5 Search"), "{tab:?}: {footer}");
+        assert!(!footer.starts_with("6 Logs"), "{tab:?}: {footer}");
+        assert!(footer.contains(":?q"), "{tab:?}: {footer}");
+    }
+
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    let footer = footer_keys(&app, 42);
+    assert!(footer.contains("Enter"), "{footer}");
+    assert!(footer.contains("e"), "{footer}");
+
+    app.tab = Tab::Search;
+    app.search_results.clear();
+    let footer = footer_keys(&app, 42);
+    assert!(footer.contains("/i"), "{footer}");
+    assert!(footer.contains("Enter search"), "{footer}");
+
+    app.tab = Tab::Logs;
+    let footer = footer_keys(&app, 42);
+    assert!(footer.contains("newest"), "{footer}");
+}
+
+#[test]
+fn search_history_browse_and_logs_empty_states_use_state_labels() {
+    let _guard = TUI_LOG_TEST_LOCK.lock().unwrap();
+    let mut app = test_app();
+    app.ctx.state.history.clear();
+    app.ctx.state.cache_queue.clear();
+    app.local_candidates.clear();
+
+    app.tab = Tab::Search;
+    let search = render_text(&app, 90, 18);
+    assert!(search.contains("provider: Wallhaven"), "{search}");
+    assert!(
+        search.contains("[empty] no results; press / or i"),
+        "{search}"
+    );
+
+    app.tab = Tab::History;
+    let history = render_text(&app, 90, 18);
+    assert!(
+        history.contains("[empty] no wallpaper history captured yet"),
+        "{history}"
+    );
+
+    app.tab = Tab::Browse;
+    let browse = render_text(&app, 90, 20);
+    assert!(browse.contains("[empty] queue is empty"), "{browse}");
+    assert!(
+        browse.contains("[empty] no local candidates found"),
+        "{browse}"
+    );
+
+    super::LOG_BUFFER.lock().unwrap().clear();
+    app.tab = Tab::Logs;
+    let logs = render_text(&app, 90, 18);
+    assert!(logs.contains("[empty] no logs captured yet"), "{logs}");
+}
+
+#[test]
+fn now_tab_surfaces_last_run_summary_without_log_clutter() {
+    let mut app = test_app();
+    app.tab = Tab::Now;
+    write_tui_journal(
+        &app,
+        &[
+            serde_json::json!({
+                "timestamp_unix": 100,
+                "kind": "provider_attempt",
+                "attempt": {
+                    "provider_id": "wallhaven",
+                    "provider_kind": "wallhaven",
+                    "operation": "advance_next",
+                    "status": "enabled",
+                    "retries": [],
+                    "outcome": {
+                        "result": "failed",
+                        "kind": "request",
+                        "status_code": 401,
+                        "message": "[redacted]"
+                    },
+                    "fallback_provider_id": "local"
+                }
+            }),
+            serde_json::json!({
+                "timestamp_unix": 110,
+                "kind": "provider_attempt",
+                "attempt": {
+                    "provider_id": "local",
+                    "provider_kind": "local",
+                    "operation": "advance_next",
+                    "status": "enabled",
+                    "retries": [],
+                    "outcome": {
+                        "result": "no_candidates",
+                        "reason": "empty_result",
+                        "candidate_count": 0
+                    },
+                    "fallback_provider_id": null
+                }
+            }),
+        ],
+    );
+
+    let text = render_text(&app, 90, 18);
+
+    assert!(
+        text.contains("last run: failed before applying a wallpaper"),
+        "{text}"
+    );
+    assert!(text.contains("last warning: local: empty result"), "{text}");
+    assert!(
+        text.contains("last error: wallhaven: request failed HTTP 401 ([redacted])"),
+        "{text}"
+    );
+    assert!(!text.contains("super-secret-token"), "{text}");
+}
+
+#[test]
+fn logs_tab_shows_newest_first_and_jk_moves_older_then_newer() {
+    let _guard = TUI_LOG_TEST_LOCK.lock().unwrap();
+    let mut app = test_app();
+    {
+        let mut logs = super::LOG_BUFFER.lock().unwrap();
+        logs.clear();
+        logs.extend(["oldest", "middle", "newest"].map(str::to_string));
+    }
+    app.switch_tab(Tab::Logs);
+
+    let lines = app.logs_lines(80, 12);
+    assert_eq!(lines[0], "> newest");
+    assert_eq!(lines[1], "  middle");
+    assert_eq!(lines[2], "  oldest");
+
+    app.move_down();
+    let lines = app.logs_lines(80, 12);
+    assert_eq!(lines[0], "  newest");
+    assert_eq!(lines[1], "> middle");
+
+    app.move_up();
+    let lines = app.logs_lines(80, 12);
+    assert_eq!(lines[0], "> newest");
+}
+
+#[test]
+fn logs_wrapped_rows_keep_single_cursor_marker_on_selected_event() {
+    let _guard = TUI_LOG_TEST_LOCK.lock().unwrap();
+    let mut app = test_app();
+    {
+        let mut logs = super::LOG_BUFFER.lock().unwrap();
+        logs.clear();
+        logs.push("alpha beta gamma delta epsilon zeta".into());
+    }
+    app.switch_tab(Tab::Logs);
+
+    let lines = app.logs_lines(18, 8);
+
+    assert!(lines[0].starts_with("> "), "{lines:?}");
+    assert!(
+        lines.iter().skip(1).all(|line| line.starts_with("  ")),
+        "{lines:?}"
+    );
+    assert_eq!(
+        lines.iter().filter(|line| line.starts_with("> ")).count(),
+        1,
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn logs_crop_keeps_selected_wrapped_event_visible() {
+    let _guard = TUI_LOG_TEST_LOCK.lock().unwrap();
+    let mut app = test_app();
+    {
+        let mut logs = super::LOG_BUFFER.lock().unwrap();
+        logs.clear();
+        logs.extend(
+            [
+                "oldest line",
+                "older selected line wraps across several visual rows",
+                "middle line",
+                "newest line",
+            ]
+            .map(str::to_string),
+        );
+    }
+    app.switch_tab(Tab::Logs);
+    app.move_down();
+    app.move_down();
+
+    let lines = app.logs_lines(22, 5);
+
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with("> ") && line.contains("older selected")),
+        "{lines:?}"
+    );
+    assert!(lines.len() <= 3, "{lines:?}");
+}
+
+#[test]
+fn logs_new_arrivals_follow_only_when_pinned_to_newest() {
+    let _guard = TUI_LOG_TEST_LOCK.lock().unwrap();
+    let mut app = test_app();
+    {
+        let mut logs = super::LOG_BUFFER.lock().unwrap();
+        logs.clear();
+        logs.extend(["oldest", "middle", "newest"].map(str::to_string));
+    }
+    app.switch_tab(Tab::Logs);
+    app.sync_log_cursor();
+
+    super::LOG_BUFFER
+        .lock()
+        .unwrap()
+        .push("newer than newest".into());
+    app.sync_log_cursor();
+    assert_eq!(app.logs_cursor, 0);
+    assert_eq!(app.logs_lines(80, 12)[0], "> newer than newest");
+
+    app.move_down();
+    app.move_down();
+    let selected_before = app.logs_lines(80, 12);
+    assert!(selected_before.iter().any(|line| line == "> middle"));
+
+    super::LOG_BUFFER
+        .lock()
+        .unwrap()
+        .push("newest while browsing".into());
+    app.sync_log_cursor();
+    let selected_after = app.logs_lines(80, 12);
+
+    assert!(selected_after.iter().any(|line| line == "> middle"));
+    assert_ne!(app.logs_cursor, 0);
+}
+
+#[test]
+fn no_colour_rendering_keeps_critical_states_redundant_in_text() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [ { "enabled": true, "type": "reddit", "query": "wallpapers", "sort": "hot" } ]
+        }),
+        serde_json::json!({}),
+    );
+    app.color_mode = style::ColorMode::Never;
+
+    app.tab = Tab::Search;
+    let search = render_text(&app, 90, 18);
+    assert!(search.contains("[empty] no results"), "{search}");
+
+    app.set_message(style::StatusKind::Success, "applied: /tmp/wall.jpg");
+    let footer = render_text(&app, 90, 18);
+    assert!(footer.contains("applied: /tmp/wall.jpg"), "{footer}");
+
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.enter_config_subnav();
+    app.config_sub_cursor = 0;
+    let config = render_text(&app, 120, 30);
+    assert!(config.contains("▸ Reddit"), "{config}");
+    assert!(
+        config.contains("reddit api credentials: [missing]"),
+        "{config}"
+    );
+    assert!(
+        config.contains("[warning] Reddit API credentials missing"),
+        "{config}"
+    );
+
+    app.start_edit_for_current();
+    app.editing
+        .as_mut()
+        .expect("editing")
+        .validation_errors
+        .push("sources[0].path is required (hint: choose an existing image folder)".into());
+    let edit = render_text(&app, 90, 24);
+    assert!(edit.contains("!! Validation errors:"), "{edit}");
+    assert!(edit.contains("!! - sources[0].path is required"), "{edit}");
+    assert!(
+        edit.contains("!!   hint: choose an existing image folder"),
+        "{edit}"
+    );
+}
+
+#[test]
+fn terminal_size_contracts_cover_tiny_narrow_standard_and_wide() {
+    assert_eq!(
+        super::terminal_size(Rect::new(0, 0, 9, 24)),
+        TerminalSize::Tiny
+    );
+    assert_eq!(
+        super::terminal_size(Rect::new(0, 0, 42, 10)),
+        TerminalSize::Narrow
+    );
+    assert_eq!(
+        super::terminal_size(Rect::new(0, 0, 80, 24)),
+        TerminalSize::Standard
+    );
+    assert_eq!(
+        super::terminal_size(Rect::new(0, 0, 120, 32)),
+        TerminalSize::Wide
+    );
+}
+
+#[test]
+fn startup_intro_renders_compact_loading_screen_without_main_tabs() {
+    let app = test_app();
+    let intro = StartupIntro::enabled();
+    let text = render_intro_text(&app, &intro, 80, 24);
+
+    assert!(text.contains("walls"), "{text}");
+    assert!(text.contains("preparing your wallpaper console"), "{text}");
+    assert!(text.contains("[                  ]"), "{text}");
+    assert!(text.contains("thinking warmly"), "{text}");
+    assert!(text.contains("|"), "{text}");
+    assert!(!text.contains("Config Now History"), "{text}");
+}
+
+#[test]
+fn startup_intro_ticks_deterministically_and_finishes_without_clock_sleep() {
+    let mut intro = StartupIntro::enabled();
+
+    assert!(intro.is_active());
+    assert_eq!(intro.poll_interval(), std::time::Duration::from_millis(200));
+    assert_eq!(intro.spinner(), "|");
+
+    intro.tick();
+    assert!(intro.is_active());
+    assert_eq!(intro.spinner(), "/");
+
+    intro.tick();
+    assert!(intro.is_active());
+    assert_eq!(intro.spinner(), "-");
+
+    for _ in 0..8 {
+        intro.tick();
+    }
+    assert!(!intro.is_active());
+    assert_eq!(intro.poll_interval(), std::time::Duration::from_millis(200));
+}
+
+#[test]
+fn startup_intro_can_be_skipped_immediately() {
+    let mut intro = StartupIntro::enabled();
+
+    intro.skip();
+
+    assert!(!intro.is_active());
+    intro.tick();
+    assert!(!intro.is_active());
+}
+
+#[test]
+fn startup_intro_env_gate_accepts_disabled_values() {
+    for value in [
+        "0", "false", "no", "off", "never", "none", "skip", "disabled",
+    ] {
+        assert!(
+            intro_disabled_value(Some(value)),
+            "{value} should disable startup intro"
+        );
+    }
+
+    assert!(!intro_disabled_value(None));
+    assert!(!intro_disabled_value(Some("1")));
+    assert!(!intro_disabled_value(Some("true")));
+}
+
+#[test]
+fn standard_layout_keeps_full_key_row_visible() {
+    let mut app = test_app();
+    let text = render_text(&app, 80, 24);
+
+    assert!(text.contains("e first active"), "{text}");
+    assert!(
+        text.contains("space pa") || text.contains("pause"),
+        "{text}"
+    );
+
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    let text = render_text(&app, 120, 24);
+    assert!(text.contains("e first active"), "{text}");
+
+    app.tab = Tab::Now;
+    let text = render_text(&app, 80, 24);
+    assert!(text.contains("1-6/←/→ tabs"), "{text}");
+}
+
+#[cfg(feature = "tui-preview")]
+#[test]
+fn wide_now_layout_keeps_metadata_and_preview_regions_stable() {
+    let mut app = test_app();
+    app.tab = Tab::Now;
+
+    let text = render_text(&app, 120, 32);
+
+    assert!(text.contains("Now"), "{text}");
+    assert!(text.contains("preview"), "{text}");
+    assert!(text.contains("[empty] no current wallpaper"), "{text}");
+}
+
+#[cfg(feature = "tui-preview")]
+#[test]
+fn preview_target_follows_history_and_browse_selection() {
+    let mut app = test_app();
+    let root = app.ctx.paths.cache_dir.parent().unwrap().to_path_buf();
+    let history = root.join("history.jpg");
+    let local = root.join("local.jpg");
+    let queued = app.ctx.paths.cache_dir.join("wallhaven-wh1.jpg");
+    let search = app.ctx.paths.cache_dir.join("wallhaven-search1.jpg");
+    fs::create_dir_all(&app.ctx.paths.cache_dir).expect("cache dir");
+    fs::write(&history, b"history").expect("history image");
+    fs::write(&local, b"local").expect("local image");
+    fs::write(&queued, b"queued").expect("queued image");
+    fs::write(&search, b"search").expect("search image");
+
+    app.ctx.state.history = vec![history.display().to_string()];
+    app.local_candidates = vec![local.clone()];
+    app.ctx.state.cache_queue = vec!["wh1".into()];
+
+    app.tab = Tab::History;
+    app.cursor = 0;
+    assert_eq!(
+        super::selected_preview_path(&app).as_deref(),
+        history.to_str()
+    );
+
+    app.tab = Tab::Browse;
+    app.cursor = 1;
+    assert_eq!(
+        super::selected_preview_path(&app).as_deref(),
+        queued.to_str()
+    );
+
+    app.cursor = 3;
+    assert_eq!(
+        super::selected_preview_path(&app).as_deref(),
+        local.to_str()
+    );
+
+    app.cursor = 5;
+    assert_eq!(
+        super::selected_preview_path(&app).as_deref(),
+        history.to_str()
+    );
+
+    app.tab = Tab::Search;
+    app.search_results = vec![
+        SearchHit {
+            id: "missing-search".into(),
+            label: "missing".into(),
+        },
+        SearchHit {
+            id: "search1".into(),
+            label: "cached".into(),
+        },
+    ];
+    app.cursor = 0;
+    assert_eq!(super::selected_preview_path(&app), None);
+
+    app.cursor = 1;
+    assert_eq!(
+        super::selected_preview_path(&app).as_deref(),
+        search.to_str()
+    );
+}
+
+#[test]
+fn open_target_follows_current_history_browse_and_search_selection() {
+    let mut app = test_app();
+    let original = app.ctx.paths.config_dir.join("original.jpg");
+    let composed = app.ctx.paths.compose_dir.join("composed.png");
+    fs::create_dir_all(original.parent().expect("original parent")).expect("original parent");
+    fs::create_dir_all(composed.parent().expect("composed parent")).expect("composed parent");
+    fs::write(&original, b"original").expect("original");
+    fs::write(&composed, b"composed").expect("composed");
+    set_current_wall(&mut app, &original, &composed);
+
+    app.tab = Tab::Now;
+    assert_eq!(
+        app.selected_open_target(),
+        Some(OpenTarget::Path(composed.clone()))
+    );
+
+    app.tab = Tab::History;
+    app.cursor = 0;
+    assert_eq!(
+        app.selected_open_target(),
+        Some(OpenTarget::Path(original.clone()))
+    );
+
+    app.tab = Tab::Browse;
+    app.cursor = app
+        .browse_items()
+        .iter()
+        .position(|line| line.starts_with("history: "))
+        .expect("history row");
+    assert_eq!(
+        app.selected_open_target(),
+        Some(OpenTarget::Path(original.clone()))
+    );
+
+    app.ctx.state.cache_queue = vec!["wall-123".into()];
+    app.cursor = app
+        .browse_items()
+        .iter()
+        .position(|line| line == "queue: wall-123")
+        .expect("queue row");
+    assert_eq!(
+        app.selected_open_target(),
+        Some(OpenTarget::Url("https://wallhaven.cc/w/wall-123".into()))
+    );
+
+    app.tab = Tab::Search;
+    app.cursor = 0;
+    app.search_results = vec![SearchHit {
+        id: "abc123".into(),
+        label: "wallhaven image".into(),
+    }];
+    assert_eq!(
+        app.selected_open_target(),
+        Some(OpenTarget::Url("https://wallhaven.cc/w/abc123".into()))
+    );
+}
+
+#[test]
+fn open_target_for_config_sources_uses_selected_or_first_active_source() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": true },
+            "paths": {
+                "cache_dir": "/tmp/walls-cache",
+                "download_dir": "/tmp/walls-downloaded",
+                "favorites_dir": "/tmp/walls-favorites",
+                "fetched_dir": "/tmp/walls-fetched",
+                "compose_dir": "/tmp/walls-compose"
+            },
+            "apply": { "backend": "auto" },
+            "display": { "mode": "os" },
+            "sources": [
+                { "enabled": false, "type": "folder", "path": "/tmp/disabled" },
+                { "enabled": true, "type": "reddit", "query": "rust", "sort": "top", "time": "week" },
+                { "enabled": true, "type": "folder", "path": "/tmp/walls-local" },
+                { "enabled": true, "type": "wallhaven", "query": "mountain lake", "categories": "100", "purity": "100", "sorting": "random", "order": "desc", "ratios": "16x9", "atleast": "1920x1080" }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.config_in_subnav = false;
+
+    assert_eq!(
+        app.selected_open_target(),
+        Some(OpenTarget::Url(
+            "https://www.reddit.com/r/rust/top/?sort=top&t=week".into()
+        ))
+    );
+
+    app.config_in_subnav = true;
+    app.config_sub_cursor = 2;
+    assert_eq!(
+        app.selected_open_target(),
+        Some(OpenTarget::Path(std::path::PathBuf::from(
+            "/tmp/walls-local"
+        )))
+    );
+
+    app.config_sub_cursor = 3;
+    assert_eq!(
+        app.selected_open_target(),
+        Some(OpenTarget::Url(
+            "https://wallhaven.cc/search?q=mountain+lake&categories=100&purity=100&sorting=random&order=desc&atleast=1920x1080&ratios=16x9".into()
+        ))
+    );
+}
+
+#[test]
+fn open_command_uses_desktop_default_opener() {
+    let target = OpenTarget::Path(std::path::PathBuf::from("/tmp/wall.jpg"));
+    let command = open_command(&target);
+
+    #[cfg(target_os = "macos")]
+    assert_eq!(command.program, "open");
+    #[cfg(target_os = "windows")]
+    assert_eq!(command.program, "cmd");
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    assert_eq!(command.program, "xdg-open");
+
+    assert!(command.args.iter().any(|arg| arg == "/tmp/wall.jpg"));
+}
+
+#[test]
+fn footer_status_uses_explicit_role_not_message_text() {
+    let mut app = test_app();
+    let theme = style::Theme::new(app.color_mode);
+
+    app.set_message(
+        style::StatusKind::Neutral,
+        "search: disabled missing unsupported",
+    );
+    assert_same_status_role(
+        rendered_footer_status_style(&app),
+        theme.status(style::StatusKind::Neutral),
+    );
+
+    app.set_message(style::StatusKind::Success, "completed without magic words");
+    assert_same_status_role(
+        rendered_footer_status_style(&app),
+        theme.status(style::StatusKind::Success),
+    );
+
+    app.set_message(style::StatusKind::Warning, "confirm before continuing");
+    assert_same_status_role(
+        rendered_footer_status_style(&app),
+        theme.status(style::StatusKind::Warning),
+    );
+
+    app.set_message(style::StatusKind::Error, "operation did not complete");
+    assert_same_status_role(
+        rendered_footer_status_style(&app),
+        theme.status(style::StatusKind::Error),
+    );
+}
+
+#[test]
+fn content_lines_do_not_get_status_style_from_data_words() {
+    let theme = style::Theme::new(style::ColorMode::Auto);
+
+    assert_eq!(
+        line_style("source disabled missing search: unsupported", theme),
+        theme.normal()
+    );
+    assert_eq!(
+        line_style("!! source disabled missing search: unsupported", theme),
+        theme.status(style::StatusKind::Error)
+    );
+}
+
+#[test]
+fn number_keys_select_visible_tabs_by_digit() {
+    let mut app = test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+
+    assert!(
+        !handle_key(&mut app, KeyEvent::from(KeyCode::Char('5')), rt.handle()).expect("handle key")
+    );
+    assert_eq!(app.tab, Tab::Search);
+
+    assert!(
+        !handle_key(&mut app, KeyEvent::from(KeyCode::Char('2')), rt.handle()).expect("handle key")
+    );
+    assert_eq!(app.tab, Tab::Now);
+
+    assert!(
+        !handle_key(&mut app, KeyEvent::from(KeyCode::Char('6')), rt.handle()).expect("handle key")
+    );
+    assert_eq!(app.tab, Tab::Logs);
+}
+
+#[test]
+fn arrow_keys_move_between_visible_tabs_in_normal_mode() {
+    let mut app = test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+
+    assert!(
+        !handle_key(&mut app, KeyEvent::from(KeyCode::Right), rt.handle()).expect("handle right")
+    );
+    assert_eq!(app.tab, Tab::Now);
+
+    assert!(
+        !handle_key(&mut app, KeyEvent::from(KeyCode::Left), rt.handle()).expect("handle left")
+    );
+    assert_eq!(app.tab, Tab::Config);
+
+    assert!(
+        !handle_key(&mut app, KeyEvent::from(KeyCode::Left), rt.handle())
+            .expect("handle wrap left")
+    );
+    assert_eq!(app.tab, Tab::Logs);
+
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.enter_config_subnav();
+    assert!(app.config_in_subnav);
+    assert!(
+        !handle_key(&mut app, KeyEvent::from(KeyCode::Right), rt.handle())
+            .expect("handle right from subnav")
+    );
+    assert_eq!(app.tab, Tab::Now);
+    assert!(!app.config_in_subnav);
+
+    app.input_mode = InputMode::SearchInput;
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Left)),
+        UiAction::Ignore
+    );
+}
+
+#[test]
+fn key_mapping_separates_normal_command_and_search_input_modes() {
+    let mut app = test_app();
+
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char(':'))),
+        UiAction::EnterCommandMode
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('/'))),
+        UiAction::EditSearch
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('?'))),
+        UiAction::OpenHelp
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('o'))),
+        UiAction::OpenSelected
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('q'))),
+        UiAction::Quit
+    );
+
+    app.input_mode = InputMode::Command;
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('?'))),
+        UiAction::CommandChar('?')
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('/'))),
+        UiAction::CommandChar('/')
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('q'))),
+        UiAction::CommandChar('q')
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('o'))),
+        UiAction::CommandChar('o')
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Esc)),
+        UiAction::CancelInput
+    );
+
+    app.input_mode = InputMode::SearchInput;
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('?'))),
+        UiAction::SearchChar('?')
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('/'))),
+        UiAction::SearchChar('/')
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char(':'))),
+        UiAction::SearchChar(':')
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('q'))),
+        UiAction::SearchChar('q')
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('o'))),
+        UiAction::SearchChar('o')
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Enter)),
+        UiAction::SubmitSearch
+    );
+}
+
+#[test]
+fn command_mode_ctrl_n_and_ctrl_p_complete_commands() {
+    let mut app = test_app();
+    app.input_mode = InputMode::Command;
+
+    assert_eq!(
+        action_for_key(
+            &app,
+            KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL)
+        ),
+        UiAction::CommandComplete { forward: true }
+    );
+    update(
+        &mut app,
+        UiAction::CommandComplete { forward: true },
+        tokio::runtime::Runtime::new().expect("rt").handle(),
+    )
+    .expect("complete command");
+    assert_eq!(app.cmd_line, "next");
+
+    update(
+        &mut app,
+        UiAction::CommandComplete { forward: false },
+        tokio::runtime::Runtime::new().expect("rt").handle(),
+    )
+    .expect("complete previous command");
+    assert_eq!(app.cmd_line, "quit");
+
+    app.cmd_line = "p".into();
+    update(
+        &mut app,
+        UiAction::CommandComplete { forward: true },
+        tokio::runtime::Runtime::new().expect("rt").handle(),
+    )
+    .expect("complete prefix");
+    assert_eq!(app.cmd_line, "prev");
+}
+
+#[test]
+fn vim_profile_adds_h_l_and_gg_navigation_without_affecting_inputs() {
+    let mut app = test_app();
+    app.ctx.config.tui.key_profile = TuiKeyProfile::Vim;
+    app.tab = Tab::Now;
+
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('h'))),
+        UiAction::SwitchTabPrev
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('l'))),
+        UiAction::SwitchTabNext
+    );
+
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('g'))),
+        UiAction::VimPrefixG
+    );
+    app.vim_pending_g = true;
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('g'))),
+        UiAction::MoveFirst
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('G'))),
+        UiAction::MoveLast
+    );
+
+    app.input_mode = InputMode::Command;
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('h'))),
+        UiAction::CommandChar('h')
+    );
+
+    app.input_mode = InputMode::SearchInput;
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('l'))),
+        UiAction::SearchChar('l')
+    );
+
+    app.input_mode = InputMode::Normal;
+    app.tab = Tab::Config;
+    app.start_edit_for_current();
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('g'))),
+        UiAction::EditFieldChar('g')
+    );
+}
+
+#[test]
+fn config_tui_block_edits_key_profile() {
+    let mut app = test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_TUI;
+
+    app.start_edit_for_current();
+    let editing = app.editing.as_ref().expect("editing");
+    assert!(matches!(
+        editing.target,
+        EditTarget::Block(CONFIG_BLOCK_TUI)
+    ));
+    assert_eq!(editing.field_buffer, "emacs");
+    assert_eq!(
+        app.current_edit_field_kind(),
+        EditFieldKind::Choice(&["emacs", "vim"])
+    );
+
+    update(
+        &mut app,
+        UiAction::EditFieldCycle { forward: true },
+        rt.handle(),
+    )
+    .expect("cycle key profile");
+
+    assert_eq!(app.ctx.config.tui.key_profile, TuiKeyProfile::Vim);
+    assert!(app.message.contains("config saved"), "{}", app.message);
+}
+
+#[test]
+fn config_library_block_edits_quota_settings() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "interval_secs": 60, "internet_enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "quota": { "enabled": true, "size_mb": 1000 },
+            "selection": { "use_landscape_enabled": true, "avoid_recent": 50, "refetch_when_cache_below": 5, "strategy": "random" },
+            "sources": []
+        }),
+        serde_json::json!({}),
+    );
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_LIBRARY;
+
+    app.start_edit_for_current();
+    let editing = app.editing.as_ref().expect("editing");
+    assert!(matches!(
+        editing.target,
+        EditTarget::Block(CONFIG_BLOCK_LIBRARY)
+    ));
+    assert_eq!(editing.field_buffer, "true");
+    assert_eq!(app.current_edit_field_kind(), EditFieldKind::Bool);
+
+    update(
+        &mut app,
+        UiAction::EditFieldCycle { forward: true },
+        rt.handle(),
+    )
+    .expect("toggle quota enabled");
+    assert!(!app.ctx.config.quota.enabled);
+
+    update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to size");
+    {
+        let editing = app.editing.as_mut().expect("editing");
+        assert_eq!(editing.field_buffer, "1000");
+        editing.field_buffer = "512".into();
+    }
+    update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save quota size");
+
+    assert_eq!(app.ctx.config.quota.size_mb, 512);
+    assert!(
+        app.message.contains("config saved: library"),
+        "{}",
+        app.message
+    );
+
+    update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to landscape");
+    {
+        let editing = app.editing.as_ref().expect("editing");
+        assert_eq!(editing.field_buffer, "true");
+        assert_eq!(app.current_edit_field_kind(), EditFieldKind::Bool);
+    }
+    update(
+        &mut app,
+        UiAction::EditFieldCycle { forward: true },
+        rt.handle(),
+    )
+    .expect("toggle landscape filter");
+
+    update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to avoid recent");
+    {
+        let editing = app.editing.as_mut().expect("editing");
+        assert_eq!(editing.field_buffer, "50");
+        editing.field_buffer = "12".into();
+    }
+    update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save avoid recent");
+
+    update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to refetch");
+    {
+        let editing = app.editing.as_mut().expect("editing");
+        assert_eq!(editing.field_buffer, "5");
+        editing.field_buffer = "2".into();
+    }
+    update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save refetch");
+
+    assert!(!app.ctx.config.selection.use_landscape_enabled);
+    assert_eq!(app.ctx.config.selection.avoid_recent, 12);
+    assert_eq!(app.ctx.config.selection.refetch_when_cache_below, 2);
+    let text = std::fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
+    assert!(text.contains("\"use_landscape_enabled\": false"), "{text}");
+    assert!(text.contains("\"avoid_recent\": 12"), "{text}");
+    assert!(text.contains("\"refetch_when_cache_below\": 2"), "{text}");
+}
+
+#[test]
+fn config_library_block_shows_quota_validation_errors_inline() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "interval_secs": 60, "internet_enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "quota": { "enabled": true, "size_mb": 1000 },
+            "sources": []
+        }),
+        serde_json::json!({}),
+    );
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_LIBRARY;
+
+    app.start_edit_for_current();
+    update(&mut app, UiAction::EditFieldDown, rt.handle()).expect("move to size");
+    app.editing.as_mut().expect("editing").field_buffer = "0".into();
+    update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("reject zero quota");
+
+    assert_eq!(app.ctx.config.quota.size_mb, 1000);
+    assert!(
+        app.message.contains("config validation failed"),
+        "{}",
+        app.message
+    );
+    let text = render_text(&app, 100, 24);
+    assert!(text.contains("quota.size_mb"), "{text}");
+    assert!(text.contains("must be greater than zero"), "{text}");
+}
+
+#[test]
+fn key_help_opens_and_closes_without_quitting() {
+    let mut app = test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+
+    assert!(
+        !handle_key(&mut app, KeyEvent::from(KeyCode::Char('?')), rt.handle()).expect("open help")
+    );
+    assert!(app.show_key_help);
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Char('q'))),
+        UiAction::CloseHelp
+    );
+
+    let text = render_text(&app, 80, 30);
+    assert!(text.contains("Key help"), "{text}");
+    assert!(text.contains("Global"), "{text}");
+    assert!(text.contains("Sources: a adds a Wallhaven query"), "{text}");
+    assert!(text.contains("Config edit"), "{text}");
+    assert!(text.contains("Esc/q close help"), "{text}");
+
+    assert!(
+        !handle_key(&mut app, KeyEvent::from(KeyCode::Char('q')), rt.handle())
+            .expect("close help with q")
+    );
+    assert!(!app.show_key_help);
+
+    assert!(
+        !handle_key(&mut app, KeyEvent::from(KeyCode::Char('?')), rt.handle())
+            .expect("open help again")
+    );
+    assert!(
+        !handle_key(&mut app, KeyEvent::from(KeyCode::Esc), rt.handle())
+            .expect("close help with esc")
+    );
+    assert!(!app.show_key_help);
+}
+
+#[test]
+fn slash_enters_search_from_any_normal_tab() {
+    let mut app = test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+
+    app.tab = Tab::Config;
+    app.config_in_subnav = true;
+    app.cursor = 3;
+
+    update(&mut app, UiAction::EditSearch, rt.handle()).expect("enter search");
+
+    assert_eq!(app.tab, Tab::Search);
+    assert_eq!(app.cursor, 0);
+    assert!(!app.config_in_subnav);
+    assert!(matches!(app.input_mode, InputMode::SearchInput));
+}
+
+#[test]
+fn command_favorite_alias_runs_through_dispatch() {
+    let mut app = test_app();
+    app.cmd_line = "favorite".into();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+
+    let (message, kind) = app
+        .run_command(rt.handle())
+        .expect("run command")
+        .expect("message");
+
+    assert_eq!(kind, style::StatusKind::Error);
+    assert!(message.starts_with("favorite error:"), "{message}");
+    assert!(message.contains("walls apply <path>"), "{message}");
+}
+
+#[test]
+fn list_jump_keys_translate_only_in_normal_mode() {
+    let mut app = test_app();
+
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Home)),
+        UiAction::MoveFirst
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::End)),
+        UiAction::MoveLast
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::PageDown)),
+        UiAction::PageDown
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::PageUp)),
+        UiAction::PageUp
+    );
+
+    app.input_mode = InputMode::Command;
+    assert_eq!(
+        action_for_key(&app, KeyEvent::from(KeyCode::Home)),
+        UiAction::Ignore
+    );
+}
+
+#[test]
+fn home_end_and_page_keys_move_active_list_cursor() {
+    let mut app = test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+
+    app.tab = Tab::Browse;
+    app.cursor = 0;
+    update(&mut app, UiAction::PageDown, rt.handle()).expect("page down");
+    assert_eq!(app.cursor, 5);
+    update(&mut app, UiAction::MoveLast, rt.handle()).expect("end");
+    assert_eq!(app.cursor, app.browse_items().len() - 1);
+    update(&mut app, UiAction::PageUp, rt.handle()).expect("page up");
+    assert_eq!(app.cursor, app.browse_items().len().saturating_sub(6));
+    update(&mut app, UiAction::MoveFirst, rt.handle()).expect("home");
+    assert_eq!(app.cursor, 0);
+
+    app.tab = Tab::Search;
+    app.search_results = (0..8)
+        .map(|i| SearchHit {
+            id: format!("id-{i}"),
+            label: format!("hit-{i}"),
+        })
+        .collect();
+    app.cursor = 2;
+    update(&mut app, UiAction::MoveLast, rt.handle()).expect("search end");
+    assert_eq!(app.cursor, 7);
+    update(&mut app, UiAction::MoveFirst, rt.handle()).expect("search home");
+    assert_eq!(app.cursor, 0);
+
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    update(&mut app, UiAction::MoveLast, rt.handle()).expect("config end");
+    assert_eq!(app.config_cursor, App::config_block_count() - 1);
+    update(&mut app, UiAction::MoveFirst, rt.handle()).expect("config home");
+    assert_eq!(app.config_cursor, CONFIG_BLOCK_SOURCES);
+
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.enter_config_subnav();
+    app.config_sub_cursor = 0;
+    update(&mut app, UiAction::MoveLast, rt.handle()).expect("subnav end");
+    assert_eq!(app.config_sub_cursor, app.sources_subnav_len() - 1);
+    update(&mut app, UiAction::MoveFirst, rt.handle()).expect("subnav home");
+    assert_eq!(app.config_sub_cursor, 0);
+}
+
+#[test]
+fn update_returns_reload_effect_for_domain_actions() {
+    let mut app = test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+
+    assert_eq!(
+        update(&mut app, UiAction::TogglePause, rt.handle()).expect("toggle"),
+        UpdateEffect::None
+    );
+    assert!(app.message.starts_with("paused:"));
+
+    assert_eq!(
+        update(&mut app, UiAction::Next, rt.handle()).expect("next"),
+        UpdateEffect::Reload
+    );
+    assert!(
+        app.message.starts_with("next:") || app.message.starts_with("next error:"),
+        "{}",
+        app.message
+    );
+}
+
+#[test]
+fn prev_action_reports_missing_history_file_with_recovery() {
+    let mut app = test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let original = app.ctx.paths.cache_dir.join("current.jpg");
+    let missing = app.ctx.paths.cache_dir.join("missing-previous.jpg");
+    fs::create_dir_all(&app.ctx.paths.cache_dir).expect("cache dir");
+    fs::write(&original, b"current").expect("current image");
+    set_current_wall(&mut app, &original, &original);
+    app.ctx.state.history = vec![
+        original.display().to_string(),
+        missing.display().to_string(),
+    ];
+    app.ctx.state.history_index = 0;
+    app.ctx.save_state().expect("save missing previous state");
+
+    assert_eq!(
+        update(&mut app, UiAction::Prev, rt.handle()).expect("prev"),
+        UpdateEffect::Reload
+    );
+
+    assert!(app
+        .message
+        .contains("prev error: previous wallpaper file is missing"));
+    assert!(app.message.contains("missing-previous.jpg"));
+    assert!(app.message.contains("walls apply <path>"));
+}
+
+#[test]
+fn config_toggle_persists_boolean_and_reloads_context() {
+    let mut app = test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    app.config_cursor = CONFIG_BLOCK_ROTATION;
+    app.tab = Tab::Config;
+
+    assert!(app.ctx.config.change.enabled);
+    assert_eq!(
+        update(&mut app, UiAction::ToggleConfigValue, rt.handle()).expect("toggle config"),
+        UpdateEffect::Reload
+    );
+    apply_effect(&mut app, UpdateEffect::Reload).expect("reload");
+
+    assert!(!app.ctx.config.change.enabled);
+    assert!(app.message.contains("config saved: rotation enabled=false"));
+    let text = std::fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
+    assert!(text.contains("\"enabled\": false"), "{text}");
+}
+
+#[test]
+fn config_cycle_persists_enum_like_value_and_reloads_context() {
+    let mut app = test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    app.config_cursor = CONFIG_BLOCK_LIBRARY;
+    app.tab = Tab::Config;
+
+    assert_eq!(
+        update(&mut app, UiAction::CycleConfigValue, rt.handle()).expect("cycle config"),
+        UpdateEffect::Reload
+    );
+    apply_effect(&mut app, UpdateEffect::Reload).expect("reload");
+
+    assert!(app.message.contains("config saved: selection=Sequential"));
+    let text = std::fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
+    assert!(text.contains("\"strategy\": \"sequential\""), "{text}");
+    assert!(render_text(&app, 120, 32).contains("strategy            : Sequential"));
+}
+
+#[test]
+fn config_edit_state_starts_and_cancels_without_side_effects() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [
+                { "enabled": true, "type": "json", "label": "demo", "url": "https://example", "image_path": "$.u" }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_ROTATION;
+    assert!(app.editing.is_none());
+    // direct for RED (will be wired via action later)
+    app.start_edit_for_current();
+    assert!(app.editing.is_some());
+    app.cancel_edit();
+    assert!(app.editing.is_none());
+    // no side effects
+    assert!(app.ctx.config.change.enabled);
+}
+
+#[test]
+fn e_on_config_block_enters_edit_popup_state() {
+    use crate::tui::app::EditTarget;
+    use ratatui::crossterm::event::KeyModifiers;
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [ { "enabled": true, "type": "folder", "path": "/tmp" } ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_ROTATION;
+    // Drive via key path (action_for_key + update) - before wiring 'e' -> EditConfigItem this will not enter edit
+    // (test will fail assert until Task 2 wire)
+    let key = KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE);
+    let action = action_for_key(&app, key);
+    // simulate update (in real handle_key calls update)
+    let rt = tokio::runtime::Runtime::new().expect("rt");
+    let _ = update(&mut app, action, rt.handle());
+    assert!(
+        app.is_editing(),
+        "after 'e' on config should have entered edit state"
+    );
+    assert!(matches!(
+        app.editing.as_ref().unwrap().target,
+        EditTarget::Block(CONFIG_BLOCK_ROTATION)
+    ));
+}
+
+#[test]
+fn e_then_render_shows_drilldown_form_in_main_content() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "interval_secs": 60 },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [ { "enabled": true, "type": "json", "label": "demo json", "url": "https://ex", "image_path": "$.d" } ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES; // sources-ish
+    app.start_edit_for_current();
+    let text = render_text(&app, 80, 24);
+    // Drill-down (non-modal): when editing Config item, main content shows the form fields directly (replaces blocks list in body area). No overlay/Clear popup.
+    assert!(
+        text.contains("EDIT FORM"),
+        "form marker should be in main tab content for drill-down edit view"
+    );
+    // fields from demo (labels now Title for clarity)
+    let has_field = text.contains("Enabled")
+        || text.contains("URL")
+        || text.contains("Image path")
+        || text.contains("Interval");
+    assert!(
+        has_field,
+        "form should list some fields for the item; got prefix: {}",
+        &text[0..300.min(text.len())]
+    );
+}
+
+#[test]
+fn edit_form_live_buffer_and_commit_updates_draft() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [ { "enabled": true, "type": "json", "url": "https://old", "image_path": "$.old" } ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.start_edit_for_current();
+    assert!(app.is_editing());
+    // With new UX, focus sets buffer to current value for editing/backspace support
+    if let Some(s) = &mut app.editing {
+        s.field_cursor = 2; // url in our list
+    }
+    // re-focus effect: set buffer (sim in test) - compute before mut borrow
+    let initial_buf = app.current_edit_field_value();
+    if let Some(s) = &mut app.editing {
+        s.field_buffer = initial_buf;
+    }
+    let rt = tokio::runtime::Runtime::new().expect("rt");
+    // simulate backspace to clear/edit: backspace the value down
+    // url "https://old" , backspace 4 times
+    let orig_len = app.editing.as_ref().unwrap().field_buffer.len();
+    for _ in 0..4 {
+        update(&mut app, UiAction::EditFieldBackspace, rt.handle()).ok();
+    }
+    let buf = app.editing.as_ref().unwrap().field_buffer.clone();
+    assert!(
+        buf.len() == orig_len - 4 && !buf.ends_with("old"),
+        "backspace should reduce the field value in buffer for clear/edit; buf={}",
+        buf
+    );
+    // commit
+    update(&mut app, UiAction::EditFieldCommit, rt.handle()).ok();
+    let draft = app.editing.as_ref().unwrap().draft_source.as_ref().unwrap();
+    assert!(
+        !draft.url.as_deref().unwrap_or("").ends_with("old"),
+        "committed shortened value"
+    );
+}
+
+#[test]
+fn edit_form_query_field_for_reddit_commits_to_correct_draft_field_not_url() {
+    // TDD for proper per-type fields + name-based commit (not brittle idx)
+    // reddit uses query (from ex + tests + Variety compat), should be editable without polluting url
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [ { "enabled": true, "type": "reddit", "query": "cats", "sort": "hot" } ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES; // sources block -> edits source 0
+    app.start_edit_for_current();
+    assert!(app.is_editing());
+    let rt = tokio::runtime::Runtime::new().expect("rt");
+    // fields for reddit: 0=enabled, 1=query (subreddit)
+    update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
+    // prefill should have loaded the query value via name-based current_edit
+    let initial = app.editing.as_ref().unwrap().field_buffer.clone();
+    assert_eq!(
+        initial, "cats",
+        "prefill must load query value for reddit source; got '{}'",
+        initial
+    );
+    // backspace to edit/clear last char
+    update(&mut app, UiAction::EditFieldBackspace, rt.handle()).ok();
+    let buf = app.editing.as_ref().unwrap().field_buffer.clone();
+    assert_eq!(buf, "cat", "backspace on query field");
+    // commit field
+    update(&mut app, UiAction::EditFieldCommit, rt.handle()).ok();
+    let draft = app.editing.as_ref().unwrap().draft_source.as_ref().unwrap();
+    assert_eq!(
+        draft.query.as_deref(),
+        Some("cat"),
+        "query must be updated in draft"
+    );
+    assert!(
+        draft.url.is_none() || draft.url.as_deref() == Some(""),
+        "must not have polluted url field; url={:?}",
+        draft.url
+    );
+}
+
+#[test]
+fn reddit_edit_form_lists_subreddit_sort_and_time_without_label_or_type() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [ { "enabled": true, "type": "reddit", "query": "wallpapers", "sort": "top", "time": "month" } ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.enter_config_subnav();
+    app.config_sub_cursor = 0;
+    app.start_edit_for_current();
+
+    // Wide tui-preview layout splits the form column; use enough width for the secrets hint.
+    let text = render_text(&app, 140, 28);
+    assert!(text.contains("Edit Reddit"), "{text}");
+    assert!(text.contains("Subreddit"), "{text}");
+    assert!(text.contains("wallpapers"), "{text}");
+    assert!(text.contains("Sort"), "{text}");
+    assert!(text.contains("Time period"), "{text}");
+    assert!(text.contains("month"), "{text}");
+    assert!(!text.contains("Label"), "{text}");
+    assert!(!text.contains("Type"), "{text}");
+    assert!(text.contains("Reddit API credentials"), "{text}");
+    assert!(
+        text.contains(walls_core::config::SECRETS_EDIT_HINT),
+        "{text}"
+    );
+}
+
+#[test]
+fn reddit_subnav_shows_missing_credentials_warning() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [ { "enabled": true, "type": "reddit", "query": "wallpapers", "sort": "hot" } ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.enter_config_subnav();
+    app.config_sub_cursor = 0;
+
+    let text = render_text(&app, 120, 30);
+    assert!(text.contains("reddit api credentials: [missing]"), "{text}");
+    assert!(text.contains("reddit.com/prefs/apps"), "{text}");
+}
+
+#[test]
+fn unsplash_edit_form_shows_secrets_hint() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [ { "enabled": false, "type": "unsplash", "label": "Nature", "query": "forest", "orientation": "landscape" } ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.enter_config_subnav();
+    app.config_sub_cursor = 0;
+    app.start_edit_for_current();
+
+    let text = render_text(&app, 140, 30);
+    assert!(text.contains("Unsplash access key"), "{text}");
+    assert!(
+        text.contains(walls_core::config::SECRETS_EDIT_HINT),
+        "{text}"
+    );
+}
+
+#[test]
+fn reddit_time_unavailable_when_sort_is_hot() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [ { "enabled": true, "type": "reddit", "query": "pics", "sort": "hot" } ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.enter_config_subnav();
+    app.start_edit_for_current();
+    let rt = tokio::runtime::Runtime::new().expect("rt");
+    for _ in 0..3 {
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
+    }
+    let text = render_text(&app, 100, 28);
+    assert!(text.contains("n/a (top/controversial only)"), "{text}");
+}
+
+#[test]
+fn config_subnav_jk_pick_then_e_edits_specific_source() {
+    use crate::tui::app::EditTarget;
+    // Setup with multiple sources so we can pick nested
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [
+                { "enabled": true, "type": "folder", "path": "/tmp" },
+                { "enabled": false, "type": "json", "label": "the one", "url": "https://ex", "image_path": "$.x" }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    // RED: no subnav yet, so entering sub + move + e should not target Source(1)
+    // (will fail until impl)
+    app.enter_config_subnav(); // expect to add
+    update(
+        &mut app,
+        UiAction::MoveDown,
+        tokio::runtime::Runtime::new().unwrap().handle(),
+    )
+    .ok();
+    update(
+        &mut app,
+        UiAction::EditConfigItem,
+        tokio::runtime::Runtime::new().unwrap().handle(),
+    )
+    .ok();
+    let editing = app
+        .editing
+        .as_ref()
+        .expect("should be editing after e in sub");
+    assert!(
+        matches!(editing.target, EditTarget::Source(1)),
+        "should have picked the 2nd source via subnav j/k then e"
+    );
+}
+
+#[test]
+fn sources_a_adds_wallhaven_query_source_without_label_and_opens_edit() {
+    let rt = tokio::runtime::Runtime::new().expect("rt");
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [
+                { "enabled": true, "type": "favorites", "label": "Favorites" }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+
+    assert_eq!(
+        action_for_key(&app, KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
+        UiAction::AddSource
+    );
+    update(&mut app, UiAction::AddSource, rt.handle()).expect("add source");
+
+    let source = app.ctx.config.sources.last().expect("added source");
+    assert_eq!(source.source_type, "wallhaven");
+    assert_eq!(source.label, None);
+    assert_eq!(source.query.as_deref(), Some("space"));
+    assert_eq!(
+        App::source_editable_fields(source),
+        vec![
+            "enabled",
+            "query",
+            "category_general",
+            "category_anime",
+            "category_people",
+            "purity_sfw",
+            "purity_sketchy",
+            "purity_nsfw",
+            "sorting",
+            "order",
+            "ratios",
+            "atleast",
+            "prefer",
+            "collections"
+        ]
+    );
+    assert!(app.config_in_subnav);
+    assert_eq!(app.config_sub_cursor, app.ctx.config.sources.len() - 1);
+    assert!(matches!(
+        app.editing.as_ref().map(|session| &session.target),
+        Some(EditTarget::Source(_))
+    ));
+
+    let text = render_text(&app, 100, 32);
+    assert!(text.contains("Edit Source"), "{text}");
+    assert!(text.contains("Wallhaven space"), "{text}");
+    assert!(text.contains("Search query"), "{text}");
+    assert!(text.contains("Aspect ratio"), "{text}");
+    assert!(text.contains("Minimum resolution"), "{text}");
+    assert!(text.contains("Collections"), "{text}");
+    assert!(text.contains("Wallhaven API key"), "{text}");
+    assert!(
+        text.contains(walls_core::config::SECRETS_EDIT_HINT),
+        "{text}"
+    );
+    assert!(!text.contains("Label"), "{text}");
+}
+
+#[test]
+fn wallhaven_source_edit_persists_collection_entries() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [
+                {
+                    "enabled": true,
+                    "type": "wallhaven",
+                    "query": "nebula",
+                    "collections": [
+                        { "username": "alice", "id": 42, "label": "Favorites" }
+                    ]
+                }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.start_edit_for_current();
+
+    let fields = app
+        .editing
+        .as_ref()
+        .and_then(|session| session.draft_source.as_ref())
+        .map(App::source_editable_fields)
+        .expect("draft source fields");
+    let collections_idx = fields
+        .iter()
+        .position(|field| field == "collections")
+        .expect("collections field");
+    {
+        let editing = app.editing.as_mut().expect("editing");
+        editing.field_cursor = collections_idx;
+        editing.field_buffer = "bob/7:Mountains, carol/9".into();
+    }
+    app.commit_edit_field_buffer();
+    app.save_edit_item(false).expect("save collection edit");
+
+    let source = &app.ctx.config.sources[0];
+    assert_eq!(source.collections.len(), 2);
+    assert_eq!(source.collections[0].username, "bob");
+    assert_eq!(source.collections[0].id, 7);
+    assert_eq!(source.collections[0].label.as_deref(), Some("Mountains"));
+    assert_eq!(source.collections[1].username, "carol");
+    assert_eq!(source.collections[1].id, 9);
+    assert_eq!(source.collections[1].label, None);
+    let text = fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
+    assert!(text.contains("\"username\": \"bob\""), "{text}");
+    assert!(text.contains("\"id\": 7"), "{text}");
+    assert!(text.contains("\"label\": \"Mountains\""), "{text}");
+
+    app.start_edit_for_current();
+    {
+        let editing = app.editing.as_mut().expect("editing");
+        editing.field_cursor = collections_idx;
+        editing.field_buffer = "missing-id".into();
+    }
+    app.commit_edit_field_buffer();
+    app.save_edit_item(false)
+        .expect("invalid collection edit stays in form");
+    assert!(app.message.contains("collections[0].id"), "{}", app.message);
+    let form = render_text(&app, 100, 28);
+    assert!(form.contains("!! Validation errors"), "{form}");
+    assert!(form.contains("collections[0].id"), "{form}");
+}
+
+#[test]
+fn attribution_source_edit_persists_source_and_author_metadata() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [
+                {
+                    "enabled": true,
+                    "type": "attribution",
+                    "label": "Daily image",
+                    "url": "https://example.com/wall.jpg",
+                    "source": "Example archive",
+                    "author": "Ada"
+                }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.start_edit_for_current();
+
+    let fields = app
+        .editing
+        .as_ref()
+        .and_then(|session| session.draft_source.as_ref())
+        .map(App::source_editable_fields)
+        .expect("draft source fields");
+    assert_eq!(fields, vec!["enabled", "label", "url", "source", "author"]);
+    let text = render_text(&app, 100, 28);
+    assert!(text.contains("Source"), "{text}");
+    assert!(text.contains("Example archive"), "{text}");
+    assert!(text.contains("Author"), "{text}");
+    assert!(text.contains("Ada"), "{text}");
+
+    let source_idx = fields
+        .iter()
+        .position(|field| field == "source")
+        .expect("source field");
+    {
+        let editing = app.editing.as_mut().expect("editing");
+        editing.field_cursor = source_idx;
+        editing.field_buffer = "Updated archive".into();
+    }
+    app.commit_edit_field_buffer();
+
+    let author_idx = fields
+        .iter()
+        .position(|field| field == "author")
+        .expect("author field");
+    {
+        let editing = app.editing.as_mut().expect("editing");
+        editing.field_cursor = author_idx;
+        editing.field_buffer = "Grace Hopper".into();
+    }
+    app.commit_edit_field_buffer();
+    app.save_edit_item(false)
+        .expect("save attribution metadata edit");
+
+    let source = &app.ctx.config.sources[0];
+    assert_eq!(source.source.as_deref(), Some("Updated archive"));
+    assert_eq!(source.author.as_deref(), Some("Grace Hopper"));
+    let text = fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
+    assert!(text.contains("\"source\": \"Updated archive\""), "{text}");
+    assert!(text.contains("\"author\": \"Grace Hopper\""), "{text}");
+}
+
+#[test]
+fn wallhaven_subnav_shows_api_key_presence() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [
+                { "enabled": true, "type": "wallhaven", "query": "jupiter" }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.enter_config_subnav();
+
+    let text = render_text(&app, 120, 30);
+    assert!(text.contains("wallhaven api key: [missing]"), "{text}");
+}
+
+#[test]
+fn sources_x_removes_selected_configured_source() {
+    let rt = tokio::runtime::Runtime::new().expect("rt");
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [
+                { "enabled": true, "type": "favorites", "label": "Favorites" },
+                { "enabled": true, "type": "wallhaven", "query": "jupiter" },
+                { "enabled": false, "type": "wallhaven", "query": "neptune" }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.config_in_subnav = true;
+    app.config_sub_cursor = 1;
+
+    assert!(
+        app.footer_keys().contains("x remove"),
+        "{}",
+        app.footer_keys()
+    );
+    assert_eq!(
+        action_for_key(&app, KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+        UiAction::RemoveSource
+    );
+    update(&mut app, UiAction::RemoveSource, rt.handle()).expect("remove source");
+
+    assert_eq!(app.ctx.config.sources.len(), 2);
+    assert_eq!(app.ctx.config.sources[0].source_type, "favorites");
+    assert_eq!(app.ctx.config.sources[1].source_type, "wallhaven");
+    assert_eq!(app.ctx.config.sources[1].query.as_deref(), Some("neptune"));
+    assert_eq!(app.config_sub_cursor, 1);
+    assert_eq!(app.message, "source removed: Wallhaven jupiter");
+}
+
+#[test]
+fn sources_x_does_not_remove_builtin_library_sources() {
+    let rt = tokio::runtime::Runtime::new().expect("rt");
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [
+                { "enabled": true, "type": "favorites", "label": "Favorites" },
+                { "enabled": true, "type": "wallhaven", "query": "jupiter" }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.config_in_subnav = true;
+    app.config_sub_cursor = 0;
+
+    assert_eq!(
+        action_for_key(&app, KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+        UiAction::Ignore
+    );
+    assert!(
+        !app.footer_keys().contains("x remove"),
+        "{}",
+        app.footer_keys()
+    );
+    update(&mut app, UiAction::RemoveSource, rt.handle()).expect("remove source");
+
+    assert_eq!(app.ctx.config.sources.len(), 2);
+    assert_eq!(app.ctx.config.sources[0].source_type, "favorites");
+    assert_eq!(
+        app.message,
+        "remove source: built-in library sources cannot be removed"
+    );
+}
+
+#[test]
+fn config_subnav_enter_enters_and_esc_exits_without_enter_toggle() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [
+                { "enabled": true, "type": "folder", "path": "/tmp" },
+                { "enabled": false, "type": "json", "label": "the one", "url": "https://ex", "image_path": "$.x" }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    let rt = tokio::runtime::Runtime::new().expect("rt");
+
+    assert!(!app.config_in_subnav);
+    update(&mut app, UiAction::Enter, rt.handle()).ok();
+    assert!(app.config_in_subnav, "Enter on Sources should enter subnav");
+
+    update(&mut app, UiAction::Enter, rt.handle()).ok();
+    assert!(
+        app.config_in_subnav,
+        "Enter while in subnav must not exit; use Esc instead"
+    );
+
+    update(&mut app, UiAction::ExitConfigSubnav, rt.handle()).ok();
+    assert!(!app.config_in_subnav, "Esc should exit subnav");
+
+    let action = action_for_key(&app, KeyEvent::from(KeyCode::Esc));
+    assert_eq!(
+        action,
+        UiAction::Ignore,
+        "Esc outside subnav should not map to exit"
+    );
+}
+
+#[test]
+fn config_subnav_highlights_selected_item_in_details() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [
+                { "enabled": true, "type": "folder", "path": "/tmp" },
+                { "enabled": false, "type": "json", "label": "the one", "url": "https://ex", "image_path": "$.x" }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.enter_config_subnav();
+    // move to second item
+    let rt = tokio::runtime::Runtime::new().expect("rt");
+    update(&mut app, UiAction::MoveDown, rt.handle()).ok();
+    let text = render_text(&app, 80, 24);
+    assert!(
+        text.contains("▸ the one"),
+        "sub item should be highlighted with marker; got: {}",
+        text
+    );
+    assert!(
+        !text.contains("▸ Local folder"),
+        "only selected sub highlighted"
+    );
+}
+
+#[test]
+fn shift_x_provider_reset_requires_confirmation_then_clears_provider_storage() {
+    use ratatui::crossterm::event::KeyModifiers;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    fs::create_dir_all(tmp.path().join("cache")).expect("cache");
+    fs::create_dir_all(tmp.path().join("downloaded")).expect("downloaded");
+    fs::create_dir_all(tmp.path().join("fetched")).expect("fetched");
+    let cache_file = tmp.path().join("cache").join("wallhaven-wh1.jpg");
+    let download_file = tmp.path().join("downloaded").join("wallhaven-wh2.jpg");
+    let fetched_file = tmp.path().join("fetched").join("imported.jpg");
+    fs::write(&cache_file, b"cache").expect("cache file");
+    fs::write(&download_file, b"download").expect("download file");
+    fs::write(&fetched_file, b"fetched").expect("fetched file");
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": false },
+            "paths": {
+                "cache_dir": tmp.path().join("cache").display().to_string(),
+                "download_dir": tmp.path().join("downloaded").display().to_string(),
+                "favorites_dir": tmp.path().join("favorites").display().to_string(),
+                "fetched_dir": tmp.path().join("fetched").display().to_string(),
+                "compose_dir": tmp.path().join("compose").display().to_string(),
+            },
+            "sources": []
+        }),
+        serde_json::json!({}),
+    );
+    app.ctx.state.cache_queue = vec!["wh1".into(), "wh2".into()];
+    app.ctx.state.history = vec![
+        cache_file.display().to_string(),
+        fetched_file.display().to_string(),
+    ];
+    app.ctx.state.current = Some(CurrentWall {
+        source_id: "wallhaven-wh1.jpg".into(),
+        wallhaven_id: Some("wh1".into()),
+        provider: Some("wallhaven".into()),
+        source_url: None,
+        author: None,
+        description: None,
+        original_path: cache_file.display().to_string(),
+        composed_path: tmp
+            .path()
+            .join("compose")
+            .join("current.jpg")
+            .display()
+            .to_string(),
+        post_filter_path: None,
+    });
+    app.ctx.save_state().expect("save state");
+
+    let rt = tokio::runtime::Runtime::new().expect("rt");
+    let shift_x = KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT);
+
+    let request = action_for_key(&app, shift_x);
+    assert_eq!(request, UiAction::NukeDownloadsRequest);
+    update(&mut app, request, rt.handle()).expect("request nuke");
+    assert!(app.pending_nuke_confirm);
+    assert!(app.message.contains("provider reset: clear 2 queued"));
+    assert!(app.message.contains("delete 1 cache + 1 downloaded file"));
+    assert!(app.message.contains("prune 1 history entry"));
+    assert!(!app.footer_keys().contains("q quit"));
+
+    let unrelated = action_for_key(&app, KeyEvent::from(KeyCode::Char('q')));
+    assert_eq!(unrelated, UiAction::Ignore);
+    update(&mut app, unrelated, rt.handle()).expect("ignore unrelated key");
+    assert!(app.pending_nuke_confirm);
+
+    let confirm = action_for_key(&app, shift_x);
+    assert_eq!(confirm, UiAction::NukeDownloadsConfirm);
+    update(&mut app, confirm, rt.handle()).expect("confirm nuke");
+    assert!(!app.pending_nuke_confirm);
+    assert!(app.message.contains("provider reset: cleared 2 queued"));
+    assert!(app.message.contains("removed 1 cache + 1 downloaded file"));
+    assert!(app.message.contains("pruned 1 history entry"));
+    assert!(app.message.contains("current=true"));
+    assert!(app.ctx.state.cache_queue.is_empty());
+    assert!(app.ctx.state.current.is_none());
+    assert_eq!(
+        app.ctx.state.history,
+        vec![fetched_file.display().to_string()]
+    );
+    assert!(!cache_file.exists());
+    assert!(!download_file.exists());
+    assert!(fetched_file.exists());
+}
+
+#[test]
+fn d_trash_requires_confirmation_and_can_cancel_or_confirm() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let original = tmp.path().join("original.jpg");
+    let composed = tmp.path().join("composed.jpg");
+    fs::write(&original, b"original").expect("original");
+    fs::write(&composed, b"composed").expect("composed");
+
+    let mut app = test_app();
+    set_current_wall(&mut app, &original, &composed);
+    let rt = tokio::runtime::Runtime::new().expect("rt");
+
+    let request = action_for_key(&app, KeyEvent::from(KeyCode::Char('d')));
+    assert_eq!(request, UiAction::Trash);
+    update(&mut app, request, rt.handle()).expect("request trash");
+    assert!(app.pending_trash_confirm);
+    assert!(app.message.contains("trash: current wallpaper original"));
+    assert!(app.message.contains("d confirm"));
+    assert!(original.exists());
+    assert!(composed.exists());
+
+    let unrelated = action_for_key(&app, KeyEvent::from(KeyCode::Char('q')));
+    assert_eq!(unrelated, UiAction::Ignore);
+    update(&mut app, unrelated, rt.handle()).expect("ignore unrelated key");
+    assert!(app.pending_trash_confirm);
+
+    let cancel = action_for_key(&app, KeyEvent::from(KeyCode::Esc));
+    assert_eq!(cancel, UiAction::CancelTrash);
+    update(&mut app, cancel, rt.handle()).expect("cancel trash");
+    assert!(!app.pending_trash_confirm);
+    assert_eq!(app.message, "trash cancelled");
+    assert!(original.exists());
+    assert!(composed.exists());
+
+    let request = action_for_key(&app, KeyEvent::from(KeyCode::Char('d')));
+    update(&mut app, request, rt.handle()).expect("request trash again");
+    let confirm = action_for_key(&app, KeyEvent::from(KeyCode::Char('d')));
+    assert_eq!(confirm, UiAction::TrashConfirm);
+    update(&mut app, confirm, rt.handle()).expect("confirm trash");
+    assert!(!app.pending_trash_confirm);
+    assert!(app.message.contains("trashed current wallpaper"));
+    assert!(!original.exists());
+    assert!(!composed.exists());
+    assert!(app.ctx.state.current.is_none());
+    assert!(app.ctx.state.cache_queue.is_empty());
+}
+
+#[test]
+fn n_p_key_from_any_tab_gives_next_prev_when_not_editing_and_disabled_in_edit() {
+    use ratatui::crossterm::event::KeyModifiers;
+    // Core behaviour test (prevents regression of wallpaper n/p from any tab).
+    // When not editing (any tab): 'n'/'p' => Next/Prev action (final match).
+    // When editing: n/p should be disabled for wallpaper (no early force); fall to edit arm as Char (so can type 'n'/'p' in fields like queries) i.e. not Next.
+    // Per user: n/p not working when not in edit; and "in edit mode everything but Enter or Escape should be disabled" (globals like wallpaper n/p disabled in edit).
+    let rt = tokio::runtime::Runtime::new().expect("rt");
+
+    for tab in [
+        Tab::Now,
+        Tab::History,
+        Tab::Browse,
+        Tab::Config,
+        Tab::Search,
+    ] {
+        let mut app = test_app();
+        app.tab = tab;
+        // ensure normal non-edit state
+        app.editing = None;
+        app.input_mode = InputMode::Normal;
+        if tab == Tab::Config {
+            app.config_in_subnav = false;
+        }
+
+        let n_action = action_for_key(
+            &app,
+            KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty()),
+        );
+        assert!(
+            matches!(n_action, UiAction::Next),
+            "n from tab {:?} (not editing) must give Next for wallpaper change",
+            tab
+        );
+        let p_action = action_for_key(
+            &app,
+            KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty()),
+        );
+        assert!(matches!(p_action, UiAction::Prev));
+
+        // Full behaviour: key -> action -> update produces Reload + next msg (core feature)
+        let eff = update(&mut app, n_action, rt.handle()).expect("next via key");
+        assert_eq!(eff, UpdateEffect::Reload);
+        assert!(
+            app.message.starts_with("next:")
+                || app.message.starts_with("next error:")
+                || app.message == "next: no change",
+            "n from {:?} should trigger advance, got msg: {}",
+            tab,
+            app.message
+        );
+    }
+
+    // In edit: n/p disabled as wallpaper (no Next), become edit chars (to allow typing in fields)
+    let mut app = test_app();
+    app.tab = Tab::Config;
+    app.start_edit_for_current();
+    assert!(app.is_editing());
+    let n_action = action_for_key(
+        &app,
+        KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty()),
+    );
+    assert!(
+        matches!(n_action, UiAction::EditFieldChar('n')),
+        "n in edit must be EditFieldChar (wallpaper n/p disabled in edit mode), not Next"
+    );
+    let p_action = action_for_key(
+        &app,
+        KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty()),
+    );
+    assert!(matches!(p_action, UiAction::EditFieldChar('p')));
+    // j/k (letters) no longer perform field nav in edit mode (per request: rather than jk in edit, hit Esc first then j/k for main list/subnav navigation).
+    // Letters now type into the current field buffer (like other chars, to support queries/labels containing j/k).
+    // Arrows (Up/Down) remain for moving between fields inside the edit form.
+    let j_action = action_for_key(
+        &app,
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
+    );
+    assert!(
+        matches!(j_action, UiAction::EditFieldChar('j')),
+        "j in edit must be EditFieldChar (types into field), not field nav; Esc first then j/k to navigate list or sources subnav"
+    );
+    let k_action = action_for_key(
+        &app,
+        KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()),
+    );
+    assert!(matches!(k_action, UiAction::EditFieldChar('k')));
+    let down_action = action_for_key(&app, KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
+    assert!(
+        matches!(down_action, UiAction::EditFieldDown),
+        "Down arrow still moves to next field inside edit form"
+    );
+    // other globals' *actions* disabled in edit (e.g. no tab switch, no quit);
+    // instead Char(c) for most (incl '1','q','n' now) types into the field buffer (required to support
+    // "type out all of the options" in forms for values containing digits/letters like queries, labels, urls).
+    // Enter now commits the field buffer AND persists/saves the config item (no separate 's'); Esc to exit edit form.
+    let one_action = action_for_key(
+        &app,
+        KeyEvent::new(KeyCode::Char('1'), KeyModifiers::empty()),
+    );
+    assert!(
+        matches!(one_action, UiAction::EditFieldChar('1')),
+        "tab switch 1 disabled (types instead) in edit"
+    );
+    let q_action = action_for_key(
+        &app,
+        KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty()),
+    );
+    assert!(
+        matches!(q_action, UiAction::EditFieldChar('q')),
+        "q disabled (types instead) in edit"
+    );
+    // but edit controls and Enter/Esc work
+    let esc_action = action_for_key(&app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+    assert!(matches!(esc_action, UiAction::CancelEdit));
+    let enter_action = action_for_key(&app, KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    assert!(matches!(enter_action, UiAction::EditFieldCommit));
+}
+
+#[test]
+fn edit_forms_for_different_source_types_prefill_values_from_config_json_and_list_only_necessary_fields(
+) {
+    // TDD coverage for "tests for all of the different forms/behaviours" + "some of the config items should be prefilled from the json configuration".
+    // Unsplash uses many fields (query/collection/user/topic/orientation/url); must prefill the values provided in the json config,
+    // and form must list exactly the necessary ones (no title_path, no irrelevant).
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [
+                {
+                    "enabled": true,
+                    "type": "unsplash",
+                    "label": "Nature",
+                    "query": "nature",
+                    "orientation": "landscape",
+                    "collection": "123456",
+                    "user": "johndoe",
+                    "topic": "wallpapers"
+                },
+                {
+                    "enabled": false,
+                    "type": "pixabay",
+                    "label": "Pix",
+                    "query": "cats",
+                    "api_key": "SECRET123"
+                }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES; // sources block
+    app.start_edit_for_current();
+    assert!(app.is_editing());
+    // First source unsplash: cursor starts at 0 (enabled), buffer prefilled from the *json config* value
+    let buf0 = app.editing.as_ref().unwrap().field_buffer.clone();
+    assert_eq!(buf0, "true", "enabled must be prefilled from config json");
+
+    // Move to query field (enabled0, label1, query2)
+    let rt = tokio::runtime::Runtime::new().expect("rt");
+    for _ in 0..2 {
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
+    }
+    let qbuf = app.editing.as_ref().unwrap().field_buffer.clone();
+    assert_eq!(
+        qbuf, "nature",
+        "query must be prefilled from the json config value for unsplash source"
+    );
+
+    // Edit the query field (append to simulate user typing), commit -- updates *draft* (not yet live ctx)
+    update(&mut app, UiAction::EditFieldChar('!'), rt.handle()).ok();
+    update(&mut app, UiAction::EditFieldCommit, rt.handle()).ok();
+    // Now move to next field (collection), prefill should come from live (unchanged)
+    update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
+    // move back to query; the buffer should use the draft value, not stale live config.
+    update(&mut app, UiAction::EditFieldUp, rt.handle()).ok();
+    let qbuf_after_commit_and_return = app.editing.as_ref().unwrap().field_buffer.clone();
+    // With improved prefill from draft, this should be the edited value "nature!" (committed to draft); if only live ctx, would be stale "nature"
+    assert_eq!(qbuf_after_commit_and_return, "nature!", "after commit, returning to field must prefill buffer from draft state (which started from json config + edits), not stale live ctx");
+
+    // Render exercises config_edit_form_lines which builds from draft (cloned from config json at start_edit)
+    // Use taller height so that with possible !! errors section (from auto-persist on Commit in new UX) the later fields like Orientation are still in the captured buffer.
+    let text = render_text(&app, 80, 30);
+    // Note: labels are now padded for alignment (e.g. "Query                                    : nature!|"),
+    // so contains checks use the distinctive value parts (robust to padding and errors section).
+    assert!(
+        text.contains("nature!"),
+        "form must show updated draft value from json+edit; text: {}",
+        text
+    );
+    assert!(
+        text.contains("Orientation"),
+        "orientation prefilled from json"
+    );
+    assert!(text.contains("123456"), "collection prefilled");
+    assert!(text.contains("johndoe"), "user prefilled");
+    assert!(text.contains("wallpapers"), "topic prefilled");
+    // only necessary; no title_path ever, no bleed from other
+    assert!(
+        !text.contains("title_path"),
+        "title_path unused, must not appear in any form"
+    );
+    assert!(!text.contains("image_path"), "image_path not for unsplash");
+
+    // Now test second source (pixabay) has its fields
+    // To switch source in test, cancel, move? but for simplicity re-start on a config with only pixabay as source0
+    let mut app2 = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [ { "enabled": true, "type": "pixabay", "label": "Pix", "query": "cats", "api_key": "SECRET123" } ]
+        }),
+        serde_json::json!({}),
+    );
+    app2.tab = Tab::Config;
+    app2.config_cursor = CONFIG_BLOCK_SOURCES;
+    app2.start_edit_for_current();
+    let text2 = render_text(&app2, 80, 24);
+    // Padded labels (e.g. "Query                                    : cats"), so check distinctive values.
+    assert!(text2.contains("cats"), "pixabay query prefilled from json");
+    assert!(
+        text2.contains("SECRET123"),
+        "api_key prefilled (masked? but in test form shows; from json)"
+    );
+    assert!(!text2.contains("url"), "no url for pixabay");
+}
+
+#[test]
+fn edit_forms_drive_shows_clear_targets_prefilled_values_inline_validation_and_bool_save_succeeds()
+{
+    // TDD + drive the TUI per user: "Can you drive the TUI and look at these config edit screens?"
+    // "None of them are clear what's being edited and they have no validation. I change a value from true to false and when I type s it just fails. Take some screenshots"
+    // Uses real render_text (TestBackend) to produce visible "screenshots" of the form body + chrome.
+    // Asserts desired: descriptive target in titles (from draft json label+type), prefilled current values visible,
+    // validation errors rendered inline near top with red cue, direct s after bool edit (with proper clear+type) succeeds without opaque fail,
+    // and post-save form would reflect the new value (or editing closed).
+    let rt = tokio::runtime::Runtime::new().expect("rt");
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "interval_secs": 60, "internet_enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [
+                { "enabled": true, "type": "folder", "label": "my images", "path": "/tmp/c" },
+                { "enabled": true, "type": "wallhaven", "query": "space" },
+                { "enabled": false, "type": "reddit", "query": "wallpapers", "sort": "top", "time": "month" }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+
+    app.config_cursor = CONFIG_BLOCK_ROTATION;
+    app.start_edit_for_current();
+    let rot_text = render_text(&app, 80, 30);
+    eprintln!(
+        "=== SCREENSHOT: EDIT ROTATION BLOCK (before bool change) ===\n{}",
+        rot_text
+    );
+    // Desired: clear target in the rendered title area (not just generic "Config (editing)")
+    assert!(
+        rot_text.contains("Edit Rotation") || rot_text.contains("Rotation"),
+        "rotation edit form must make target obvious; got head: {}",
+        &rot_text[..rot_text.len().min(400)]
+    );
+    // TDD for full rotation fields: previously only enabled/interval/internet were in the block edit form
+    // (hardcoded in start_edit, form_lines, value_at, commit, save). All ChangeConfig fields should be editable
+    // (on_start, safe_mode, change_lock_screen, download_preference_ratio too) so user can configure the full rotation.
+    assert!(
+        rot_text.contains("On start") || rot_text.contains("on start"),
+        "rotation edit must list on_start (full rotation settings, not just 3)"
+    );
+    assert!(
+        rot_text.contains("Safe mode") || rot_text.contains("safe mode"),
+        "rotation edit must list safe_mode"
+    );
+    assert!(
+        rot_text.contains("Change lock screen") || rot_text.contains("lock screen"),
+        "rotation edit must list change_lock_screen"
+    );
+    assert!(
+        rot_text.contains("Download preference") || rot_text.contains("preference ratio"),
+        "rotation edit must list download_preference_ratio"
+    );
+
+    // Now drive source with name derived from type + query ("Wallhaven space")
+    app.cancel_edit();
+    app.config_cursor = CONFIG_BLOCK_SOURCES; // sources block
+                                              // ensure subnav targets the Wallhaven source.
+    app.config_in_subnav = true;
+    app.config_sub_cursor = 1;
+    app.start_edit_for_current();
+    let src_text = render_text(&app, 80, 24);
+    eprintln!(
+        "=== SCREENSHOT: EDIT WALLHAVEN SPACE SOURCE (prefilled from json draft) ===\n{}",
+        src_text
+    );
+    assert!(
+        src_text.contains("Wallhaven space") && src_text.contains("wallhaven"),
+        "edit form header must show concrete derived name + type from draft json so 'what is being edited' is obvious"
+    );
+    assert!(
+        src_text.contains("Enabled")
+            && (src_text.contains("true") || src_text.contains("Enabled: true")),
+        "enabled must be prefilled from the json config value"
+    );
+
+    // Reproduce the user flow: change enabled true -> false via Space toggle (bool fields are pickers, not free text).
+    update(
+        &mut app,
+        UiAction::EditFieldCycle { forward: true },
+        rt.handle(),
+    )
+    .ok();
+    let after_enter_msg = app.message.clone();
+    let still_editing = app.is_editing();
+    eprintln!(
+        "=== AFTER BOOL TOGGLE + Enter: message='{}' still_editing={} ===",
+        after_enter_msg, still_editing
+    );
+    // Must have persisted the change (draft has it; in real use the ctx would too after successful atomic).
+    // Editing stays open (Esc to leave the form for the item; no j/k letters for fields -- Esc first then j/k for list).
+    let draft_enabled_false = app
+        .editing
+        .as_ref()
+        .and_then(|s| s.draft_source.as_ref())
+        .map(|d| !d.enabled)
+        .unwrap_or_else(|| {
+            !app.ctx
+                .config
+                .sources
+                .first()
+                .map(|s| s.enabled)
+                .unwrap_or(true)
+        });
+    assert!(
+        draft_enabled_false,
+        "after Space toggle on enabled, the draft must have enabled=false; msg={}",
+        after_enter_msg
+    );
+    assert!(
+        still_editing,
+        "Enter on field in edit must keep the edit form open (persist the item but allow editing more fields of it); got still_editing=false"
+    );
+    // Do not assert absence of "fail" strings: in tmp test harness atomic save often hits "config file not found" (env), but draft apply and validate path succeeded.
+
+    // Drive a validation error case and ensure it is visible inline at top of form (not just footer status, not buried at bottom)
+    app.cancel_edit();
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.config_in_subnav = true;
+    app.config_sub_cursor = 0;
+    app.start_edit_for_current();
+    // Make a bad change that will fail scoped source validation on save (missing folder path).
+    // Folder sources expose path as a free-text field (type is a choice picker, not backspace-editable).
+    for _ in 0..3 {
+        update(&mut app, UiAction::EditFieldDown, rt.handle()).ok();
+    }
+    for _ in 0..20 {
+        update(&mut app, UiAction::EditFieldBackspace, rt.handle()).ok();
+    }
+    for c in "/no/such/folder/path".chars() {
+        update(&mut app, UiAction::EditFieldChar(c), rt.handle()).ok();
+    }
+    update(&mut app, UiAction::EditFieldCommit, rt.handle()).ok();
+    update(&mut app, UiAction::SaveEditItem, rt.handle()).ok();
+    let err_text = render_text(&app, 80, 24);
+    eprintln!(
+        "=== SCREENSHOT: EDIT FORM WITH VALIDATION ERROR (must be obvious inline) ===\n{}",
+        err_text
+    );
+    // Must show inline near top of the edit form body, with cue that gets red treatment
+    let has_inline_err = err_text.contains("!! Validation")
+        || err_text.contains("validation:")
+        || err_text.contains("Validation errors");
+    assert!(
+        has_inline_err,
+        "validation problems must be visible inline in the form body (top, red-cued) before/during/after s, not opaque fail only in status; form head: {}",
+        &err_text[..err_text.len().min(600)]
+    );
+    assert!(
+        err_text.contains("sources[0].path") && err_text.contains("hint:"),
+        "inline validation should include the config path and recovery hint; form head: {}",
+        &err_text[..err_text.len().min(600)]
+    );
+}
