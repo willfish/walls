@@ -166,6 +166,16 @@ impl WallsCtx {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("no current wallpaper"))?;
         let src = Path::new(&current.original_path);
+        if !src.is_file() {
+            anyhow::bail!("not a file: {}", src.display());
+        }
+        let name = src
+            .file_name()
+            .ok_or_else(|| anyhow::anyhow!("path has no file name: {}", src.display()))?;
+        let existing = self.paths.favorites_dir.join(name);
+        if existing.is_file() {
+            return Ok(existing);
+        }
         crate::library::copy_into_dir(src, &self.paths.favorites_dir)
     }
 }
