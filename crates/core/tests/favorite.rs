@@ -29,7 +29,7 @@ fn favorite_current_copies_to_favorites_dir() {
 }
 
 #[test]
-fn favorite_picks_unique_name_on_collision() {
+fn favorite_current_reuses_existing_favorite() {
     let root = tempfile::tempdir().unwrap();
     let images = root.path().join("images");
     fs::create_dir_all(&images).unwrap();
@@ -45,6 +45,7 @@ fn favorite_picks_unique_name_on_collision() {
     let mut ctx = WallsCtx::load_from(root.path()).unwrap();
     ctx.apply_file(&wall, ApplyTrigger::Manual).unwrap();
     let dest = ctx.favorite_current().unwrap();
-    assert_ne!(dest, favorites.join("wall.jpg"));
-    assert!(dest.file_name().unwrap().to_str().unwrap().contains("wall"));
+    assert_eq!(dest, favorites.join("wall.jpg"));
+    assert_eq!(fs::read(dest).unwrap(), b"old");
+    assert!(!favorites.join("wall_1.jpg").exists());
 }
