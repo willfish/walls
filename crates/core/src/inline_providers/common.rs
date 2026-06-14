@@ -7,23 +7,27 @@ use reqwest::Client;
 use crate::apply::ApplyTrigger;
 use crate::config::{SourceEntry, SourceKind};
 use crate::ctx::WallsCtx;
-use crate::downloads::write_file_atomic;
+use crate::downloads::{
+    response_bytes_limited, write_provider_cache_with_quota, DEFAULT_MAX_PROVIDER_DOWNLOAD_BYTES,
+};
 use crate::provider_http;
 use crate::providers::{provider_for_source, ProviderDescriptor};
 use crate::state::CurrentWallMetadata;
 
-pub(crate) fn first_enabled_source(
+pub(crate) fn enabled_sources(
     sources: &[SourceEntry],
     source_kind: SourceKind,
     internet_required: bool,
     internet_enabled: bool,
-) -> Option<&SourceEntry> {
+) -> Vec<SourceEntry> {
     if internet_required && !internet_enabled {
-        return None;
+        return Vec::new();
     }
     sources
         .iter()
-        .find(|source| source.enabled && SourceKind::parse(&source.source_type) == source_kind)
+        .filter(|source| source.enabled && SourceKind::parse(&source.source_type) == source_kind)
+        .cloned()
+        .collect()
 }
 
 pub(crate) fn provider_for(entry: &SourceEntry) -> ProviderDescriptor {
@@ -36,13 +40,12 @@ pub(crate) async fn download_bytes(
     provider: &ProviderDescriptor,
     operation: &'static str,
 ) -> anyhow::Result<Vec<u8>> {
-    provider_http::send_with_retries(|| client.get(url))
+    let response = provider_http::send_with_retries(|| client.get(url))
         .await
-        .with_context(|| provider.failure_scope(operation).to_string())?
-        .bytes()
+        .with_context(|| provider.failure_scope(operation).to_string())?;
+    response_bytes_limited(response, DEFAULT_MAX_PROVIDER_DOWNLOAD_BYTES, &provider.id)
         .await
         .with_context(|| provider.failure_scope(operation).to_string())
-        .map(|b| b.to_vec())
 }
 
 pub(crate) async fn write_cache_and_apply(
@@ -53,7 +56,14 @@ pub(crate) async fn write_cache_and_apply(
     metadata: CurrentWallMetadata,
 ) -> anyhow::Result<PathBuf> {
     let dest = ctx.paths.cache_dir.join(cache_file);
-    write_file_atomic(&dest, bytes).await?;
+    write_provider_cache_with_quota(
+        &dest,
+        &ctx.paths.download_dir,
+        bytes,
+        ctx.config.quota.size_mb,
+        ctx.config.quota.enabled,
+    )
+    .await?;
     ctx.apply_file_inner_with_metadata(
         &dest,
         ApplyTrigger::Auto,

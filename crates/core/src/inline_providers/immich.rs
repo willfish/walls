@@ -6,20 +6,38 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use crate::config::SourceKind;
 use crate::ctx::WallsCtx;
 use crate::inline_providers::common::{
-    download_bytes, first_enabled_source, provider_for, send_with_retries, write_cache_and_apply,
+    download_bytes, enabled_sources, provider_for, send_with_retries, write_cache_and_apply,
 };
 use crate::state::CurrentWallMetadata;
 
 pub async fn try_immich(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
-    let Some(src) = first_enabled_source(
+    let sources = enabled_sources(
         &ctx.config.sources,
         SourceKind::Immich,
         true,
         ctx.config.change.internet_enabled,
-    ) else {
+    );
+    if sources.is_empty() {
         return Ok(None);
-    };
+    }
+    let mut last_error = None;
+    for source in sources {
+        match try_immich_source(ctx, &source).await {
+            Ok(Some(path)) => return Ok(Some(path)),
+            Ok(None) => {}
+            Err(error) => last_error = Some(error),
+        }
+    }
+    if let Some(error) = last_error {
+        return Err(error);
+    }
+    Ok(None)
+}
 
+async fn try_immich_source(
+    ctx: &mut WallsCtx,
+    src: &crate::config::SourceEntry,
+) -> anyhow::Result<Option<PathBuf>> {
     let provider = provider_for(src);
     let server = src
         .url

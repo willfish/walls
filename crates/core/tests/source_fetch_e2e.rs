@@ -158,6 +158,60 @@ async fn e2e_json_source_fetches_via_mock_feed() {
 }
 
 #[tokio::test]
+async fn e2e_json_source_tries_second_enabled_source_after_first_fails() {
+    let server = MockServer::start().await;
+    let image_url = format!("{}/second-image.jpg", server.uri());
+    Mock::given(method("GET"))
+        .and(path("/first-feed"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/second-feed"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "download_url": image_url
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/second-image.jpg"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"second-json-jpeg"))
+        .mount(&server)
+        .await;
+
+    let harness = FetchHarness::new();
+    harness.write_config(harness.base_config(
+        true,
+        json!([
+            {
+                "enabled": true,
+                "type": "json",
+                "url": format!("{}/first-feed", server.uri()),
+                "image_path": "$.download_url",
+                "label": "Broken JSON"
+            },
+            {
+                "enabled": true,
+                "type": "json",
+                "url": format!("{}/second-feed", server.uri()),
+                "image_path": "$.download_url",
+                "label": "Working JSON"
+            }
+        ]),
+    ));
+    harness.write_secrets(json!({}));
+
+    let applied = advance_expect_applied(harness.load_ctx()).await;
+
+    assert!(applied.ends_with("json-feed.jpg"));
+    assert_eq!(fs::read(&applied).unwrap(), b"second-json-jpeg");
+    assert_eq!(
+        fs::read(harness.path().join("downloaded").join("json-feed.jpg")).unwrap(),
+        b"second-json-jpeg"
+    );
+}
+
+#[tokio::test]
 async fn e2e_mediarss_source_fetches_via_mock_rss() {
     let server = MockServer::start().await;
     let image_url = format!("{}/rss-image.jpg", server.uri());

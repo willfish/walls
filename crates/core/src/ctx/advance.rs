@@ -518,7 +518,7 @@ impl<'ctx> AdvanceNext<'ctx> {
             .config
             .sources
             .iter()
-            .find(|source| SourceKind::parse(&source.source_type) == source_kind)
+            .find(|source| source.enabled && SourceKind::parse(&source.source_type) == source_kind)
             .cloned()
         else {
             return Ok(None);
@@ -601,7 +601,7 @@ impl<'ctx> AdvanceNext<'ctx> {
             .config
             .sources
             .iter()
-            .find(|source| SourceKind::parse(&source.source_type) == source_kind)
+            .find(|source| source.enabled && SourceKind::parse(&source.source_type) == source_kind)
             .cloned()
         else {
             return Ok(None);
@@ -691,8 +691,6 @@ impl<'ctx> AdvanceNext<'ctx> {
 
     async fn apply_bing_inner(&mut self) -> anyhow::Result<Option<PathBuf>> {
         use crate::config::SourceKind;
-        use crate::providers::provider_for_source;
-        use anyhow::Context;
         let bing_sources: Vec<_> = self
             .ctx
             .config
@@ -701,11 +699,33 @@ impl<'ctx> AdvanceNext<'ctx> {
             .filter(|source| {
                 source.enabled && SourceKind::parse(&source.source_type) == SourceKind::Bing
             })
+            .cloned()
             .collect();
         if bing_sources.is_empty() || !self.ctx.config.change.internet_enabled {
             return Ok(None);
         }
-        let provider = provider_for_source(bing_sources[0]);
+        let mut last_error = None;
+        for source in bing_sources {
+            match self.apply_bing_source(source).await {
+                Ok(Some(path)) => return Ok(Some(path)),
+                Ok(None) => {}
+                Err(error) => last_error = Some(error),
+            }
+        }
+        if let Some(error) = last_error {
+            return Err(error);
+        }
+        Ok(None)
+    }
+
+    async fn apply_bing_source(
+        &mut self,
+        src: crate::config::SourceEntry,
+    ) -> anyhow::Result<Option<PathBuf>> {
+        use crate::providers::provider_for_source;
+        use anyhow::Context;
+
+        let provider = provider_for_source(&src);
 
         let base = bing_api_base();
         let client = crate::provider_http::client()?;
@@ -735,16 +755,24 @@ impl<'ctx> AdvanceNext<'ctx> {
             .await
             .with_context(|| provider.failure_scope("bing image download").to_string())?;
         self.provider_retries.extend(outcome.retries);
-        let bytes = outcome
-            .response
-            .bytes()
-            .await
-            .with_context(|| provider.failure_scope("bing bytes").to_string())?;
+        let bytes = crate::downloads::response_bytes_limited(
+            outcome.response,
+            crate::downloads::DEFAULT_MAX_PROVIDER_DOWNLOAD_BYTES,
+            &provider.id,
+        )
+        .await
+        .with_context(|| provider.failure_scope("bing bytes").to_string())?;
 
         let dest = self.ctx.paths.cache_dir.join("bing-daily.jpg");
-        crate::downloads::write_file_atomic(&dest, &bytes)
-            .await
-            .with_context(|| provider.failure_scope("bing write cache").to_string())?;
+        crate::downloads::write_provider_cache_with_quota(
+            &dest,
+            &self.ctx.paths.download_dir,
+            &bytes,
+            self.ctx.config.quota.size_mb,
+            self.ctx.config.quota.enabled,
+        )
+        .await
+        .with_context(|| provider.failure_scope("bing write cache").to_string())?;
 
         self.ctx
             .apply_file_inner(&dest, ApplyTrigger::Auto, Some("bing-daily".into()), true)?;
@@ -758,8 +786,6 @@ impl<'ctx> AdvanceNext<'ctx> {
 
     async fn apply_json_feed_inner(&mut self) -> anyhow::Result<Option<PathBuf>> {
         use crate::config::SourceKind;
-        use crate::providers::provider_for_source;
-        use anyhow::Context;
         let json_sources: Vec<_> = self
             .ctx
             .config
@@ -768,12 +794,33 @@ impl<'ctx> AdvanceNext<'ctx> {
             .filter(|source| {
                 source.enabled && SourceKind::parse(&source.source_type) == SourceKind::Json
             })
+            .cloned()
             .collect();
         if json_sources.is_empty() || !self.ctx.config.change.internet_enabled {
             return Ok(None);
         }
-        let src = json_sources[0];
-        let provider = provider_for_source(src);
+        let mut last_error = None;
+        for source in json_sources {
+            match self.apply_json_feed_source(source).await {
+                Ok(Some(path)) => return Ok(Some(path)),
+                Ok(None) => {}
+                Err(error) => last_error = Some(error),
+            }
+        }
+        if let Some(error) = last_error {
+            return Err(error);
+        }
+        Ok(None)
+    }
+
+    async fn apply_json_feed_source(
+        &mut self,
+        src: crate::config::SourceEntry,
+    ) -> anyhow::Result<Option<PathBuf>> {
+        use crate::providers::provider_for_source;
+        use anyhow::Context;
+
+        let provider = provider_for_source(&src);
         let feed_url = src
             .url
             .as_deref()
@@ -808,16 +855,24 @@ impl<'ctx> AdvanceNext<'ctx> {
             .await
             .with_context(|| provider.failure_scope("json image download").to_string())?;
         self.provider_retries.extend(outcome.retries);
-        let bytes = outcome
-            .response
-            .bytes()
-            .await
-            .with_context(|| provider.failure_scope("json bytes").to_string())?;
+        let bytes = crate::downloads::response_bytes_limited(
+            outcome.response,
+            crate::downloads::DEFAULT_MAX_PROVIDER_DOWNLOAD_BYTES,
+            &provider.id,
+        )
+        .await
+        .with_context(|| provider.failure_scope("json bytes").to_string())?;
 
         let dest = self.ctx.paths.cache_dir.join("json-feed.jpg");
-        crate::downloads::write_file_atomic(&dest, &bytes)
-            .await
-            .with_context(|| provider.failure_scope("json write cache").to_string())?;
+        crate::downloads::write_provider_cache_with_quota(
+            &dest,
+            &self.ctx.paths.download_dir,
+            &bytes,
+            self.ctx.config.quota.size_mb,
+            self.ctx.config.quota.enabled,
+        )
+        .await
+        .with_context(|| provider.failure_scope("json write cache").to_string())?;
 
         self.ctx
             .apply_file_inner(&dest, ApplyTrigger::Auto, Some("json-feed".into()), true)?;
@@ -833,8 +888,6 @@ impl<'ctx> AdvanceNext<'ctx> {
 
     async fn apply_media_rss_inner(&mut self) -> anyhow::Result<Option<PathBuf>> {
         use crate::config::SourceKind;
-        use crate::providers::provider_for_source;
-        use anyhow::Context;
         let rss_sources: Vec<_> = self
             .ctx
             .config
@@ -843,12 +896,33 @@ impl<'ctx> AdvanceNext<'ctx> {
             .filter(|source| {
                 source.enabled && SourceKind::parse(&source.source_type) == SourceKind::MediaRss
             })
+            .cloned()
             .collect();
         if rss_sources.is_empty() || !self.ctx.config.change.internet_enabled {
             return Ok(None);
         }
-        let src = rss_sources[0];
-        let provider = provider_for_source(src);
+        let mut last_error = None;
+        for source in rss_sources {
+            match self.apply_media_rss_source(source).await {
+                Ok(Some(path)) => return Ok(Some(path)),
+                Ok(None) => {}
+                Err(error) => last_error = Some(error),
+            }
+        }
+        if let Some(error) = last_error {
+            return Err(error);
+        }
+        Ok(None)
+    }
+
+    async fn apply_media_rss_source(
+        &mut self,
+        src: crate::config::SourceEntry,
+    ) -> anyhow::Result<Option<PathBuf>> {
+        use crate::providers::provider_for_source;
+        use anyhow::Context;
+
+        let provider = provider_for_source(&src);
         let rss_url = src
             .url
             .as_deref()
@@ -876,16 +950,24 @@ impl<'ctx> AdvanceNext<'ctx> {
                     .to_string()
             })?;
         self.provider_retries.extend(outcome.retries);
-        let bytes = outcome
-            .response
-            .bytes()
-            .await
-            .with_context(|| provider.failure_scope("mediarss bytes").to_string())?;
+        let bytes = crate::downloads::response_bytes_limited(
+            outcome.response,
+            crate::downloads::DEFAULT_MAX_PROVIDER_DOWNLOAD_BYTES,
+            &provider.id,
+        )
+        .await
+        .with_context(|| provider.failure_scope("mediarss bytes").to_string())?;
 
         let dest = self.ctx.paths.cache_dir.join("mediarss.jpg");
-        crate::downloads::write_file_atomic(&dest, &bytes)
-            .await
-            .with_context(|| provider.failure_scope("mediarss write cache").to_string())?;
+        crate::downloads::write_provider_cache_with_quota(
+            &dest,
+            &self.ctx.paths.download_dir,
+            &bytes,
+            self.ctx.config.quota.size_mb,
+            self.ctx.config.quota.enabled,
+        )
+        .await
+        .with_context(|| provider.failure_scope("mediarss write cache").to_string())?;
 
         self.ctx
             .apply_file_inner(&dest, ApplyTrigger::Auto, Some("mediarss".into()), true)?;

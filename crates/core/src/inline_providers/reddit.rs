@@ -6,7 +6,8 @@ use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT};
 use crate::config::{reddit_json_url, reddit_oauth_listing_url, SourceKind};
 use crate::ctx::WallsCtx;
 use crate::inline_providers::common::{
-    self, api_base, download_bytes, provider_for, reddit_user_agent, write_cache_and_apply,
+    self, api_base, download_bytes, enabled_sources, provider_for, reddit_user_agent,
+    write_cache_and_apply,
 };
 use crate::state::CurrentWallMetadata;
 
@@ -18,22 +19,27 @@ struct RedditCandidate {
 }
 
 pub async fn try_reddit(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
-    if !ctx.config.change.internet_enabled {
+    let sources = enabled_sources(
+        &ctx.config.sources,
+        SourceKind::Reddit,
+        true,
+        ctx.config.change.internet_enabled,
+    );
+    if sources.is_empty() {
         return Ok(None);
     }
-    let Some(src) = ctx
-        .config
-        .sources
-        .iter()
-        .find(|source| {
-            source.enabled && SourceKind::parse(&source.source_type) == SourceKind::Reddit
-        })
-        .cloned()
-    else {
-        return Ok(None);
-    };
-
-    try_reddit_inner(ctx, &src).await
+    let mut last_error = None;
+    for source in sources {
+        match try_reddit_inner(ctx, &source).await {
+            Ok(Some(path)) => return Ok(Some(path)),
+            Ok(None) => {}
+            Err(error) => last_error = Some(error),
+        }
+    }
+    if let Some(error) = last_error {
+        return Err(error);
+    }
+    Ok(None)
 }
 
 async fn try_reddit_inner(

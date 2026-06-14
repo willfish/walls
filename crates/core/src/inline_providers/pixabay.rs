@@ -3,22 +3,39 @@ use std::path::PathBuf;
 use crate::config::SourceKind;
 use crate::ctx::WallsCtx;
 use crate::inline_providers::common::{
-    api_base, download_bytes, first_enabled_source, pick_random, provider_for,
-    write_cache_and_apply,
+    api_base, download_bytes, enabled_sources, pick_random, provider_for, write_cache_and_apply,
 };
 use crate::state::CurrentWallMetadata;
 use anyhow::Context;
 
 pub async fn try_pixabay(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
-    let Some(src) = first_enabled_source(
+    let sources = enabled_sources(
         &ctx.config.sources,
         SourceKind::Pixabay,
         true,
         ctx.config.change.internet_enabled,
-    ) else {
+    );
+    if sources.is_empty() {
         return Ok(None);
-    };
+    }
+    let mut last_error = None;
+    for source in sources {
+        match try_pixabay_source(ctx, &source).await {
+            Ok(Some(path)) => return Ok(Some(path)),
+            Ok(None) => {}
+            Err(error) => last_error = Some(error),
+        }
+    }
+    if let Some(error) = last_error {
+        return Err(error);
+    }
+    Ok(None)
+}
 
+async fn try_pixabay_source(
+    ctx: &mut WallsCtx,
+    src: &crate::config::SourceEntry,
+) -> anyhow::Result<Option<PathBuf>> {
     let provider = provider_for(src);
     let api_key = src
         .api_key

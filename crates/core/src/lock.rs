@@ -1,5 +1,5 @@
 use std::fs::{File, OpenOptions};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
 
@@ -47,9 +47,15 @@ pub struct StateLock {
 impl StateLock {
     pub fn acquire(state_file: &Path) -> anyhow::Result<Self> {
         Ok(Self {
-            _inner: ProcessLock::acquire(state_file)?,
+            _inner: ProcessLock::acquire(&state_lock_file(state_file))?,
         })
     }
+}
+
+fn state_lock_file(state_file: &Path) -> PathBuf {
+    let mut lock_file = state_file.to_path_buf().into_os_string();
+    lock_file.push(".lock");
+    PathBuf::from(lock_file)
 }
 
 #[cfg(test)]

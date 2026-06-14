@@ -3,19 +3,32 @@ use std::path::PathBuf;
 use crate::apply::ApplyTrigger;
 use crate::config::SourceKind;
 use crate::ctx::WallsCtx;
-use crate::inline_providers::common::{expand_dir, first_enabled_source, pick_random_image_in_dir};
+use crate::inline_providers::common::{enabled_sources, expand_dir, pick_random_image_in_dir};
 
 /// Windows Spotlight cache or any local folder configured via `path` / `url`.
 pub async fn try_spotlight(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
-    let Some(src) = first_enabled_source(
+    let sources = enabled_sources(
         &ctx.config.sources,
         SourceKind::Spotlight,
         false,
         ctx.config.change.internet_enabled,
-    ) else {
+    );
+    if sources.is_empty() {
         return Ok(None);
-    };
+    }
 
+    for src in sources {
+        if let Some(path) = try_spotlight_source(ctx, &src)? {
+            return Ok(Some(path));
+        }
+    }
+    Ok(None)
+}
+
+fn try_spotlight_source(
+    ctx: &mut WallsCtx,
+    src: &crate::config::SourceEntry,
+) -> anyhow::Result<Option<PathBuf>> {
     let dir = src
         .path
         .as_deref()

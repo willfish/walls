@@ -1,10 +1,13 @@
 use std::fs;
 use walls_core::downloads::{
     copy_file_atomic, inspect_cache, is_provider_cache_file_name, list_cache_files, nuke_downloads,
-    plan_nuke_downloads, purge_provider_files, write_file_atomic, NukeDownloadsMode,
+    plan_nuke_downloads, purge_provider_files, response_bytes_limited, write_file_atomic,
+    NukeDownloadsMode,
 };
 use walls_core::paths::WallsPaths;
 use walls_core::state::State;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn temp_paths(root: &std::path::Path) -> WallsPaths {
     WallsPaths {
@@ -69,6 +72,36 @@ async fn copy_file_atomic_writes_final_copy() {
 
     assert_eq!(fs::read(&dest).expect("read copied"), b"cached");
     assert_no_temp_files(tmp.path());
+}
+
+#[tokio::test]
+async fn response_bytes_limited_rejects_over_limit_content_length() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/large.jpg"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("Content-Length", "11")
+                .set_body_bytes(b"hello world"),
+        )
+        .mount(&server)
+        .await;
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("{}/large.jpg", server.uri()))
+        .send()
+        .await
+        .expect("response");
+
+    let err = response_bytes_limited(response, 10, "test-provider")
+        .await
+        .expect_err("over-limit response should fail");
+
+    assert!(
+        err.to_string()
+            .contains("test-provider download size 11 bytes exceeds limit of 10 bytes"),
+        "{err}"
+    );
 }
 
 #[test]
