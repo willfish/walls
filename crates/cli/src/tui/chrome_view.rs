@@ -21,7 +21,7 @@ pub(crate) fn key_help_lines(app: &App, width: u16) -> Vec<String> {
         "  Search input: type, Backspace, Enter search, Esc cancel".into(),
         "Command mode".into(),
         "  : opens commands; Ctrl+n/Ctrl+p completes; Enter runs; Esc cancels".into(),
-        "  :next :prev :pause :favorite :status :quit".into(),
+        "  :next :prev :pause :favorite :source from-current :status :quit".into(),
         "Config".into(),
         "  Sources: a adds a Wallhaven query; x removes selected removable source; e edits first active; Enter picks a source; Esc leaves subnav".into(),
         "  Config values: e edit   t toggle".into(),

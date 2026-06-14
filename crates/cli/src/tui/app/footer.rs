@@ -20,6 +20,13 @@ impl App {
             } else {
                 match self.current_edit_field_kind() {
                     EditFieldKind::Text => "type/Backspace",
+                    EditFieldKind::TagList if self.tag_input_active() => {
+                        "type tag | Backspace | Enter commit | Esc cancel"
+                    }
+                    EditFieldKind::TagList if self.tag_editor_active() => {
+                        "←/→ tags | x delete | a add | e edit | Esc fields"
+                    }
+                    EditFieldKind::TagList => "Enter tags",
                     EditFieldKind::Bool => "Space toggle",
                     EditFieldKind::Choice(_) => "Space/←/→ cycle",
                 }
@@ -82,6 +89,18 @@ impl App {
                         Self::NORMAL_TAB_NAV_HINT
                     )
                 }
+                Tab::Now => {
+                    let create_hint = if self.current_has_wallhaven_id() {
+                        " | c create source"
+                    } else {
+                        ""
+                    };
+                    format!(
+                        "{} | o open | f favorite | d trash{} | ? help",
+                        Self::NORMAL_TAB_NAV_HINT,
+                        create_hint
+                    )
+                }
                 _ => {
                     format!(
                         "{} | j/k Pg Home/End | o open | n/p next/prev | f favorite d request trash | Shift+X reset | space pause | : cmd | ? help",
@@ -130,9 +149,26 @@ impl App {
                         format!("{nav} j/k Pg Enter o e t n/p sp :?q")
                     }
                     Tab::Logs => format!("{nav} newest j older k newer :?q"),
+                    Tab::Now => {
+                        let create_hint = if self.current_has_wallhaven_id() {
+                            " c"
+                        } else {
+                            ""
+                        };
+                        format!("{nav} o f d{create_hint} ?q")
+                    }
                     _ => format!("{nav} j/k Pg o n/p f/d? Shift+X sp :?q"),
                 }
             }
         }
+    }
+
+    fn current_has_wallhaven_id(&self) -> bool {
+        self.ctx
+            .state
+            .current
+            .as_ref()
+            .and_then(|current| current.wallhaven_id.as_deref())
+            .is_some_and(|id| !id.trim().is_empty())
     }
 }

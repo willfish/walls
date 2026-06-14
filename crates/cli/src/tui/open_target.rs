@@ -72,8 +72,9 @@ pub(crate) fn wallhaven_wallpaper(id: &str) -> OpenTarget {
 }
 
 pub(crate) fn wallhaven_search(search: &WallhavenSearch) -> OpenTarget {
+    let q = walls_core::config::wallhaven_effective_query(search);
     let mut query = vec![
-        ("q", search.q.as_str()),
+        ("q", q.as_str()),
         ("categories", search.categories.as_str()),
         ("purity", search.purity.as_str()),
         ("sorting", search.sorting.as_str()),
