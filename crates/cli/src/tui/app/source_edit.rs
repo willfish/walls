@@ -1,7 +1,7 @@
 use walls_core::config::{
     reddit_sort_needs_time, reddit_sort_value, reddit_time_value,
-    source_editable_fields as core_source_editable_fields, source_wallhaven_search, SourceEntry,
-    REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
+    source_editable_fields as core_source_editable_fields, source_field_preserves_blank,
+    source_wallhaven_search, SourceEntry, REDDIT_SORT_CHOICES, REDDIT_TIME_CHOICES,
 };
 
 use super::wallhaven_edit;
@@ -52,6 +52,10 @@ pub(super) fn get_source_field(src: &SourceEntry, name: &str) -> String {
         "order" => src.order.clone().unwrap_or_default(),
         "ratios" => src.ratios.clone().unwrap_or_default(),
         "atleast" => src.atleast.clone().unwrap_or_default(),
+        "broaden_when_cache_below" => src
+            .broaden_when_cache_below
+            .map(|threshold| threshold.to_string())
+            .unwrap_or_default(),
         "prefer" => src
             .prefer
             .map(wallhaven_edit::prefer_label)
@@ -98,6 +102,9 @@ pub(super) fn set_source_field(draft: &mut SourceEntry, name: &str, buf: &str) {
         "image_path" => draft.image_path = v,
         "source" => draft.source = v,
         "author" => draft.author = v,
+        "query" if source_field_preserves_blank(&draft.source_type, name) => {
+            draft.query = Some(trimmed.to_string());
+        }
         "query" => draft.query = v,
         "api_key" => draft.api_key = v,
         "collection" => draft.collection = v,
@@ -114,6 +121,9 @@ pub(super) fn set_source_field(draft: &mut SourceEntry, name: &str, buf: &str) {
         "order" => draft.order = v,
         "ratios" => draft.ratios = v,
         "atleast" => draft.atleast = v,
+        "broaden_when_cache_below" => {
+            draft.broaden_when_cache_below = trimmed.parse::<usize>().ok();
+        }
         "prefer" => {
             if let Some(prefer) = wallhaven_edit::parse_prefer(trimmed) {
                 draft.prefer = Some(prefer);

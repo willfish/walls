@@ -295,7 +295,6 @@ fn validate_provider_source(
         SourceKind::Reddit => validate_reddit_source(index, src, errors),
         SourceKind::Bing | SourceKind::Apod => {}
         SourceKind::Wallhaven => {
-            validate_required_text(index, src, "query", src.query.as_deref(), errors);
             validate_wallhaven_source(index, src, secrets, errors);
         }
         SourceKind::Weighting => {

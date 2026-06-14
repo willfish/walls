@@ -260,7 +260,7 @@ fn validate_config_reports_enabled_provider_schema_errors() {
         "{errors:?}"
     );
     assert!(
-        errors
+        !errors
             .iter()
             .any(|error| error.contains("sources[11].query: query is required")),
         "{errors:?}"
