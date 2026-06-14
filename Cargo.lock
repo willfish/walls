@@ -4743,6 +4743,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "walls-core",
+ "wiremock",
 ]
 
 [[package]]

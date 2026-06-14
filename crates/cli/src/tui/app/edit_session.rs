@@ -1,5 +1,6 @@
 use walls_core::config::{
     default_wallhaven_source, normalize_source_entry, persist_config, Config, SourceEntry,
+    WallhavenPrefer,
 };
 use walls_core::validate::{
     validate_config_diagnostics, validate_source_edit, validate_wallhaven_edit,
@@ -16,7 +17,7 @@ use super::edit_fields::{
 };
 use super::{
     config_block_edit, source_edit, wallhaven_edit, App, EditFieldKind, EditSession, EditTarget,
-    InputMode, Tab,
+    InputMode, Tab, TagEditor, TagEditorMode,
 };
 use crate::tui::style::StatusKind;
 
@@ -136,6 +137,7 @@ impl App {
         let new_buf = self.current_edit_field_value();
         if let Some(session) = &mut self.editing {
             session.field_buffer = new_buf;
+            session.tag_editor = None;
         }
     }
 
@@ -252,6 +254,263 @@ impl App {
         false
     }
 
+    pub(crate) fn tag_editor_active(&self) -> bool {
+        self.editing
+            .as_ref()
+            .is_some_and(|session| session.tag_editor.is_some())
+    }
+
+    pub(crate) fn tag_input_active(&self) -> bool {
+        self.editing.as_ref().is_some_and(|session| {
+            session.tag_editor.as_ref().is_some_and(|editor| {
+                matches!(editor.mode, TagEditorMode::Add | TagEditorMode::Edit)
+            })
+        })
+    }
+
+    pub(crate) fn enter_tag_editor(&mut self) {
+        if self.current_edit_field_kind() != EditFieldKind::TagList {
+            return;
+        }
+        let max = self.current_tag_values().len();
+        if let Some(session) = &mut self.editing {
+            let mut editor = TagEditor::browse();
+            if max > 0 {
+                editor.tag_cursor = editor.tag_cursor.min(max - 1);
+            }
+            session.tag_editor = Some(editor);
+        }
+    }
+
+    pub(crate) fn exit_tag_editor(&mut self) {
+        if let Some(session) = &mut self.editing {
+            session.tag_editor = None;
+        }
+    }
+
+    pub(crate) fn move_tag_cursor(&mut self, forward: bool) {
+        let max = self.current_tag_values().len();
+        if max == 0 {
+            return;
+        }
+        if let Some(editor) = self
+            .editing
+            .as_mut()
+            .and_then(|session| session.tag_editor.as_mut())
+        {
+            editor.tag_cursor = if forward {
+                (editor.tag_cursor + 1).min(max - 1)
+            } else {
+                editor.tag_cursor.saturating_sub(1)
+            };
+        }
+    }
+
+    pub(crate) fn delete_current_tag(&mut self) {
+        let Some(cursor) = self.current_tag_cursor() else {
+            return;
+        };
+        let mut tags = self.current_tag_values();
+        if cursor >= tags.len() {
+            return;
+        }
+        tags.remove(cursor);
+        self.set_current_tag_values(tags);
+        let new_len = self.current_tag_values().len();
+        if let Some(editor) = self
+            .editing
+            .as_mut()
+            .and_then(|session| session.tag_editor.as_mut())
+        {
+            editor.tag_cursor = editor.tag_cursor.min(new_len.saturating_sub(1));
+            editor.mode = TagEditorMode::Browse;
+            editor.input.clear();
+        }
+        let _ = self.save_edit_item(false);
+    }
+
+    pub(crate) fn begin_add_tag(&mut self) {
+        if let Some(editor) = self
+            .editing
+            .as_mut()
+            .and_then(|session| session.tag_editor.as_mut())
+        {
+            editor.mode = TagEditorMode::Add;
+            editor.input.clear();
+        }
+    }
+
+    pub(crate) fn begin_edit_tag(&mut self) {
+        let Some(cursor) = self.current_tag_cursor() else {
+            return;
+        };
+        let tags = self.current_tag_values();
+        let Some(tag) = tags.get(cursor).cloned() else {
+            return;
+        };
+        if let Some(editor) = self
+            .editing
+            .as_mut()
+            .and_then(|session| session.tag_editor.as_mut())
+        {
+            editor.mode = TagEditorMode::Edit;
+            editor.input = tag;
+        }
+    }
+
+    pub(crate) fn tag_input_char(&mut self, c: char) {
+        if let Some(editor) = self
+            .editing
+            .as_mut()
+            .and_then(|session| session.tag_editor.as_mut())
+        {
+            editor.input.push(c);
+        }
+    }
+
+    pub(crate) fn tag_input_backspace(&mut self) {
+        if let Some(editor) = self
+            .editing
+            .as_mut()
+            .and_then(|session| session.tag_editor.as_mut())
+        {
+            editor.input.pop();
+        }
+    }
+
+    pub(crate) fn cancel_tag_input(&mut self) {
+        if let Some(editor) = self
+            .editing
+            .as_mut()
+            .and_then(|session| session.tag_editor.as_mut())
+        {
+            editor.mode = TagEditorMode::Browse;
+            editor.input.clear();
+        }
+    }
+
+    pub(crate) fn commit_tag_input(&mut self) {
+        let Some((mode, cursor, input)) = self
+            .editing
+            .as_ref()
+            .and_then(|session| session.tag_editor.as_ref())
+            .map(|editor| (editor.mode.clone(), editor.tag_cursor, editor.input.clone()))
+        else {
+            return;
+        };
+        let tag = input.trim();
+        if tag.is_empty() {
+            self.cancel_tag_input();
+            return;
+        }
+        let mut tags = self.current_tag_values();
+        match mode {
+            TagEditorMode::Add => {
+                tags.push(tag.to_string());
+            }
+            TagEditorMode::Edit if cursor < tags.len() => {
+                tags[cursor] = tag.to_string();
+            }
+            TagEditorMode::Browse | TagEditorMode::Edit => return,
+        }
+        tags = walls_core::config::normalize_wallhaven_tags(&tags);
+        let selected = tags
+            .iter()
+            .position(|candidate| candidate == tag)
+            .unwrap_or_else(|| cursor.min(tags.len().saturating_sub(1)));
+        self.set_current_tag_values(tags);
+        if let Some(editor) = self
+            .editing
+            .as_mut()
+            .and_then(|session| session.tag_editor.as_mut())
+        {
+            editor.tag_cursor = selected;
+            editor.mode = TagEditorMode::Browse;
+            editor.input.clear();
+        }
+        let _ = self.save_edit_item(false);
+    }
+
+    pub(crate) fn tag_editor_display_value(&self) -> Option<String> {
+        let session = self.editing.as_ref()?;
+        let editor = session.tag_editor.as_ref()?;
+        let tags = self.current_tag_values();
+        let rendered = if tags.is_empty() {
+            "(none)".to_string()
+        } else {
+            tags.iter()
+                .enumerate()
+                .map(|(index, tag)| {
+                    if index == editor.tag_cursor && editor.mode == TagEditorMode::Browse {
+                        format!("[{tag}]")
+                    } else {
+                        tag.clone()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        Some(match editor.mode {
+            TagEditorMode::Browse => format!("{rendered}  (←/→ select, x delete, a add, e edit)"),
+            TagEditorMode::Add => format!("{rendered}  +{}|", editor.input),
+            TagEditorMode::Edit => format!("{rendered}  edit: {}|", editor.input),
+        })
+    }
+
+    fn current_tag_cursor(&self) -> Option<usize> {
+        self.editing
+            .as_ref()
+            .and_then(|session| session.tag_editor.as_ref())
+            .map(|editor| editor.tag_cursor)
+    }
+
+    fn current_source_field_name(&self) -> Option<String> {
+        let session = self.editing.as_ref()?;
+        let draft = session.draft_source.as_ref()?;
+        let names = Self::source_editable_fields(draft);
+        names.get(session.field_cursor).cloned()
+    }
+
+    fn current_tag_values(&self) -> Vec<String> {
+        let Some(name) = self.current_source_field_name() else {
+            return Vec::new();
+        };
+        let Some(draft) = self
+            .editing
+            .as_ref()
+            .and_then(|session| session.draft_source.as_ref())
+        else {
+            return Vec::new();
+        };
+        match name.as_str() {
+            "required_tags" => draft.required_tags.clone(),
+            "excluded_tags" => draft.excluded_tags.clone(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn set_current_tag_values(&mut self, tags: Vec<String>) {
+        let Some(name) = self.current_source_field_name() else {
+            return;
+        };
+        let normalized = walls_core::config::normalize_wallhaven_tags(&tags);
+        let joined = normalized.join(", ");
+        if let Some(draft) = self
+            .editing
+            .as_mut()
+            .and_then(|session| session.draft_source.as_mut())
+        {
+            match name.as_str() {
+                "required_tags" => draft.required_tags = normalized,
+                "excluded_tags" => draft.excluded_tags = normalized,
+                _ => return,
+            }
+        }
+        if let Some(session) = &mut self.editing {
+            session.field_buffer = joined;
+        }
+    }
+
     pub(crate) fn reddit_field_display_value(
         &self,
         src: &SourceEntry,
@@ -283,7 +542,7 @@ impl App {
         }
         let kind = self.current_edit_field_kind();
         let next = match kind {
-            EditFieldKind::Text => return,
+            EditFieldKind::Text | EditFieldKind::TagList => return,
             EditFieldKind::Bool => {
                 let current = self
                     .editing
@@ -506,6 +765,63 @@ impl App {
         self.sync_edit_field_buffer();
         self.set_message(StatusKind::Success, "source added: Wallhaven query");
         Ok(())
+    }
+
+    pub fn add_wallhaven_source_from_current(
+        &mut self,
+        rt: &tokio::runtime::Handle,
+    ) -> anyhow::Result<(String, StatusKind)> {
+        let Some(wallhaven_id) = self
+            .ctx
+            .state
+            .current
+            .as_ref()
+            .and_then(|current| current.wallhaven_id.as_deref())
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+        else {
+            return Ok((
+                "source from-current: current wallpaper has no Wallhaven id".into(),
+                StatusKind::Warning,
+            ));
+        };
+
+        let client = walls_core::wallhaven::WallhavenClient::new(
+            walls_core::wallhaven::api_base(),
+            &self.ctx.secrets.wallhaven_api_key,
+        )?;
+        let wallpaper =
+            tokio::task::block_in_place(|| rt.block_on(client.fetch_wallpaper(&wallhaven_id)))?;
+        let tags = walls_core::wallhaven::tag_names_from_wallpaper(&wallpaper);
+        if tags.is_empty() {
+            return Ok((
+                format!("source from-current: Wallhaven {wallhaven_id} has no usable tags"),
+                StatusKind::Warning,
+            ));
+        }
+        let query = tags
+            .iter()
+            .filter_map(|tag| walls_core::config::wallhaven_required_tag_query_part(tag))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let mut source = default_wallhaven_source_entry();
+        source.query = Some(String::new());
+        source.required_tags = tags;
+        source.atleast = Some(String::new());
+        source.ratios = Some(String::new());
+        source.prefer = Some(WallhavenPrefer::SearchOnly);
+        normalize_source_entry(&mut source);
+
+        let mut config = self.ctx.config.clone();
+        config.sources.push(source);
+        persist_config(&self.ctx.paths.config_file, &config)?;
+        self.reload_ctx()?;
+        Ok((
+            format!("source added: Wallhaven tags {query}"),
+            StatusKind::Success,
+        ))
     }
 
     pub fn remove_selected_source(&mut self) -> anyhow::Result<Option<String>> {

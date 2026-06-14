@@ -4,7 +4,7 @@ use std::time::Duration;
 use anyhow::{ensure, Context};
 use reqwest::{Client, Response};
 
-use crate::config::{WallhavenCollection, WallhavenSearch};
+use crate::config::{wallhaven_effective_query, WallhavenCollection, WallhavenSearch};
 use crate::downloads::{copy_file_atomic, write_file_atomic};
 use crate::provider_http;
 use crate::quota::enforce_download_quota;
@@ -74,8 +74,9 @@ impl WallhavenClient {
         let url = format!("{}/api/v1/search", self.base_url);
         let page = page.to_string();
         let purity = purity_for_request(&params.purity, &self.api_key);
+        let q = wallhaven_effective_query(params);
         let mut query = vec![
-            ("q", params.q.as_str()),
+            ("q", q.as_str()),
             ("categories", params.categories.as_str()),
             ("purity", purity.as_str()),
             ("sorting", params.sorting.as_str()),

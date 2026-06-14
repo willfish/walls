@@ -18,6 +18,7 @@ pub(crate) const CONFIG_BLOCK_TUI: usize = 4;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EditFieldKind {
     Text,
+    TagList,
     Bool,
     Choice(&'static [&'static str]),
 }
@@ -273,6 +274,7 @@ pub(crate) fn source_field_kind_for(src: &SourceEntry, name: &str) -> EditFieldK
         return match name {
             "enabled" => EditFieldKind::Bool,
             "type" => EditFieldKind::Choice(SOURCE_TYPE_CHOICES),
+            "required_tags" | "excluded_tags" => EditFieldKind::TagList,
             "category_general" | "category_anime" | "category_people" | "purity_sfw"
             | "purity_sketchy" | "purity_nsfw" => EditFieldKind::Bool,
             "prefer" => EditFieldKind::Choice(&[
@@ -319,6 +321,8 @@ pub(crate) fn source_field_label(src: &SourceEntry, name: &str) -> String {
             "enabled" => "Enabled".into(),
             "type" => "Type".into(),
             "query" => "Search query".into(),
+            "required_tags" => "Required tags".into(),
+            "excluded_tags" => "Excluded tags".into(),
             "category_general" => "Category: General".into(),
             "category_anime" => "Category: Anime".into(),
             "category_people" => "Category: People".into(),
@@ -391,6 +395,7 @@ pub(super) fn choice_display_value(kind: EditFieldKind, value: &str) -> String {
                 value.to_string()
             }
         }
+        EditFieldKind::TagList => value.to_string(),
         EditFieldKind::Text => value.to_string(),
     }
 }
@@ -575,13 +580,18 @@ pub(super) fn default_wallhaven_source_entry() -> SourceEntry {
 
 pub(super) fn source_entry_display_name(source: &SourceEntry) -> String {
     if source.source_type == "wallhaven" {
-        return source
+        if let Some(query) = source
             .query
             .as_deref()
             .map(str::trim)
             .filter(|query| !query.is_empty())
-            .map(|query| format!("Wallhaven {query}"))
-            .unwrap_or_else(|| "Wallhaven".into());
+        {
+            return format!("Wallhaven {query}");
+        }
+        if !source.required_tags.is_empty() {
+            return format!("Wallhaven tags: {}", source.required_tags.join(", "));
+        }
+        return "Wallhaven".into();
     }
     source
         .label

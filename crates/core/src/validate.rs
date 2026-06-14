@@ -554,6 +554,9 @@ fn validate_choice(
 }
 
 fn validate_wallhaven_resolution(field: &str, value: &str, errors: &mut Vec<ValidationDiagnostic>) {
+    if value.trim().is_empty() {
+        return;
+    }
     if wallhaven_resolution_supported(value) {
         return;
     }
@@ -566,6 +569,9 @@ fn validate_wallhaven_resolution(field: &str, value: &str, errors: &mut Vec<Vali
 }
 
 fn validate_wallhaven_ratio(field: &str, value: &str, errors: &mut Vec<ValidationDiagnostic>) {
+    if value.trim().is_empty() {
+        return;
+    }
     if wallhaven_ratio_supported(value) {
         return;
     }

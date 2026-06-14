@@ -307,6 +307,30 @@ fn validate_config_accepts_valid_provider_source_schemas() {
 }
 
 #[test]
+fn validate_config_accepts_blank_wallhaven_ratio_and_resolution_filters() {
+    let root = tempfile::tempdir().unwrap();
+    let images = root.path().join("images");
+    std::fs::create_dir_all(&images).unwrap();
+    let noop = common::write_noop_script(root.path());
+    common::write_minimal_config(root.path(), &images, &noop);
+
+    let mut config = load_config_json(root.path());
+    config["change"]["internet_enabled"] = serde_json::json!(true);
+    config["sources"] = serde_json::json!([{
+        "enabled": true,
+        "type": "wallhaven",
+        "query": "",
+        "required_tags": ["robot", "science fiction"],
+        "ratios": "",
+        "atleast": ""
+    }]);
+    common::write_config(root.path(), config);
+
+    let errors = validate_root(root.path());
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
 fn validate_config_skips_disabled_provider_schema_errors() {
     let root = tempfile::tempdir().unwrap();
     let images = root.path().join("images");

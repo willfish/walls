@@ -24,6 +24,8 @@ pub(super) fn get_source_field(src: &SourceEntry, name: &str) -> String {
         "source" => src.source.clone().unwrap_or_default(),
         "author" => src.author.clone().unwrap_or_default(),
         "query" => src.query.clone().unwrap_or_default(),
+        "required_tags" => src.required_tags.join(", "),
+        "excluded_tags" => src.excluded_tags.join(", "),
         "api_key" => src.api_key.clone().unwrap_or_default(),
         "collection" => src.collection.clone().unwrap_or_default(),
         "user" => src.user.clone().unwrap_or_default(),
@@ -106,6 +108,8 @@ pub(super) fn set_source_field(draft: &mut SourceEntry, name: &str, buf: &str) {
             draft.query = Some(trimmed.to_string());
         }
         "query" => draft.query = v,
+        "required_tags" => draft.required_tags = parse_tag_list(buf),
+        "excluded_tags" => draft.excluded_tags = parse_tag_list(buf),
         "api_key" => draft.api_key = v,
         "collection" => draft.collection = v,
         "user" => draft.user = v,
@@ -153,4 +157,14 @@ pub(super) fn set_source_field(draft: &mut SourceEntry, name: &str, buf: &str) {
         }
         _ => {}
     }
+}
+
+fn parse_tag_list(buf: &str) -> Vec<String> {
+    let tags = buf
+        .split(',')
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    walls_core::config::normalize_wallhaven_tags(&tags)
 }

@@ -20,6 +20,7 @@ async fn wallhaven_download_to_cache_writes_file() {
     let wp = Wallpaper {
         id: "abc123".into(),
         path: image_url,
+        tags: vec![],
     };
     let cache = tempfile::tempdir().unwrap();
     let client = WallhavenClient::new(server.uri(), "").unwrap();
@@ -52,6 +53,7 @@ async fn wallhaven_download_to_cache_rejects_over_limit_content_length() {
     let wp = Wallpaper {
         id: "abc123".into(),
         path: image_url,
+        tags: vec![],
     };
     let cache = tempfile::tempdir().unwrap();
     let client = client_with_download_limit(server.uri(), 10);
@@ -89,6 +91,7 @@ async fn wallhaven_download_to_cache_rejects_chunked_response_once_limit_is_exce
     let wp = Wallpaper {
         id: "chunked".into(),
         path: format!("http://{addr}/wallpaper.jpg"),
+        tags: vec![],
     };
     let cache = tempfile::tempdir().unwrap();
     let client = client_with_download_limit(format!("http://{addr}"), 10);

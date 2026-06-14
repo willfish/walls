@@ -6,4 +6,7 @@ mod types;
 pub use cache::cached_wallpaper_path;
 pub use client::{api_base, WallhavenClient};
 pub use refill::{refill_wallhaven_cache, source_search_key};
-pub use types::{SearchMeta, SearchResponse, Wallpaper, WallpaperResponse};
+pub use types::{
+    tag_names_from_wallpaper, tag_query_from_wallpaper, SearchMeta, SearchResponse, Wallpaper,
+    WallpaperResponse,
+};
