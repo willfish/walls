@@ -7,13 +7,20 @@ use super::layout_size::{terminal_size, TerminalSize};
 use super::preview;
 use super::{chrome_view, config_edit_view, config_view, line_view, now_view, style};
 
+#[cfg(feature = "tui-preview")]
+const PREVIEW_CONTENT_PERCENT: u16 = 55;
+#[cfg(feature = "tui-preview")]
+const MIN_PREVIEW_WIDTH: u16 = 48;
+#[cfg(feature = "tui-preview")]
+const MIN_PREVIEW_HEIGHT: u16 = 14;
+
 #[cfg(not(feature = "tui-preview"))]
 pub(crate) fn draw_inner(f: &mut Frame, app: &App) {
     let area = f.area();
     if terminal_size(area) == TerminalSize::Tiny {
         return;
     }
-    let theme = style::Theme::new(app.color_mode);
+    let theme = style::Theme::with_preset(app.color_mode, app.ctx.config.tui.theme);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -35,7 +42,7 @@ pub(crate) fn draw_inner(f: &mut Frame, app: &App, preview: Option<&mut preview:
     if terminal_size(area) == TerminalSize::Tiny {
         return;
     }
-    let theme = style::Theme::new(app.color_mode);
+    let theme = style::Theme::with_preset(app.color_mode, app.ctx.config.tui.theme);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -75,16 +82,16 @@ fn render_tab_body(
     theme: style::Theme,
 ) {
     f.render_widget(Clear, area);
-    if !app.show_key_help
-        && matches!(app.tab, Tab::Now | Tab::History | Tab::Browse | Tab::Search)
-        && terminal_size(area) == TerminalSize::Wide
-    {
+    let path = selected_preview_path(app);
+    if preview_split_area(area, app, path.as_deref()).is_some() {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
+            .constraints([
+                Constraint::Percentage(100 - PREVIEW_CONTENT_PERCENT),
+                Constraint::Percentage(PREVIEW_CONTENT_PERCENT),
+            ])
             .split(area);
         render_tab_content(f, chunks[0], app, theme, chunks[0].width);
-        let path = selected_preview_path(app);
         if let Some(preview) = preview {
             preview.render(
                 f,
@@ -135,6 +142,29 @@ fn render_tab_body(
     } else {
         render_tab_content(f, area, app, theme, area.width);
     }
+}
+
+#[cfg(feature = "tui-preview")]
+fn preview_split_area(area: Rect, app: &App, path: Option<&str>) -> Option<Rect> {
+    if app.show_key_help
+        || !matches!(app.tab, Tab::Now | Tab::History | Tab::Browse | Tab::Search)
+        || terminal_size(area) != TerminalSize::Wide
+        || path.is_none()
+    {
+        return None;
+    }
+
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(100 - PREVIEW_CONTENT_PERCENT),
+            Constraint::Percentage(PREVIEW_CONTENT_PERCENT),
+        ])
+        .split(area);
+    let preview_area = chunks[1];
+    let inner_width = preview_area.width.saturating_sub(2);
+    let inner_height = preview_area.height.saturating_sub(2);
+    (inner_width >= MIN_PREVIEW_WIDTH && inner_height >= MIN_PREVIEW_HEIGHT).then_some(preview_area)
 }
 
 #[cfg(feature = "tui-preview")]

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::WallhavenSearch;
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
 pub struct State {
     #[serde(default)]
     pub paused: bool,
@@ -26,7 +26,7 @@ pub struct State {
     pub last_change_unix: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct CurrentWall {
     pub source_id: String,
     #[serde(default)]
@@ -53,7 +53,7 @@ pub struct CurrentWallMetadata {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
 pub struct WallhavenState {
     #[serde(default)]
     pub random_seed: Option<String>,

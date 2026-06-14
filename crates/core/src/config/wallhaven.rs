@@ -30,7 +30,7 @@ pub struct WallhavenCollection {
     pub label: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct WallhavenSearch {
     #[serde(default = "default_query")]
     pub q: String,

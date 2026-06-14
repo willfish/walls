@@ -4,7 +4,7 @@ use ratatui::widgets::{List, ListItem};
 use walls_core::apply::{
     backend_setting_label, summarize_apply_environment, ApplyEnvironmentSummary,
 };
-use walls_core::config::{ApplyBackendSetting, CosmicMethod, TuiKeyProfile};
+use walls_core::config::{ApplyBackendSetting, CosmicMethod, TuiKeyProfile, TuiTheme};
 
 use super::app::{
     App, CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION,
@@ -101,8 +101,9 @@ pub(super) fn lines(app: &App) -> Vec<String> {
         "TUI",
         true,
         format!(
-            "{} keys",
-            tui_key_profile_label(app.ctx.config.tui.key_profile)
+            "{} keys · {}",
+            tui_key_profile_label(app.ctx.config.tui.key_profile),
+            tui_theme_label(app.ctx.config.tui.theme)
         ),
         tui_details(app),
     );
@@ -193,8 +194,9 @@ fn list_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
             title: "TUI",
             enabled: true,
             summary: format!(
-                "{} keys",
-                tui_key_profile_label(app.ctx.config.tui.key_profile)
+                "{} keys · {}",
+                tui_key_profile_label(app.ctx.config.tui.key_profile),
+                tui_theme_label(app.ctx.config.tui.theme)
             ),
             details: tui_detail_items(app, theme),
             theme,
@@ -469,8 +471,33 @@ fn tui_key_profile_label(profile: TuiKeyProfile) -> &'static str {
     }
 }
 
+fn tui_theme_label(theme: TuiTheme) -> &'static str {
+    match theme {
+        TuiTheme::Auto => "auto",
+        TuiTheme::Plain => "plain",
+        TuiTheme::Gruvbox => "gruvbox",
+        TuiTheme::RosePine => "rose-pine",
+        TuiTheme::Nord => "nord",
+        TuiTheme::Catppuccin => "catppuccin",
+        TuiTheme::TokyoNight => "tokyo-night",
+        TuiTheme::Dracula => "dracula",
+        TuiTheme::SolarizedDark => "solarized-dark",
+        TuiTheme::SolarizedLight => "solarized-light",
+        TuiTheme::Everforest => "everforest",
+        TuiTheme::Kanagawa => "kanagawa",
+        TuiTheme::Monokai => "monokai",
+        TuiTheme::OneDark => "one-dark",
+        TuiTheme::AyuDark => "ayu-dark",
+        TuiTheme::GithubDark => "github-dark",
+    }
+}
+
 fn tui_details(app: &App) -> Vec<String> {
-    match app.ctx.config.tui.key_profile {
+    let mut details = vec![format!(
+        "theme: {}",
+        tui_theme_label(app.ctx.config.tui.theme)
+    )];
+    details.extend(match app.ctx.config.tui.key_profile {
         TuiKeyProfile::Emacs => vec![
             "key profile: emacs".into(),
             "tabs: ←/→ or 1-6".into(),
@@ -483,7 +510,8 @@ fn tui_details(app: &App) -> Vec<String> {
             "rows: j/k, Pg, gg/G".into(),
             "commands: : then Ctrl+n/Ctrl+p completes".into(),
         ],
-    }
+    });
+    details
 }
 
 fn tui_detail_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
@@ -494,6 +522,7 @@ fn tui_detail_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
             tui_key_profile_label(app.ctx.config.tui.key_profile),
             theme,
         ),
+        key_value_detail_item("theme", tui_theme_label(app.ctx.config.tui.theme), theme),
         spacer_detail_item(),
         section_detail_item("navigation", theme),
     ];

@@ -231,6 +231,18 @@ impl App {
         Ok(())
     }
 
+    /// Refresh only the persisted runtime state. Used when another process, such as the tray,
+    /// owns automatic rotation and may update `state.json` while the TUI is open.
+    pub fn sync_state_from_disk(&mut self) -> anyhow::Result<bool> {
+        let _lock = walls_core::lock::StateLock::acquire(&self.ctx.paths.state_file)?;
+        let state = walls_core::state::State::load_or_default(&self.ctx.paths.state_file)?;
+        if state == self.ctx.state {
+            return Ok(false);
+        }
+        self.ctx.state = state;
+        Ok(true)
+    }
+
     fn refresh_local_candidates(&mut self) -> anyhow::Result<()> {
         self.local_candidates = self.ctx.collect_local_candidates().unwrap_or_default();
         self.config_warnings = summarize_config_warnings(&self.ctx);
