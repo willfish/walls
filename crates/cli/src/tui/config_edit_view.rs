@@ -57,6 +57,10 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
             }
             lines.push("".into());
         }
+        if let Some(notice) = edit_notice_line(app) {
+            lines.push(notice);
+            lines.push("".into());
+        }
 
         let mut fields: Vec<(String, String, app::EditFieldKind)> = vec![];
         if let Some(ref src) = sess.draft_source {
@@ -196,6 +200,35 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
     }
 }
 
+fn edit_notice_line(app: &App) -> Option<String> {
+    let sess = app.editing.as_ref()?;
+    let EditTarget::Source(index) = sess.target else {
+        return None;
+    };
+    let source = sess.draft_source.as_ref()?;
+    if source.source_type != "wallhaven" {
+        return None;
+    }
+
+    let configured = walls_core::config::source_wallhaven_search(source);
+    let key = walls_core::wallhaven::source_search_key(index, source);
+    let effective = app
+        .ctx
+        .state
+        .wallhaven
+        .effective_source_searches
+        .get(&key)?;
+    let ratio_broadened =
+        !configured.ratios.trim().is_empty() && effective.ratios.trim().is_empty();
+    let resolution_broadened =
+        !configured.atleast.trim().is_empty() && effective.atleast.trim().is_empty();
+    if ratio_broadened || resolution_broadened {
+        Some(":: Search broadened: open URL omits ratio/resolution.".into())
+    } else {
+        None
+    }
+}
+
 fn build_rich_edit_form_items(app: &App, theme: style::Theme) -> Vec<ListItem<'static>> {
     let plain_lines = config_edit_form_lines(app);
     let mut items = Vec::new();
@@ -218,6 +251,15 @@ fn build_rich_edit_form_items(app: &App, theme: style::Theme) -> Vec<ListItem<'s
             let l = Line::from(vec![
                 Span::styled("!! ", err_st),
                 Span::styled(line[3..].to_string(), err_st),
+            ]);
+            items.push(ListItem::new(l));
+            continue;
+        }
+        if trimmed.starts_with("::") {
+            let warn_st = theme.status(StatusKind::Warning);
+            let l = Line::from(vec![
+                Span::styled(":: ", warn_st),
+                Span::styled(line[3..].to_string(), warn_st),
             ]);
             items.push(ListItem::new(l));
             continue;

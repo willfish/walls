@@ -191,6 +191,7 @@ pub fn default_wallhaven_source() -> SourceEntry {
         order: Some(search.order),
         atleast: Some(search.atleast),
         ratios: Some(search.ratios),
+        broaden_when_cache_below: None,
         prefer: Some(default_prefer()),
         collections: Vec::new(),
     }
@@ -198,13 +199,6 @@ pub fn default_wallhaven_source() -> SourceEntry {
 
 pub fn populate_wallhaven_source_defaults(source: &mut SourceEntry) {
     let defaults = WallhavenSearch::default();
-    if source
-        .query
-        .as_deref()
-        .is_none_or(|value| value.trim().is_empty())
-    {
-        source.query = Some(defaults.q);
-    }
     if source
         .categories
         .as_deref()
@@ -259,8 +253,7 @@ pub fn source_wallhaven_search(source: &SourceEntry) -> WallhavenSearch {
             .query
             .as_deref()
             .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or(&defaults.q)
+            .unwrap_or_default()
             .to_string(),
         categories: source
             .categories
@@ -402,7 +395,8 @@ fn resolution_area(width: u32, height: u32) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        main_monitor_resolution_from_cosmic_randr, main_monitor_resolution_from_xrandr,
+        default_wallhaven_source, main_monitor_resolution_from_cosmic_randr,
+        main_monitor_resolution_from_xrandr, source_wallhaven_search,
         wallhaven_atleast_for_monitor, wallhaven_ratio_for_monitor, WallhavenSearch,
     };
 
@@ -417,6 +411,17 @@ mod tests {
             serde_json::from_value(serde_json::json!({})).expect("wallhaven search config");
 
         assert_eq!(search.q, "space");
+    }
+
+    #[test]
+    fn blank_source_query_builds_empty_search_query() {
+        let source = crate::config::SourceEntry {
+            source_type: "wallhaven".into(),
+            query: Some("   ".into()),
+            ..default_wallhaven_source()
+        };
+
+        assert_eq!(source_wallhaven_search(&source).q, "");
     }
 
     #[test]

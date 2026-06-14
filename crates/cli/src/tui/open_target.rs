@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use walls_core::config::{source_wallhaven_search, SourceEntry, SourceKind, WallhavenSearch};
+use walls_core::state::WallhavenState;
 use walls_core::{expand_home, WallsCtx};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,9 +26,9 @@ pub(crate) fn spawn(target: &OpenTarget) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn source(ctx: &WallsCtx, source: &SourceEntry) -> Option<OpenTarget> {
+pub(crate) fn source(ctx: &WallsCtx, index: usize, source: &SourceEntry) -> Option<OpenTarget> {
     if source.source_type == "wallhaven" {
-        let search = source_wallhaven_search(source);
+        let search = effective_wallhaven_search(&ctx.state.wallhaven, index, source);
         return Some(wallhaven_search(&search));
     }
 
@@ -37,6 +38,19 @@ pub(crate) fn source(ctx: &WallsCtx, source: &SourceEntry) -> Option<OpenTarget>
         SourceKind::Fetched => Some(OpenTarget::Path(ctx.paths.fetched_dir.clone())),
         _ => source_url_target(source),
     }
+}
+
+fn effective_wallhaven_search(
+    state: &WallhavenState,
+    index: usize,
+    source: &SourceEntry,
+) -> WallhavenSearch {
+    let key = walls_core::wallhaven::source_search_key(index, source);
+    state
+        .effective_source_searches
+        .get(&key)
+        .cloned()
+        .unwrap_or_else(|| source_wallhaven_search(source))
 }
 
 pub(crate) fn cache_queue_id(cache_dir: &Path, id: &str) -> OpenTarget {
@@ -58,16 +72,25 @@ pub(crate) fn wallhaven_wallpaper(id: &str) -> OpenTarget {
 }
 
 pub(crate) fn wallhaven_search(search: &WallhavenSearch) -> OpenTarget {
-    OpenTarget::Url(format!(
-        "https://wallhaven.cc/search?q={}&categories={}&purity={}&sorting={}&order={}&atleast={}&ratios={}",
-        url_component(&search.q),
-        search.categories,
-        search.purity,
-        search.sorting,
-        search.order,
-        url_component(&search.atleast),
-        url_component(&search.ratios)
-    ))
+    let mut query = vec![
+        ("q", search.q.as_str()),
+        ("categories", search.categories.as_str()),
+        ("purity", search.purity.as_str()),
+        ("sorting", search.sorting.as_str()),
+        ("order", search.order.as_str()),
+    ];
+    if !search.atleast.trim().is_empty() {
+        query.push(("atleast", search.atleast.as_str()));
+    }
+    if !search.ratios.trim().is_empty() {
+        query.push(("ratios", search.ratios.as_str()));
+    }
+    let query = query
+        .into_iter()
+        .map(|(key, value)| format!("{key}={}", url_component(value)))
+        .collect::<Vec<_>>()
+        .join("&");
+    OpenTarget::Url(format!("https://wallhaven.cc/search?{query}"))
 }
 
 #[derive(Debug, PartialEq, Eq)]
