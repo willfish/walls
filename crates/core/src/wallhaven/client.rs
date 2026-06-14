@@ -1,18 +1,18 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{ensure, Context};
-use reqwest::{Client, Response};
+use reqwest::Client;
 
 use crate::config::{wallhaven_effective_query, WallhavenCollection, WallhavenSearch};
-use crate::downloads::{copy_file_atomic, write_file_atomic};
+use crate::downloads::{
+    mirror_provider_cache_with_quota, response_bytes_limited, write_file_atomic,
+    DEFAULT_MAX_PROVIDER_DOWNLOAD_BYTES,
+};
 use crate::provider_http;
-use crate::quota::enforce_download_quota;
 
 use super::types::{SearchResponse, Wallpaper, WallpaperResponse};
 
 pub const DEFAULT_API_BASE: &str = "https://wallhaven.cc";
-const DEFAULT_MAX_DOWNLOAD_BYTES: u64 = 50 * 1024 * 1024;
 
 pub fn api_base() -> String {
     std::env::var("WALLHAVEN_API_BASE").unwrap_or_else(|_| DEFAULT_API_BASE.to_string())
@@ -46,7 +46,7 @@ impl WallhavenClient {
             api_key,
             request_timeout,
             connect_timeout,
-            DEFAULT_MAX_DOWNLOAD_BYTES,
+            DEFAULT_MAX_PROVIDER_DOWNLOAD_BYTES,
         )
     }
 
@@ -115,7 +115,7 @@ impl WallhavenClient {
             return Ok(dest);
         }
         let response = provider_http::send_with_retries(|| self.http.get(&wp.path)).await?;
-        let bytes = pipe_limited_body(response, self.max_download_bytes).await?;
+        let bytes = response_bytes_limited(response, self.max_download_bytes, "Wallhaven").await?;
         write_file_atomic(&dest, &bytes).await?;
         Ok(dest)
     }
@@ -129,13 +129,7 @@ impl WallhavenClient {
         quota_enabled: bool,
     ) -> anyhow::Result<PathBuf> {
         let dest = self.download_to_cache(wp, cache_dir).await?;
-        if let Some(name) = dest.file_name() {
-            let dl_path = download_dir.join(name);
-            copy_file_atomic(&dest, &dl_path).await.ok();
-        }
-        if quota_enabled {
-            enforce_download_quota(download_dir, quota_mb)?;
-        }
+        mirror_provider_cache_with_quota(&dest, download_dir, quota_mb, quota_enabled).await?;
         Ok(dest)
     }
 
@@ -168,30 +162,6 @@ impl WallhavenClient {
         let body: WallpaperResponse = resp.json().await?;
         Ok(body.data)
     }
-}
-
-async fn pipe_limited_body(mut response: Response, max_bytes: u64) -> anyhow::Result<Vec<u8>> {
-    if let Some(content_length) = response.content_length() {
-        ensure!(
-            content_length <= max_bytes,
-            "Wallhaven download size {content_length} bytes exceeds limit of {max_bytes} bytes"
-        );
-    }
-
-    let mut total = 0_u64;
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await? {
-        let chunk_len = u64::try_from(chunk.len())?;
-        total = total
-            .checked_add(chunk_len)
-            .context("Wallhaven download size overflowed while reading response")?;
-        ensure!(
-            total <= max_bytes,
-            "Wallhaven download exceeded limit of {max_bytes} bytes while reading response"
-        );
-        bytes.extend_from_slice(&chunk);
-    }
-    Ok(bytes)
 }
 
 /// Anonymous Wallhaven access ignores NSFW purity; strip that bit when no API key is set.

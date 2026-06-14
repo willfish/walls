@@ -3,10 +3,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use anyhow::{ensure, Context};
+
 use crate::paths::WallsPaths;
+use crate::quota::enforce_download_quota;
 use crate::state::State;
 
 static ATOMIC_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
+pub const DEFAULT_MAX_PROVIDER_DOWNLOAD_BYTES: u64 = 50 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NukeDownloadsMode {
@@ -109,6 +113,61 @@ pub async fn copy_file_atomic(from: &Path, to: &Path) -> anyhow::Result<()> {
         let _ = tokio::fs::remove_file(&tmp).await;
     }
     result
+}
+
+pub async fn response_bytes_limited(
+    mut response: reqwest::Response,
+    max_bytes: u64,
+    provider_label: &str,
+) -> anyhow::Result<Vec<u8>> {
+    if let Some(content_length) = response.content_length() {
+        ensure!(
+            content_length <= max_bytes,
+            "{provider_label} download size {content_length} bytes exceeds limit of {max_bytes} bytes"
+        );
+    }
+
+    let mut total = 0_u64;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        let chunk_len = u64::try_from(chunk.len())?;
+        total = total.checked_add(chunk_len).with_context(|| {
+            format!("{provider_label} download size overflowed while reading response")
+        })?;
+        ensure!(
+            total <= max_bytes,
+            "{provider_label} download exceeded limit of {max_bytes} bytes while reading response"
+        );
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
+pub async fn write_provider_cache_with_quota(
+    cache_path: &Path,
+    download_dir: &Path,
+    bytes: &[u8],
+    quota_mb: u64,
+    quota_enabled: bool,
+) -> anyhow::Result<()> {
+    write_file_atomic(cache_path, bytes).await?;
+    mirror_provider_cache_with_quota(cache_path, download_dir, quota_mb, quota_enabled).await
+}
+
+pub async fn mirror_provider_cache_with_quota(
+    cache_path: &Path,
+    download_dir: &Path,
+    quota_mb: u64,
+    quota_enabled: bool,
+) -> anyhow::Result<()> {
+    if let Some(name) = cache_path.file_name() {
+        let download_path = download_dir.join(name);
+        copy_file_atomic(cache_path, &download_path).await.ok();
+    }
+    if quota_enabled {
+        enforce_download_quota(download_dir, quota_mb)?;
+    }
+    Ok(())
 }
 
 /// Returns true when `name` is a provider-fetched artifact stored under `cache_dir`.

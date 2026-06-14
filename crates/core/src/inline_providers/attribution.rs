@@ -3,20 +3,38 @@ use std::path::PathBuf;
 use crate::apply::ApplyTrigger;
 use crate::config::SourceKind;
 use crate::ctx::WallsCtx;
-use crate::downloads::write_file_atomic;
-use crate::inline_providers::common::{download_bytes, first_enabled_source, provider_for};
+use crate::downloads::write_provider_cache_with_quota;
+use crate::inline_providers::common::{download_bytes, enabled_sources, provider_for};
 use crate::state::CurrentWallMetadata;
 
 pub async fn try_attribution(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
-    let Some(src) = first_enabled_source(
+    let sources = enabled_sources(
         &ctx.config.sources,
         SourceKind::Attribution,
         true,
         ctx.config.change.internet_enabled,
-    ) else {
+    );
+    if sources.is_empty() {
         return Ok(None);
-    };
+    }
+    let mut last_error = None;
+    for source in sources {
+        match try_attribution_source(ctx, &source).await {
+            Ok(Some(path)) => return Ok(Some(path)),
+            Ok(None) => {}
+            Err(error) => last_error = Some(error),
+        }
+    }
+    if let Some(error) = last_error {
+        return Err(error);
+    }
+    Ok(None)
+}
 
+async fn try_attribution_source(
+    ctx: &mut WallsCtx,
+    src: &crate::config::SourceEntry,
+) -> anyhow::Result<Option<PathBuf>> {
     let provider = provider_for(src);
     let image_url = src
         .url
@@ -28,7 +46,14 @@ pub async fn try_attribution(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBu
     let bytes = download_bytes(&client, image_url, &provider, "attribution image download").await?;
 
     let dest = ctx.paths.cache_dir.join("attribution-fetch.jpg");
-    write_file_atomic(&dest, &bytes).await?;
+    write_provider_cache_with_quota(
+        &dest,
+        &ctx.paths.download_dir,
+        &bytes,
+        ctx.config.quota.size_mb,
+        ctx.config.quota.enabled,
+    )
+    .await?;
 
     let label = src.label.clone().unwrap_or_else(|| "attribution".into());
     let description = src
