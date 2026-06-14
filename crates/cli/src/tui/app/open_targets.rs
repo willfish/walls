@@ -39,7 +39,7 @@ impl App {
                 .config
                 .sources
                 .get(*index)
-                .and_then(|source| open_target::source(&self.ctx, source)),
+                .and_then(|source| open_target::source(&self.ctx, *index, source)),
             EditTarget::Wallhaven => Some(open_target::wallhaven_search(
                 &wallhaven_edit::first_search(&self.ctx.config),
             )),

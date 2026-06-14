@@ -4,6 +4,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::WallhavenSearch;
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct State {
     #[serde(default)]
@@ -61,6 +63,8 @@ pub struct WallhavenState {
     pub search_page: u32,
     #[serde(default)]
     pub source_search_pages: std::collections::HashMap<String, u32>,
+    #[serde(default)]
+    pub effective_source_searches: std::collections::HashMap<String, WallhavenSearch>,
 }
 
 impl State {

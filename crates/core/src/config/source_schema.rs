@@ -89,6 +89,7 @@ pub fn source_config_fields(source_type: &str) -> &'static [&'static str] {
             "order",
             "atleast",
             "ratios",
+            "broaden_when_cache_below",
             "prefer",
             "collections",
         ],
@@ -137,6 +138,7 @@ pub fn source_editable_fields(entry: &SourceEntry) -> Vec<&'static str> {
             "order",
             "ratios",
             "atleast",
+            "broaden_when_cache_below",
             "prefer",
             "collections",
         ],
@@ -144,6 +146,18 @@ pub fn source_editable_fields(entry: &SourceEntry) -> Vec<&'static str> {
         SourceKind::Immich => vec!["enabled", "label", "url", "api_key"],
         _ => vec!["enabled", "label"],
     }
+}
+
+/// Whether an allowed source field should preserve an explicitly empty string.
+///
+/// Most source fields use empty input to clear an optional JSON key. Wallhaven's
+/// query is different: an empty query means "search Wallhaven using filters
+/// only", so it must survive edits and normalization as `""`.
+pub fn source_field_preserves_blank(source_type: &str, key: &str) -> bool {
+    matches!(
+        (SourceKind::parse(source_type), key),
+        (SourceKind::Wallhaven, "query")
+    )
 }
 
 /// Strip fields that do not belong to this source type and apply type-specific cleanup.
@@ -160,7 +174,11 @@ pub fn normalize_source_entry(entry: &mut SourceEntry) {
 
     normalize_optional_field(&allowed, "label", &mut entry.label);
     normalize_optional_field(&allowed, "path", &mut entry.path);
-    normalize_optional_field(&allowed, "query", &mut entry.query);
+    if source_field_preserves_blank(&entry.source_type, "query") && allowed.contains("query") {
+        normalize_blank_preserving_field(&mut entry.query);
+    } else {
+        normalize_optional_field(&allowed, "query", &mut entry.query);
+    }
     normalize_optional_field(&allowed, "url", &mut entry.url);
     normalize_optional_field(&allowed, "collection", &mut entry.collection);
     normalize_optional_field(&allowed, "user", &mut entry.user);
@@ -180,6 +198,9 @@ pub fn normalize_source_entry(entry: &mut SourceEntry) {
     normalize_optional_field(&allowed, "ratios", &mut entry.ratios);
     if !allowed.contains("prefer") {
         entry.prefer = None;
+    }
+    if !allowed.contains("broaden_when_cache_below") {
+        entry.broaden_when_cache_below = None;
     }
     if !allowed.contains("collections") {
         entry.collections.clear();
@@ -202,6 +223,10 @@ fn normalize_optional_field(
     } else {
         *value = None;
     }
+}
+
+fn normalize_blank_preserving_field(value: &mut Option<String>) {
+    *value = value.take().map(|value| value.trim().to_string());
 }
 
 pub fn normalize_config_sources(sources: &mut [SourceEntry]) {
@@ -339,6 +364,7 @@ mod tests {
             order: Some("asc".into()),
             ratios: Some("16x10".into()),
             atleast: Some("1024x768".into()),
+            broaden_when_cache_below: Some(2),
             prefer: Some(crate::config::WallhavenPrefer::SearchOnly),
             collections: Vec::new(),
         };
@@ -350,6 +376,7 @@ mod tests {
         assert_eq!(entry.order.as_deref(), Some("asc"));
         assert_eq!(entry.ratios.as_deref(), Some("16x10"));
         assert_eq!(entry.atleast.as_deref(), Some("1024x768"));
+        assert_eq!(entry.broaden_when_cache_below, Some(2));
         assert_eq!(
             entry.prefer,
             Some(crate::config::WallhavenPrefer::SearchOnly)
@@ -359,6 +386,20 @@ mod tests {
         assert!(entry.url.is_none());
         assert!(entry.api_key.is_none());
         assert!(entry.sort.is_none());
+    }
+
+    #[test]
+    fn normalize_wallhaven_preserves_empty_query() {
+        let mut entry = SourceEntry {
+            enabled: true,
+            source_type: "wallhaven".into(),
+            query: Some("   ".into()),
+            ..SourceEntry::default()
+        };
+
+        normalize_source_entry(&mut entry);
+
+        assert_eq!(entry.query.as_deref(), Some(""));
     }
 
     #[test]

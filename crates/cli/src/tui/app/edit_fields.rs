@@ -329,6 +329,7 @@ pub(crate) fn source_field_label(src: &SourceEntry, name: &str) -> String {
             "order" => "Order".into(),
             "ratios" => "Aspect ratio".into(),
             "atleast" => "Minimum resolution".into(),
+            "broaden_when_cache_below" => "Broaden below".into(),
             "prefer" => "Prefer".into(),
             "collections" => "Collections".into(),
             other => other.into(),

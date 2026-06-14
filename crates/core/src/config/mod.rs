@@ -25,8 +25,8 @@ pub use source_kind::SourceKind;
 pub use source_schema::{
     normalize_config_sources, normalize_source_entry, secrets_credential_field,
     secrets_credential_label, secrets_credential_present, secrets_credential_warning,
-    source_config_fields, source_editable_fields, source_secrets_detail_lines, source_secrets_key,
-    SourceSecretsKey, SECRETS_EDIT_HINT,
+    source_config_fields, source_editable_fields, source_field_preserves_blank,
+    source_secrets_detail_lines, source_secrets_key, SourceSecretsKey, SECRETS_EDIT_HINT,
 };
 pub use unsplash::UnsplashSourceConfig;
 pub use wallhaven::{
@@ -209,6 +209,9 @@ pub struct SourceEntry {
     pub atleast: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ratios: Option<String>,
+    /// Broaden Wallhaven search by clearing ratio/resolution when the queue stays below this size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broaden_when_cache_below: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefer: Option<WallhavenPrefer>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

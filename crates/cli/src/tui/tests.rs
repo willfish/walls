@@ -1575,6 +1575,60 @@ fn open_target_for_config_sources_uses_selected_or_first_active_source() {
 }
 
 #[test]
+fn wallhaven_source_open_target_uses_effective_broadened_search() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": true },
+            "paths": {
+                "cache_dir": "/tmp/walls-cache",
+                "download_dir": "/tmp/walls-downloaded",
+                "favorites_dir": "/tmp/walls-favorites",
+                "fetched_dir": "/tmp/walls-fetched",
+                "compose_dir": "/tmp/walls-compose"
+            },
+            "sources": [
+                {
+                    "enabled": true,
+                    "type": "wallhaven",
+                    "query": "mountain lake",
+                    "categories": "100",
+                    "purity": "100",
+                    "sorting": "random",
+                    "order": "desc",
+                    "ratios": "16x9",
+                    "atleast": "1920x1080"
+                }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    let key = walls_core::wallhaven::source_search_key(0, &app.ctx.config.sources[0]);
+    app.ctx.state.wallhaven.effective_source_searches.insert(
+        key,
+        walls_core::config::WallhavenSearch {
+            q: "mountain lake".into(),
+            categories: "100".into(),
+            purity: "100".into(),
+            sorting: "random".into(),
+            order: "desc".into(),
+            ratios: String::new(),
+            atleast: String::new(),
+        },
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.config_in_subnav = true;
+    app.config_sub_cursor = 0;
+
+    assert_eq!(
+        app.selected_open_target(),
+        Some(OpenTarget::Url(
+            "https://wallhaven.cc/search?q=mountain+lake&categories=100&purity=100&sorting=random&order=desc".into()
+        ))
+    );
+}
+
+#[test]
 fn open_command_uses_desktop_default_opener() {
     let target = OpenTarget::Path(std::path::PathBuf::from("/tmp/wall.jpg"));
     let command = open_command(&target);
@@ -2596,6 +2650,7 @@ fn sources_a_adds_wallhaven_query_source_without_label_and_opens_edit() {
             "order",
             "ratios",
             "atleast",
+            "broaden_when_cache_below",
             "prefer",
             "collections"
         ]
@@ -2613,6 +2668,7 @@ fn sources_a_adds_wallhaven_query_source_without_label_and_opens_edit() {
     assert!(text.contains("Search query"), "{text}");
     assert!(text.contains("Aspect ratio"), "{text}");
     assert!(text.contains("Minimum resolution"), "{text}");
+    assert!(text.contains("Broaden below"), "{text}");
     assert!(text.contains("Collections"), "{text}");
     assert!(text.contains("Wallhaven API key"), "{text}");
     assert!(
@@ -2689,6 +2745,108 @@ fn wallhaven_source_edit_persists_collection_entries() {
     let form = render_text(&app, 100, 28);
     assert!(form.contains("!! Validation errors"), "{form}");
     assert!(form.contains("collections[0].id"), "{form}");
+}
+
+#[test]
+fn wallhaven_source_edit_persists_empty_query() {
+    let rt = tokio::runtime::Runtime::new().expect("rt");
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [
+                {
+                    "enabled": true,
+                    "type": "wallhaven",
+                    "query": "nebula",
+                    "ratios": "16x9",
+                    "atleast": "1920x1080"
+                }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.start_edit_for_current();
+
+    let fields = app
+        .editing
+        .as_ref()
+        .and_then(|session| session.draft_source.as_ref())
+        .map(App::source_editable_fields)
+        .expect("draft source fields");
+    let query_idx = fields
+        .iter()
+        .position(|field| field == "query")
+        .expect("query field");
+    {
+        let editing = app.editing.as_mut().expect("editing");
+        editing.field_cursor = query_idx;
+        editing.field_buffer.clear();
+    }
+    update(&mut app, UiAction::EditFieldCommit, rt.handle()).expect("save empty query");
+
+    let source = &app.ctx.config.sources[0];
+    assert_eq!(source.query.as_deref(), Some(""));
+    assert_eq!(walls_core::config::source_wallhaven_search(source).q, "");
+    assert_eq!(
+        app.editing
+            .as_ref()
+            .map(|session| session.field_buffer.as_str()),
+        Some("")
+    );
+    assert!(
+        !app.message.contains("query is required"),
+        "{}",
+        app.message
+    );
+
+    let text = fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
+    assert!(text.contains("\"query\": \"\""), "{text}");
+    assert!(!text.contains("\"query\": \"space\""), "{text}");
+}
+
+#[test]
+fn wallhaven_source_edit_shows_broadened_search_notice() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [
+                {
+                    "enabled": true,
+                    "type": "wallhaven",
+                    "query": "nebula",
+                    "ratios": "16x9",
+                    "atleast": "1920x1080"
+                }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    let key = walls_core::wallhaven::source_search_key(0, &app.ctx.config.sources[0]);
+    app.ctx.state.wallhaven.effective_source_searches.insert(
+        key,
+        walls_core::config::WallhavenSearch {
+            q: "nebula".into(),
+            categories: "111".into(),
+            purity: "100".into(),
+            sorting: "random".into(),
+            order: "desc".into(),
+            ratios: String::new(),
+            atleast: String::new(),
+        },
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.start_edit_for_current();
+
+    let text = render_text(&app, 100, 32);
+
+    assert!(text.contains("Search broadened"), "{text}");
+    assert!(text.contains("omits ratio/resolution"), "{text}");
+    assert!(text.contains("Aspect ratio"), "{text}");
 }
 
 #[test]

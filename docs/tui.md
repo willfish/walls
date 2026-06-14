@@ -190,6 +190,7 @@ or deliberately defers it to a later focused slice.
 | `config.sources[].order` | Editable | Wallhaven order choice field. |
 | `config.sources[].ratios` | Editable | Wallhaven aspect ratio choice field. |
 | `config.sources[].atleast` | Editable | Wallhaven minimum resolution choice field. |
+| `config.sources[].broaden_when_cache_below` | Editable | Optional Wallhaven source threshold; clears ratio/resolution filters when the queue remains below this size. |
 | `config.sources[].prefer` | Editable | Wallhaven collection/search preference choice field. |
 | `config.sources[].collections` | Editable | Wallhaven source edit form text field using `username/id[:label]` entries separated by commas. |
 | `config.sources[].collections[].username` | Editable | Parsed from each Wallhaven collection entry before save. |

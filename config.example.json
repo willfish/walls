@@ -92,6 +92,7 @@
       "order": "desc",
       "ratios": "16x9",
       "atleast": "1920x1080",
+      "broaden_when_cache_below": 2,
       "prefer": "collections_then_search"
     }
   ]
