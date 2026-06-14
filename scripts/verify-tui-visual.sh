@@ -54,6 +54,9 @@ def setup():
     secrets = config_home / "walls" / "secrets.json"
     secrets.write_text("{}")
     secrets.chmod(0o600)
+    (state_home / "walls" / "state.json").write_text(
+        json.dumps({"last_change_unix": int(time.time())})
+    )
     return tmp, config_home, state_home
 
 
@@ -121,6 +124,7 @@ def capture(name, cols, rows, keys=b"", extra_env=None):
             "XDG_STATE_HOME": str(state_home),
             "RUST_BACKTRACE": "0",
             "TERM": "xterm-256color",
+            "WALLS_TUI_INTRO": "0",
             "WALLS_TUI_PREVIEW": "0",
         }
         if extra_env:
@@ -164,22 +168,22 @@ def capture(name, cols, rows, keys=b"", extra_env=None):
 
 standard = capture("standard-config", 80, 24)
 assert "normal ready | paused=false | queue=0 | history=0" in standard, standard
-assert "space pause" in standard and "q quit" in standard, standard
+assert "e first active" in standard and "Enter pick" in standard, standard
 assert "Config" in standard, standard
-assert "> [on] Rotation" in standard, standard
-assert "  [on] Local sources - 1 configured, 1 candidates" in standard, standard
-assert "  [off] Wallhaven" in standard, standard
+assert "  [on] Rotation" in standard, standard
+assert "> [on] Sources - 1 active" in standard, standard
 assert "paused:" not in standard, standard
 
 narrow_search = capture("narrow-search", 42, 10, b"5")
 assert "Search" in narrow_search and "query:" in narrow_search, narrow_search
-assert "i edit | Enter | j/k | : | q" in narrow_search, narrow_search
+assert "/i e o Enter search j/k :?q" in narrow_search, narrow_search
 
 no_colour = capture("no-colour-config", 80, 24, extra_env={"WALLS_TUI_COLOR": "never"})
-assert "normal ready" in no_colour and "q quit" in no_colour, no_colour
+assert "normal ready" in no_colour and "e first active" in no_colour, no_colour
 
 wide_now = capture("wide-now-preview-disabled", 120, 32, b"2")
-assert "Now" in wide_now and "(no current wallpaper)" in wide_now, wide_now
+assert "Now" in wide_now and "[empty] no current wallpaper" in wide_now, wide_now
+assert "preview" not in wide_now, wide_now
 
 print("ok: TUI visual verification frames passed")
 PY

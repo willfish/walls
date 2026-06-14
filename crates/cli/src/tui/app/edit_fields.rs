@@ -84,8 +84,26 @@ pub(crate) const SEARCH_FILTER_FIELDS: &[&str] = &[
     "atleast",
 ];
 
-pub(crate) const TUI_BLOCK_FIELDS: &[&str] = &["key_profile"];
+pub(crate) const TUI_BLOCK_FIELDS: &[&str] = &["key_profile", "theme"];
 pub(crate) const TUI_KEY_PROFILE_CHOICES: &[&str] = &["emacs", "vim"];
+pub(crate) const TUI_THEME_CHOICES: &[&str] = &[
+    "auto",
+    "plain",
+    "gruvbox",
+    "rose-pine",
+    "nord",
+    "catppuccin",
+    "tokyo-night",
+    "dracula",
+    "solarized-dark",
+    "solarized-light",
+    "everforest",
+    "kanagawa",
+    "monokai",
+    "one-dark",
+    "ayu-dark",
+    "github-dark",
+];
 pub(crate) const APPLY_BACKEND_CHOICES: &[&str] = &[
     "auto",
     "cosmic",
@@ -190,6 +208,7 @@ pub(crate) fn block_field_label(block: usize, key: &str) -> String {
         },
         CONFIG_BLOCK_TUI => match key {
             "key_profile" => "Key profile".into(),
+            "theme" => "Theme".into(),
             other => other.into(),
         },
         _ => key.into(),
@@ -249,6 +268,7 @@ pub(crate) fn block_field_kind(block: usize, key: &str) -> EditFieldKind {
         },
         CONFIG_BLOCK_TUI => match key {
             "key_profile" => EditFieldKind::Choice(TUI_KEY_PROFILE_CHOICES),
+            "theme" => EditFieldKind::Choice(TUI_THEME_CHOICES),
             _ => EditFieldKind::Text,
         },
         _ => EditFieldKind::Text,
@@ -521,6 +541,7 @@ pub(super) fn block_field_value_at(
             "key_profile" => {
                 config_block_edit::tui_key_profile_label(config.tui.key_profile).into()
             }
+            "theme" => config_block_edit::tui_theme_label(config.tui.theme).into(),
             _ => String::new(),
         },
         _ => String::new(),

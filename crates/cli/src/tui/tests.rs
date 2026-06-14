@@ -5,7 +5,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::prelude::{Color, Style};
 use ratatui::Terminal;
-use walls_core::config::{ApplyBackendSetting, CosmicMethod, TuiKeyProfile};
+use walls_core::config::{ApplyBackendSetting, CosmicMethod, TuiKeyProfile, TuiTheme};
 use walls_core::state::CurrentWall;
 use walls_core::WallsCtx;
 use wiremock::matchers::{header, method, path};
@@ -190,7 +190,7 @@ fn render_intro_text(app: &App, intro: &StartupIntro, width: u16, height: u16) -
 }
 
 fn rendered_footer_status_style(app: &App) -> Style {
-    let theme = style::Theme::new(app.color_mode);
+    let theme = style::Theme::with_preset(app.color_mode, app.ctx.config.tui.theme);
     let backend = TestBackend::new(80, 4);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal
@@ -233,6 +233,7 @@ fn default_config_screen_renders_blocks_and_footer_status() {
     assert!(!text.contains("  [off] Wallhaven"), "{text}");
     assert!(text.contains("  [on] Library"), "{text}");
     assert!(text.contains("  [on] Apply/display"), "{text}");
+    assert!(text.contains("  [on] TUI - emacs keys · auto"), "{text}");
     assert!(text.contains("local only"), "{text}");
     assert!(!text.contains("paused:"), "{text}");
     assert!(text.contains("normal"), "{text}");
@@ -240,6 +241,21 @@ fn default_config_screen_renders_blocks_and_footer_status() {
         text.contains("ready | paused=false | queue=0 | history=0"),
         "{text}"
     );
+}
+
+#[test]
+fn configured_theme_changes_footer_style_without_reload() {
+    let mut app = test_app();
+    app.color_mode = style::ColorMode::Auto;
+    app.set_message(style::StatusKind::Warning, "theme preview");
+
+    app.ctx.config.tui.theme = TuiTheme::Gruvbox;
+    let gruvbox = rendered_footer_status_style(&app);
+
+    app.ctx.config.tui.theme = TuiTheme::RosePine;
+    let rose_pine = rendered_footer_status_style(&app);
+
+    assert_ne!(gruvbox, rose_pine);
 }
 
 #[test]
@@ -1128,13 +1144,14 @@ fn now_tab_surfaces_last_run_summary_without_log_clutter() {
 
     let text = render_text(&app, 90, 18);
 
+    assert!(text.contains("Status"), "{text}");
     assert!(
-        text.contains("last run: failed before applying a wallpaper"),
+        text.contains("failed before applying a wallpaper"),
         "{text}"
     );
-    assert!(text.contains("last warning: local: empty result"), "{text}");
+    assert!(text.contains("warning local: empty result"), "{text}");
     assert!(
-        text.contains("last error: wallhaven: request failed HTTP 401 ([redacted])"),
+        text.contains("error wallhaven: request failed HTTP 401 ([redacted])"),
         "{text}"
     );
     assert!(!text.contains("super-secret-token"), "{text}");
@@ -1429,11 +1446,52 @@ fn now_tab_hints_source_from_current_for_wallhaven_current() {
 
     let text = render_text(&app, 80, 24);
 
-    assert!(text.contains(":source from-current"), "{text}");
-    assert!(
-        text.contains("fetches Wallhaven tags to create a source"),
-        "{text}"
-    );
+    assert!(text.contains("Status"), "{text}");
+    assert!(text.contains("Library"), "{text}");
+    assert!(text.contains("Source"), "{text}");
+    assert!(text.contains("Next action"), "{text}");
+    assert!(text.contains("Paths"), "{text}");
+    assert!(text.contains("c create source from current"), "{text}");
+    assert!(text.contains("tags available"), "{text}");
+}
+
+#[test]
+fn now_tab_syncs_current_wallpaper_written_by_external_rotation() {
+    let mut app = test_app();
+    app.tab = Tab::Now;
+    assert!(render_text(&app, 80, 24).contains("[empty] no current wallpaper"));
+
+    let original = app.ctx.paths.cache_dir.join("wallhaven-rotated.jpg");
+    let composed = app.ctx.paths.compose_dir.join("rotated.jpg");
+    fs::create_dir_all(&app.ctx.paths.cache_dir).expect("cache dir");
+    fs::create_dir_all(&app.ctx.paths.compose_dir).expect("compose dir");
+    fs::write(&original, b"original").expect("original image");
+    fs::write(&composed, b"composed").expect("composed image");
+    let mut external_state = app.ctx.state.clone();
+    external_state.current = Some(CurrentWall {
+        source_id: "rotated-source".into(),
+        wallhaven_id: Some("rotated".into()),
+        provider: Some("wallhaven".into()),
+        source_url: None,
+        author: None,
+        description: None,
+        original_path: original.display().to_string(),
+        composed_path: composed.display().to_string(),
+        post_filter_path: None,
+    });
+    external_state.cache_queue = vec!["next-up".into()];
+    external_state.history = vec![original.display().to_string()];
+    external_state
+        .save(&app.ctx.paths.state_file)
+        .expect("external rotation state");
+
+    assert!(app.sync_state_from_disk().expect("sync state"));
+
+    let text = render_text(&app, 80, 24);
+    assert!(text.contains("Now  rotated-source"), "{text}");
+    assert!(text.contains("queue 1"), "{text}");
+    assert!(text.contains("history 1"), "{text}");
+    assert!(text.contains("Wallhaven rotated"), "{text}");
 }
 
 #[test]
@@ -1469,8 +1527,32 @@ fn wide_now_layout_keeps_metadata_and_preview_regions_stable() {
     let text = render_text(&app, 120, 32);
 
     assert!(text.contains("Now"), "{text}");
-    assert!(text.contains("preview"), "{text}");
+    assert!(!text.contains("preview"), "{text}");
     assert!(text.contains("[empty] no current wallpaper"), "{text}");
+}
+
+#[cfg(feature = "tui-preview")]
+#[test]
+fn now_preview_split_tracks_current_frame_size() {
+    let mut app = test_app();
+    let original = app.ctx.paths.cache_dir.join("wallhaven-yqxev7.jpg");
+    let composed = app.ctx.paths.compose_dir.join("current.jpg");
+    fs::create_dir_all(&app.ctx.paths.cache_dir).expect("cache dir");
+    fs::create_dir_all(&app.ctx.paths.compose_dir).expect("compose dir");
+    fs::write(&original, b"original").expect("original image");
+    fs::write(&composed, b"composed").expect("composed image");
+    set_current_wall(&mut app, &original, &composed);
+    app.tab = Tab::Now;
+
+    let standard = render_text(&app, 90, 24);
+    assert!(standard.contains("Now"), "{standard}");
+    assert!(!standard.contains("preview"), "{standard}");
+    assert!(standard.contains("Paths"), "{standard}");
+
+    let wide = render_text(&app, 120, 32);
+    assert!(wide.contains("Now"), "{wide}");
+    assert!(wide.contains("preview"), "{wide}");
+    assert!(wide.contains("Paths"), "{wide}");
 }
 
 #[cfg(feature = "tui-preview")]
@@ -2017,6 +2099,55 @@ fn config_tui_block_edits_key_profile() {
 
     assert_eq!(app.ctx.config.tui.key_profile, TuiKeyProfile::Vim);
     assert!(app.message.contains("config saved"), "{}", app.message);
+}
+
+#[test]
+fn config_tui_block_edits_theme_without_reload() {
+    let mut app = test_app();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_TUI;
+
+    app.start_edit_for_current();
+    {
+        let field_buffer = "auto".to_string();
+        let editing = app.editing.as_mut().expect("editing");
+        editing.field_cursor = 1;
+        editing.field_buffer = field_buffer;
+    }
+    assert_eq!(app.editing.as_ref().expect("editing").field_buffer, "auto");
+    assert_eq!(
+        app.current_edit_field_kind(),
+        EditFieldKind::Choice(&[
+            "auto",
+            "plain",
+            "gruvbox",
+            "rose-pine",
+            "nord",
+            "catppuccin",
+            "tokyo-night",
+            "dracula",
+            "solarized-dark",
+            "solarized-light",
+            "everforest",
+            "kanagawa",
+            "monokai",
+            "one-dark",
+            "ayu-dark",
+            "github-dark"
+        ])
+    );
+
+    update(
+        &mut app,
+        UiAction::EditFieldCycle { forward: true },
+        rt.handle(),
+    )
+    .expect("cycle theme");
+
+    assert_eq!(app.ctx.config.tui.theme, TuiTheme::Plain);
+    assert!(app.message.contains("config saved"), "{}", app.message);
+    assert!(matches!(app.input_mode, InputMode::Normal));
 }
 
 #[test]

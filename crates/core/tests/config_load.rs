@@ -1,6 +1,7 @@
 use walls_core::config::load_config;
 use walls_core::config::SourceEntry;
 use walls_core::config::TuiKeyProfile;
+use walls_core::config::TuiTheme;
 use walls_core::providers::{configured_source_providers, ProviderKind};
 
 #[test]
@@ -12,6 +13,13 @@ fn loads_example_config() {
     assert!(cfg.change.enabled);
     assert_eq!(cfg.paths.cache_dir, "~/.local/share/walls/cache");
     assert_eq!(cfg.tui.key_profile, TuiKeyProfile::Emacs);
+    assert_eq!(cfg.tui.theme, TuiTheme::Auto);
+
+    let raw: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&root).expect("example config should be readable"),
+    )
+    .expect("example config should be json");
+    assert_eq!(raw["tui"]["theme"], "auto");
 
     // First-run defaults should be focused on sources that are immediately
     // useful, not a showcase list of every provider shape.

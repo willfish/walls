@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use walls_core::config::{ApplyBackendSetting, Config, CosmicMethod, TuiKeyProfile};
+use walls_core::config::{ApplyBackendSetting, Config, CosmicMethod, TuiKeyProfile, TuiTheme};
 
 use super::App;
 
@@ -43,6 +43,7 @@ pub(super) fn tui_draft(config: &Config) -> HashMap<String, String> {
         "key_profile".into(),
         tui_key_profile_label(config.tui.key_profile).into(),
     );
+    vals.insert("theme".into(), tui_theme_label(config.tui.theme).into());
     vals
 }
 
@@ -127,10 +128,53 @@ pub(super) fn tui_key_profile_label(profile: TuiKeyProfile) -> &'static str {
     }
 }
 
+pub(super) fn tui_theme_label(theme: TuiTheme) -> &'static str {
+    match theme {
+        TuiTheme::Auto => "auto",
+        TuiTheme::Plain => "plain",
+        TuiTheme::Gruvbox => "gruvbox",
+        TuiTheme::RosePine => "rose-pine",
+        TuiTheme::Nord => "nord",
+        TuiTheme::Catppuccin => "catppuccin",
+        TuiTheme::TokyoNight => "tokyo-night",
+        TuiTheme::Dracula => "dracula",
+        TuiTheme::SolarizedDark => "solarized-dark",
+        TuiTheme::SolarizedLight => "solarized-light",
+        TuiTheme::Everforest => "everforest",
+        TuiTheme::Kanagawa => "kanagawa",
+        TuiTheme::Monokai => "monokai",
+        TuiTheme::OneDark => "one-dark",
+        TuiTheme::AyuDark => "ayu-dark",
+        TuiTheme::GithubDark => "github-dark",
+    }
+}
+
 fn parse_tui_key_profile(value: &str) -> Option<TuiKeyProfile> {
     match value.trim().to_ascii_lowercase().as_str() {
         "emacs" | "default" => Some(TuiKeyProfile::Emacs),
         "vim" => Some(TuiKeyProfile::Vim),
+        _ => None,
+    }
+}
+
+fn parse_tui_theme(value: &str) -> Option<TuiTheme> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Some(TuiTheme::Auto),
+        "plain" => Some(TuiTheme::Plain),
+        "gruvbox" => Some(TuiTheme::Gruvbox),
+        "rose-pine" | "rosepine" | "rose_pine" => Some(TuiTheme::RosePine),
+        "nord" => Some(TuiTheme::Nord),
+        "catppuccin" => Some(TuiTheme::Catppuccin),
+        "tokyo-night" | "tokyonight" | "tokyo_night" => Some(TuiTheme::TokyoNight),
+        "dracula" => Some(TuiTheme::Dracula),
+        "solarized-dark" | "solarized_dark" | "solarizeddark" => Some(TuiTheme::SolarizedDark),
+        "solarized-light" | "solarized_light" | "solarizedlight" => Some(TuiTheme::SolarizedLight),
+        "everforest" => Some(TuiTheme::Everforest),
+        "kanagawa" => Some(TuiTheme::Kanagawa),
+        "monokai" => Some(TuiTheme::Monokai),
+        "one-dark" | "one_dark" | "onedark" => Some(TuiTheme::OneDark),
+        "ayu-dark" | "ayu_dark" | "ayudark" => Some(TuiTheme::AyuDark),
+        "github-dark" | "github_dark" | "githubdark" => Some(TuiTheme::GithubDark),
         _ => None,
     }
 }
@@ -189,6 +233,9 @@ pub(super) fn apply_tui_draft(config: &mut Config, draft: &HashMap<String, Strin
         .and_then(|v| parse_tui_key_profile(v))
     {
         config.tui.key_profile = profile;
+    }
+    if let Some(theme) = draft.get("theme").and_then(|v| parse_tui_theme(v)) {
+        config.tui.theme = theme;
     }
 }
 
