@@ -9,9 +9,9 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
-## [0.13.0] - 2026-06-10
+## [0.13.1] - 2026-06-14
 
-Consolidated release for the completed v0.10.0, v0.11.0, v0.12.0, and v0.13.0 milestone work.
+Reissued release for the completed v0.10.0, v0.11.0, v0.12.0, and v0.13.0 milestone work after moving the repository to rewritten linear conventional-commit history.
 
 ### Added
 
@@ -24,7 +24,7 @@ Consolidated release for the completed v0.10.0, v0.11.0, v0.12.0, and v0.13.0 mi
 
 ### Changed
 
-- Bumped workspace and packaged release version metadata to `0.13.0`.
+- Bumped workspace and packaged release version metadata to `0.13.1`.
 - Reworked documentation around user journeys, troubleshooting, README positioning, and the TUI-first project experience.
 
 ### Fixed
@@ -179,8 +179,8 @@ Initial share of the workspace (M1–M5 scaffold).
 - `systemd` user `walls.service` + `walls.timer`; Nix flake; CI (rustfmt, clippy, test, audit/deny, multi-arch Nix)
 - Example `config.json` / `secrets.json` and home-manager timer sketch
 
-[unreleased]: https://github.com/willfish/walls/compare/v0.13.0...HEAD
-[0.13.0]: https://github.com/willfish/walls/compare/v0.9.0...v0.13.0
+[unreleased]: https://github.com/willfish/walls/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/willfish/walls/releases/tag/v0.13.1
 [0.9.0]: https://github.com/willfish/walls/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/willfish/walls/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/willfish/walls/compare/v0.6.5...v0.7.0
