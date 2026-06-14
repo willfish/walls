@@ -87,6 +87,8 @@ pub fn run(startup_message: Option<String>, tray_owns_rotation: bool) -> anyhow:
                 if matches!(outcome, Ok(walls_core::rotation::TickOutcome::Rotated)) {
                     app.reload_ctx()?;
                 }
+            } else {
+                app.sync_state_from_disk()?;
             }
         }
         if event::poll(startup_intro.poll_interval())? {

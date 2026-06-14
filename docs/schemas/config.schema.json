@@ -158,7 +158,28 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "key_profile": { "type": "string", "enum": ["emacs", "vim"] }
+        "key_profile": { "type": "string", "enum": ["emacs", "vim"] },
+        "theme": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "plain",
+            "gruvbox",
+            "rose-pine",
+            "nord",
+            "catppuccin",
+            "tokyo-night",
+            "dracula",
+            "solarized-dark",
+            "solarized-light",
+            "everforest",
+            "kanagawa",
+            "monokai",
+            "one-dark",
+            "ayu-dark",
+            "github-dark"
+          ]
+        }
       }
     },
     "source": {

@@ -62,6 +62,8 @@ pub struct Config {
 pub struct TuiConfig {
     #[serde(default)]
     pub key_profile: TuiKeyProfile,
+    #[serde(default)]
+    pub theme: TuiTheme,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
@@ -71,6 +73,28 @@ pub enum TuiKeyProfile {
     #[serde(alias = "default")]
     Emacs,
     Vim,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum TuiTheme {
+    #[default]
+    Auto,
+    Plain,
+    Gruvbox,
+    RosePine,
+    Nord,
+    Catppuccin,
+    TokyoNight,
+    Dracula,
+    SolarizedDark,
+    SolarizedLight,
+    Everforest,
+    Kanagawa,
+    Monokai,
+    OneDark,
+    AyuDark,
+    GithubDark,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -364,6 +388,7 @@ fn default_strategy() -> SelectionStrategy {
 mod tests {
     use super::{
         load_config, save_config_atomic, Config, SelectionStrategy, SourceEntry, TuiKeyProfile,
+        TuiTheme,
     };
 
     fn test_config() -> Config {
@@ -451,6 +476,52 @@ mod tests {
         )
         .expect("deserialize legacy default key profile");
         assert_eq!(legacy.tui.key_profile, TuiKeyProfile::Emacs);
+    }
+
+    #[test]
+    fn tui_theme_defaults_and_round_trips_classic_presets() {
+        let mut config = test_config();
+        assert_eq!(config.tui.theme, TuiTheme::Auto);
+
+        for (theme, serialized) in [
+            (TuiTheme::Plain, "plain"),
+            (TuiTheme::Gruvbox, "gruvbox"),
+            (TuiTheme::RosePine, "rose-pine"),
+            (TuiTheme::Nord, "nord"),
+            (TuiTheme::Catppuccin, "catppuccin"),
+            (TuiTheme::TokyoNight, "tokyo-night"),
+            (TuiTheme::Dracula, "dracula"),
+            (TuiTheme::SolarizedDark, "solarized-dark"),
+            (TuiTheme::SolarizedLight, "solarized-light"),
+            (TuiTheme::Everforest, "everforest"),
+            (TuiTheme::Kanagawa, "kanagawa"),
+            (TuiTheme::Monokai, "monokai"),
+            (TuiTheme::OneDark, "one-dark"),
+            (TuiTheme::AyuDark, "ayu-dark"),
+            (TuiTheme::GithubDark, "github-dark"),
+        ] {
+            config.tui.theme = theme;
+            let value = serde_json::to_value(&config).expect("serialize config");
+            assert_eq!(value["tui"]["theme"], serialized);
+
+            let loaded: Config = serde_json::from_value(value).expect("deserialize config");
+            assert_eq!(loaded.tui.theme, theme);
+        }
+
+        let legacy: Config = serde_json::from_str(
+            r#"{
+                "paths": {
+                    "cache_dir": "/tmp/cache",
+                    "download_dir": "/tmp/downloads",
+                    "favorites_dir": "/tmp/favorites",
+                    "fetched_dir": "/tmp/fetched",
+                    "compose_dir": "/tmp/compose"
+                },
+                "tui": { "key_profile": "vim" }
+            }"#,
+        )
+        .expect("deserialize legacy config without theme");
+        assert_eq!(legacy.tui.theme, TuiTheme::Auto);
     }
 
     #[test]

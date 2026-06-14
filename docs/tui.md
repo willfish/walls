@@ -170,6 +170,7 @@ or deliberately defers it to a later focused slice.
 | `config.tray.accent` | Editable | Rotation edit form choice field. |
 | `config.tray.autostart.desktops.*` | Editable | Rotation edit form toggles the current desktop entry when supported. |
 | `config.tui.key_profile` | Editable | TUI edit form choice field for Emacs/Vim key profiles. |
+| `config.tui.theme` | Editable | TUI edit form choice field for classic colour themes; missing values fall back to the binary default. |
 | `config.sources[].enabled` | Editable | Source edit form boolean. |
 | `config.sources[].type` | Editable | Source edit form choice field for source kinds. |
 | `config.sources[].label` | Editable | Source edit form text field when the source kind persists labels. |
