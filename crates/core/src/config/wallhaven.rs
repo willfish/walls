@@ -34,6 +34,10 @@ pub struct WallhavenCollection {
 pub struct WallhavenSearch {
     #[serde(default = "default_query")]
     pub q: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub excluded_tags: Vec<String>,
     #[serde(default = "default_categories")]
     pub categories: String,
     #[serde(default = "default_purity")]
@@ -66,6 +70,8 @@ impl Default for WallhavenSearch {
     fn default() -> Self {
         Self {
             q: WALLHAVEN_DEFAULT_QUERY.into(),
+            required_tags: Vec::new(),
+            excluded_tags: Vec::new(),
             categories: default_categories(),
             purity: default_purity(),
             sorting: default_sorting(),
@@ -173,6 +179,8 @@ pub fn default_wallhaven_source() -> SourceEntry {
         label: None,
         path: None,
         query: Some(search.q),
+        required_tags: search.required_tags,
+        excluded_tags: search.excluded_tags,
         url: None,
         collection: None,
         user: None,
@@ -227,18 +235,10 @@ pub fn populate_wallhaven_source_defaults(source: &mut SourceEntry) {
     {
         source.order = Some(defaults.order);
     }
-    if source
-        .atleast
-        .as_deref()
-        .is_none_or(|value| value.trim().is_empty())
-    {
+    if source.atleast.is_none() {
         source.atleast = Some(defaults.atleast);
     }
-    if source
-        .ratios
-        .as_deref()
-        .is_none_or(|value| value.trim().is_empty())
-    {
+    if source.ratios.is_none() {
         source.ratios = Some(defaults.ratios);
     }
     if source.prefer.is_none() {
@@ -255,6 +255,8 @@ pub fn source_wallhaven_search(source: &SourceEntry) -> WallhavenSearch {
             .map(str::trim)
             .unwrap_or_default()
             .to_string(),
+        required_tags: normalize_wallhaven_tags(&source.required_tags),
+        excluded_tags: normalize_wallhaven_tags(&source.excluded_tags),
         categories: source
             .categories
             .as_deref()
@@ -286,17 +288,62 @@ pub fn source_wallhaven_search(source: &SourceEntry) -> WallhavenSearch {
         atleast: source
             .atleast
             .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or(&defaults.atleast)
+            .map_or(defaults.atleast.as_str(), str::trim)
             .to_string(),
         ratios: source
             .ratios
             .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or(&defaults.ratios)
+            .map_or(defaults.ratios.as_str(), str::trim)
             .to_string(),
+    }
+}
+
+pub fn normalize_wallhaven_tags(tags: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    tags.iter()
+        .map(|tag| tag.trim())
+        .filter(|tag| !tag.is_empty())
+        .filter(|tag| seen.insert(tag.to_ascii_lowercase()))
+        .map(str::to_string)
+        .collect()
+}
+
+pub fn wallhaven_effective_query(search: &WallhavenSearch) -> String {
+    let mut parts = Vec::new();
+    let raw_query = search.q.trim();
+    if !raw_query.is_empty() {
+        parts.push(raw_query.to_string());
+    }
+    parts.extend(
+        normalize_wallhaven_tags(&search.required_tags)
+            .iter()
+            .filter_map(|tag| wallhaven_required_tag_query_part(tag)),
+    );
+    parts.extend(
+        normalize_wallhaven_tags(&search.excluded_tags)
+            .iter()
+            .filter_map(|tag| wallhaven_excluded_tag_query_part(tag)),
+    );
+    parts.join(" ")
+}
+
+pub fn wallhaven_required_tag_query_part(name: &str) -> Option<String> {
+    wallhaven_tag_query_part("+", name)
+}
+
+pub fn wallhaven_excluded_tag_query_part(name: &str) -> Option<String> {
+    wallhaven_tag_query_part("-", name)
+}
+
+fn wallhaven_tag_query_part(prefix: &str, name: &str) -> Option<String> {
+    let tag = name.trim();
+    if tag.is_empty() {
+        return None;
+    }
+    if tag.chars().any(char::is_whitespace) {
+        Some(format!("{prefix}\"{}\"", tag.replace('"', "\\\"")))
+    } else {
+        Some(format!("{prefix}{tag}"))
     }
 }
 
@@ -422,6 +469,20 @@ mod tests {
         };
 
         assert_eq!(source_wallhaven_search(&source).q, "");
+    }
+
+    #[test]
+    fn blank_source_ratio_and_resolution_build_empty_search_filters() {
+        let source = crate::config::SourceEntry {
+            source_type: "wallhaven".into(),
+            ratios: Some("   ".into()),
+            atleast: Some("   ".into()),
+            ..default_wallhaven_source()
+        };
+        let search = source_wallhaven_search(&source);
+
+        assert_eq!(search.ratios, "");
+        assert_eq!(search.atleast, "");
     }
 
     #[test]

@@ -23,6 +23,7 @@ pub(crate) enum UiAction {
     Prev,
     Favorite,
     Trash,
+    CreateSourceFromCurrent,
     OpenSelected,
     TrashConfirm,
     CancelTrash,
@@ -45,6 +46,18 @@ pub(crate) enum UiAction {
     EditFieldCycle {
         forward: bool,
     },
+    TagListEnter,
+    TagListExit,
+    TagListMove {
+        forward: bool,
+    },
+    TagListDelete,
+    TagListAdd,
+    TagListEdit,
+    TagInputChar(char),
+    TagInputBackspace,
+    TagInputCommit,
+    TagInputCancel,
     ExitConfigSubnav,
     #[allow(dead_code)]
     SaveEditItem,
@@ -146,6 +159,35 @@ pub(crate) fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
     // n/p etc also type (disabled for globals).
     // Enter = commit buffer for current field + persist/save the item (no separate save key; "enter ... should just save the config").
     if app.is_editing() {
+        if matches!(app.current_edit_field_kind(), app::EditFieldKind::TagList) {
+            if app.tag_input_active() {
+                return match key.code {
+                    KeyCode::Esc => UiAction::TagInputCancel,
+                    KeyCode::Enter => UiAction::TagInputCommit,
+                    KeyCode::Backspace => UiAction::TagInputBackspace,
+                    KeyCode::Char(c) => UiAction::TagInputChar(c),
+                    _ => UiAction::Ignore,
+                };
+            }
+            if app.tag_editor_active() {
+                return match key.code {
+                    KeyCode::Esc => UiAction::TagListExit,
+                    KeyCode::Left => UiAction::TagListMove { forward: false },
+                    KeyCode::Right => UiAction::TagListMove { forward: true },
+                    KeyCode::Char('x') => UiAction::TagListDelete,
+                    KeyCode::Char('a') => UiAction::TagListAdd,
+                    KeyCode::Char('e') => UiAction::TagListEdit,
+                    _ => UiAction::Ignore,
+                };
+            }
+            return match key.code {
+                KeyCode::Enter => UiAction::TagListEnter,
+                KeyCode::Up => UiAction::EditFieldUp,
+                KeyCode::Down => UiAction::EditFieldDown,
+                KeyCode::Esc => UiAction::CancelEdit,
+                _ => UiAction::Ignore,
+            };
+        }
         return match key.code {
             KeyCode::Up => UiAction::EditFieldUp,
             KeyCode::Down => UiAction::EditFieldDown,
@@ -188,6 +230,7 @@ pub(crate) fn action_for_key(app: &App, key: KeyEvent) -> UiAction {
         KeyCode::Char('p') => UiAction::Prev,
         KeyCode::Char('f') => UiAction::Favorite,
         KeyCode::Char('d') => UiAction::Trash,
+        KeyCode::Char('c') if app.tab == Tab::Now => UiAction::CreateSourceFromCurrent,
         KeyCode::Char('o') => UiAction::OpenSelected,
         _ if is_shift_x(key) => UiAction::NukeDownloadsRequest,
         KeyCode::Char(' ') => UiAction::TogglePause,
@@ -323,6 +366,16 @@ pub(crate) fn update(
             Err(e) => app.set_message(
                 style::StatusKind::Error,
                 crate::recovery::favorite_error(&e),
+            ),
+        },
+        UiAction::CreateSourceFromCurrent => match app.add_wallhaven_source_from_current(rt) {
+            Ok((message, kind)) => {
+                app.set_message(kind, message);
+                return Ok(UpdateEffect::Reload);
+            }
+            Err(error) => app.set_message(
+                style::StatusKind::Error,
+                format!("source from-current error: {error}"),
             ),
         },
         UiAction::OpenSelected => match open_selected(app) {
@@ -463,6 +516,16 @@ pub(crate) fn update(
                 app.refresh_edit_validation();
             }
         }
+        UiAction::TagListEnter => app.enter_tag_editor(),
+        UiAction::TagListExit => app.exit_tag_editor(),
+        UiAction::TagListMove { forward } => app.move_tag_cursor(forward),
+        UiAction::TagListDelete => app.delete_current_tag(),
+        UiAction::TagListAdd => app.begin_add_tag(),
+        UiAction::TagListEdit => app.begin_edit_tag(),
+        UiAction::TagInputChar(c) => app.tag_input_char(c),
+        UiAction::TagInputBackspace => app.tag_input_backspace(),
+        UiAction::TagInputCommit => app.commit_tag_input(),
+        UiAction::TagInputCancel => app.cancel_tag_input(),
         UiAction::EditFieldCycle { forward } => {
             app.cycle_current_edit_field(forward);
         }
@@ -500,6 +563,7 @@ pub(crate) fn update(
                     sess.field_cursor -= 1;
                 }
                 sess.field_buffer = buf;
+                sess.tag_editor = None;
             }
         }
         UiAction::EditFieldDown => {
@@ -517,6 +581,7 @@ pub(crate) fn update(
                     sess.field_cursor += 1;
                 }
                 sess.field_buffer = buf;
+                sess.tag_editor = None;
             }
         }
         UiAction::SaveEditItem => {

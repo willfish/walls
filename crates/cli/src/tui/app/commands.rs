@@ -38,6 +38,7 @@ impl App {
                 Ok(msg) => (msg, StatusKind::Success),
                 Err(e) => (crate::recovery::favorite_error(&e), StatusKind::Error),
             },
+            ParsedCommand::SourceFromCurrent => self.add_wallhaven_source_from_current(rt)?,
             ParsedCommand::Status => (
                 format!(
                     "paused={} history={} queue={}",
@@ -51,7 +52,7 @@ impl App {
             ParsedCommand::Empty => ("(empty command)".into(), StatusKind::Warning),
             ParsedCommand::Unknown(other) => (
                 format!(
-                    "unknown command: {other} (try :next :prev :pause :favorite :status :quit)"
+                    "unknown command: {other} (try :next :prev :pause :favorite :source from-current :status :quit)"
                 ),
                 StatusKind::Error,
             ),

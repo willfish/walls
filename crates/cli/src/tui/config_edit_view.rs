@@ -154,6 +154,9 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
             let val = if i == sess.field_cursor {
                 match kind {
                     app::EditFieldKind::Text => format!("{}|", sess.field_buffer),
+                    app::EditFieldKind::TagList => app
+                        .tag_editor_display_value()
+                        .unwrap_or_else(|| format!("{}  (Enter tags)", sess.field_buffer)),
                     app::EditFieldKind::Bool | app::EditFieldKind::Choice(_) => format!(
                         "‹ {} ›",
                         if let Some(src) = &sess.draft_source {

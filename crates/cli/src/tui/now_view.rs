@@ -5,9 +5,10 @@ pub(crate) fn lines(app: &App) -> Vec<String> {
     let mut lines = match &app.ctx.state.current {
         Some(c) => vec![
             format!("source: {}", c.source_id),
-            format!("wallhaven: {:?}", c.wallhaven_id),
+            wallhaven_line(c.wallhaven_id.as_deref()),
             format!("original: {}", c.original_path),
             format!("composed: {}", c.composed_path),
+            source_from_current_hint(c.wallhaven_id.as_deref()).unwrap_or_default(),
             app.message.clone(),
         ],
         None => vec![
@@ -17,6 +18,24 @@ pub(crate) fn lines(app: &App) -> Vec<String> {
     };
     lines.extend(last_run_lines(app));
     lines
+}
+
+fn wallhaven_line(wallhaven_id: Option<&str>) -> String {
+    match wallhaven_id {
+        Some(id) if !id.trim().is_empty() => format!("wallhaven: {id}"),
+        _ => "wallhaven: (none)".into(),
+    }
+}
+
+fn source_from_current_hint(wallhaven_id: Option<&str>) -> Option<String> {
+    let id = wallhaven_id?.trim();
+    if id.is_empty() {
+        return None;
+    }
+
+    Some(format!(
+        "hint: :source from-current fetches Wallhaven tags to create a source from {id}"
+    ))
 }
 
 fn last_run_lines(app: &App) -> Vec<String> {

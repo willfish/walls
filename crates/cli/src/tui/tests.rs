@@ -8,8 +8,11 @@ use ratatui::Terminal;
 use walls_core::config::{ApplyBackendSetting, CosmicMethod, TuiKeyProfile};
 use walls_core::state::CurrentWall;
 use walls_core::WallsCtx;
+use wiremock::matchers::{header, method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 static TUI_LOG_TEST_LOCK: Mutex<()> = Mutex::new(());
+static WALLHAVEN_API_BASE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 use super::{
     action_for_key,
@@ -55,6 +58,26 @@ fn set_current_wall(app: &mut App, original: &std::path::Path, composed: &std::p
     app.ctx.state.history = vec![original.display().to_string()];
     app.ctx.state.cache_queue = vec!["wh-current".into()];
     app.ctx.save_state().expect("save current state");
+}
+
+async fn mount_wallhaven_current_tags(server: &MockServer, api_key: &str, wallhaven_id: &str) {
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/w/{wallhaven_id}")))
+        .and(header("X-API-Key", api_key))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": {
+                "id": wallhaven_id,
+                "path": format!("{}/wallhaven-{wallhaven_id}.jpg", server.uri()),
+                "tags": [
+                    { "id": 1, "name": "blue eyes", "purity": "sfw" },
+                    { "id": 2, "name": "skirt", "purity": "sfw" },
+                    { "id": 3, "name": "sea", "purity": "sfw" },
+                    { "id": 4, "name": "girls with guns", "purity": "sketchy" }
+                ]
+            }
+        })))
+        .mount(server)
+        .await;
 }
 
 fn write_tui_journal(app: &App, events: &[serde_json::Value]) {
@@ -996,7 +1019,12 @@ fn narrow_normal_footer_keeps_same_key_group_ordering() {
         assert!(!footer.starts_with("1 Config"), "{tab:?}: {footer}");
         assert!(!footer.starts_with("5 Search"), "{tab:?}: {footer}");
         assert!(!footer.starts_with("6 Logs"), "{tab:?}: {footer}");
-        assert!(footer.contains(":?q"), "{tab:?}: {footer}");
+        if tab == Tab::Now {
+            assert!(footer.contains("?q"), "{tab:?}: {footer}");
+            assert!(!footer.contains(':'), "{tab:?}: {footer}");
+        } else {
+            assert!(footer.contains(":?q"), "{tab:?}: {footer}");
+        }
     }
 
     app.tab = Tab::Config;
@@ -1385,6 +1413,53 @@ fn standard_layout_keeps_full_key_row_visible() {
     assert!(text.contains("1-6/←/→ tabs"), "{text}");
 }
 
+#[test]
+fn now_tab_hints_source_from_current_for_wallhaven_current() {
+    let mut app = test_app();
+    let original = app.ctx.paths.cache_dir.join("wallhaven-yqxev7.jpg");
+    let composed = app.ctx.paths.compose_dir.join("current.jpg");
+    fs::create_dir_all(&app.ctx.paths.cache_dir).expect("cache dir");
+    fs::create_dir_all(&app.ctx.paths.compose_dir).expect("compose dir");
+    fs::write(&original, b"original").expect("original image");
+    fs::write(&composed, b"composed").expect("composed image");
+    set_current_wall(&mut app, &original, &composed);
+    app.ctx.state.current.as_mut().unwrap().wallhaven_id = Some("yqxev7".into());
+    app.ctx.state.current.as_mut().unwrap().provider = Some("wallhaven".into());
+    app.tab = Tab::Now;
+
+    let text = render_text(&app, 80, 24);
+
+    assert!(text.contains(":source from-current"), "{text}");
+    assert!(
+        text.contains("fetches Wallhaven tags to create a source"),
+        "{text}"
+    );
+}
+
+#[test]
+fn now_footer_focuses_current_wallpaper_actions() {
+    let mut app = test_app();
+    let original = app.ctx.paths.cache_dir.join("wallhaven-yqxev7.jpg");
+    let composed = app.ctx.paths.compose_dir.join("current.jpg");
+    fs::create_dir_all(&app.ctx.paths.cache_dir).expect("cache dir");
+    fs::create_dir_all(&app.ctx.paths.compose_dir).expect("compose dir");
+    fs::write(&original, b"original").expect("original image");
+    fs::write(&composed, b"composed").expect("composed image");
+    set_current_wall(&mut app, &original, &composed);
+    app.ctx.state.current.as_mut().unwrap().wallhaven_id = Some("yqxev7".into());
+    app.tab = Tab::Now;
+
+    let footer = app.footer_keys();
+
+    assert!(footer.contains("o open"), "{footer}");
+    assert!(footer.contains("f favorite"), "{footer}");
+    assert!(footer.contains("d trash"), "{footer}");
+    assert!(footer.contains("c create source"), "{footer}");
+    assert!(!footer.contains("n/p"), "{footer}");
+    assert!(!footer.contains("Shift+X"), "{footer}");
+    assert!(!footer.contains("space pause"), "{footer}");
+}
+
 #[cfg(feature = "tui-preview")]
 #[test]
 fn wide_now_layout_keeps_metadata_and_preview_regions_stable() {
@@ -1607,6 +1682,8 @@ fn wallhaven_source_open_target_uses_effective_broadened_search() {
         key,
         walls_core::config::WallhavenSearch {
             q: "mountain lake".into(),
+            required_tags: Vec::new(),
+            excluded_tags: Vec::new(),
             categories: "100".into(),
             purity: "100".into(),
             sorting: "random".into(),
@@ -2131,6 +2208,131 @@ fn command_favorite_alias_runs_through_dispatch() {
 }
 
 #[test]
+fn command_source_from_current_creates_wallhaven_tag_source() {
+    let _guard = WALLHAVEN_API_BASE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let server = rt.block_on(MockServer::start());
+    let mut app = test_app();
+    std::env::set_var("WALLHAVEN_API_BASE", server.uri());
+    app.ctx.secrets.wallhaven_api_key = "key".into();
+    let original = app.ctx.paths.cache_dir.join("wallhaven-yqxev7.jpg");
+    let composed = app.ctx.paths.compose_dir.join("current.jpg");
+    fs::create_dir_all(&app.ctx.paths.cache_dir).expect("cache dir");
+    fs::create_dir_all(&app.ctx.paths.compose_dir).expect("compose dir");
+    fs::write(&original, b"wall").expect("original");
+    fs::write(&composed, b"wall").expect("composed");
+    set_current_wall(&mut app, &original, &composed);
+    app.ctx.state.current.as_mut().unwrap().wallhaven_id = Some("yqxev7".into());
+    app.ctx.state.current.as_mut().unwrap().provider = Some("wallhaven".into());
+    app.ctx.save_state().expect("save state");
+    app.cmd_line = "source from-current".into();
+    rt.block_on(mount_wallhaven_current_tags(&server, "key", "yqxev7"));
+
+    let (message, kind) = app
+        .run_command(rt.handle())
+        .expect("run command")
+        .expect("message");
+
+    assert_eq!(kind, style::StatusKind::Success);
+    assert_eq!(
+        message,
+        "source added: Wallhaven tags +\"blue eyes\" +skirt +sea"
+    );
+    let source = app
+        .ctx
+        .config
+        .sources
+        .last()
+        .expect("derived wallhaven source");
+    assert!(source.enabled);
+    assert_eq!(source.source_type, "wallhaven");
+    assert_eq!(source.label.as_deref(), None);
+    assert_eq!(source.query.as_deref(), Some(""));
+    assert_eq!(source.required_tags, vec!["blue eyes", "skirt", "sea"]);
+    assert!(source.excluded_tags.is_empty());
+    assert_eq!(source.atleast.as_deref(), Some(""));
+    assert_eq!(source.ratios.as_deref(), Some(""));
+    assert_eq!(
+        source.prefer,
+        Some(walls_core::config::WallhavenPrefer::SearchOnly)
+    );
+
+    let saved = fs::read_to_string(&app.ctx.paths.config_file).expect("saved config");
+    assert!(
+        saved.contains("\"required_tags\": [\n        \"blue eyes\",\n        \"skirt\",\n        \"sea\"\n      ]"),
+        "{saved}"
+    );
+}
+
+#[test]
+fn now_c_key_creates_wallhaven_tag_source_from_current() {
+    let _guard = WALLHAVEN_API_BASE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let server = rt.block_on(MockServer::start());
+    let mut app = test_app();
+    std::env::set_var("WALLHAVEN_API_BASE", server.uri());
+    app.ctx.secrets.wallhaven_api_key = "key".into();
+    let original = app.ctx.paths.cache_dir.join("wallhaven-yqxev7.jpg");
+    let composed = app.ctx.paths.compose_dir.join("current.jpg");
+    fs::create_dir_all(&app.ctx.paths.cache_dir).expect("cache dir");
+    fs::create_dir_all(&app.ctx.paths.compose_dir).expect("compose dir");
+    fs::write(&original, b"wall").expect("original");
+    fs::write(&composed, b"wall").expect("composed");
+    set_current_wall(&mut app, &original, &composed);
+    app.ctx.state.current.as_mut().unwrap().wallhaven_id = Some("yqxev7".into());
+    app.ctx.state.current.as_mut().unwrap().provider = Some("wallhaven".into());
+    app.ctx.save_state().expect("save state");
+    app.tab = Tab::Now;
+    rt.block_on(mount_wallhaven_current_tags(&server, "key", "yqxev7"));
+
+    let action = action_for_key(&app, KeyEvent::from(KeyCode::Char('c')));
+    let effect = update(&mut app, action, rt.handle()).expect("create source from current");
+
+    assert_eq!(action, UiAction::CreateSourceFromCurrent);
+    assert_eq!(effect, UpdateEffect::Reload);
+    assert_eq!(app.message_kind, style::StatusKind::Success);
+    assert_eq!(
+        app.message,
+        "source added: Wallhaven tags +\"blue eyes\" +skirt +sea"
+    );
+    let source = app
+        .ctx
+        .config
+        .sources
+        .last()
+        .expect("derived wallhaven source");
+    assert_eq!(source.source_type, "wallhaven");
+    assert_eq!(source.query.as_deref(), Some(""));
+    assert_eq!(source.required_tags, vec!["blue eyes", "skirt", "sea"]);
+    assert!(source.excluded_tags.is_empty());
+    assert_eq!(source.atleast.as_deref(), Some(""));
+    assert_eq!(source.ratios.as_deref(), Some(""));
+}
+
+#[test]
+fn command_source_from_current_requires_wallhaven_current() {
+    let mut app = test_app();
+    app.cmd_line = "source from-current".into();
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+
+    let (message, kind) = app
+        .run_command(rt.handle())
+        .expect("run command")
+        .expect("message");
+
+    assert_eq!(kind, style::StatusKind::Warning);
+    assert_eq!(
+        message,
+        "source from-current: current wallpaper has no Wallhaven id"
+    );
+    assert_eq!(app.ctx.config.sources.len(), 1);
+}
+
+#[test]
 fn list_jump_keys_translate_only_in_normal_mode() {
     let mut app = test_app();
 
@@ -2640,6 +2842,8 @@ fn sources_a_adds_wallhaven_query_source_without_label_and_opens_edit() {
         vec![
             "enabled",
             "query",
+            "required_tags",
+            "excluded_tags",
             "category_general",
             "category_anime",
             "category_people",
@@ -2666,6 +2870,8 @@ fn sources_a_adds_wallhaven_query_source_without_label_and_opens_edit() {
     assert!(text.contains("Edit Source"), "{text}");
     assert!(text.contains("Wallhaven space"), "{text}");
     assert!(text.contains("Search query"), "{text}");
+    assert!(text.contains("Required tags"), "{text}");
+    assert!(text.contains("Excluded tags"), "{text}");
     assert!(text.contains("Aspect ratio"), "{text}");
     assert!(text.contains("Minimum resolution"), "{text}");
     assert!(text.contains("Broaden below"), "{text}");
@@ -2745,6 +2951,164 @@ fn wallhaven_source_edit_persists_collection_entries() {
     let form = render_text(&app, 100, 28);
     assert!(form.contains("!! Validation errors"), "{form}");
     assert!(form.contains("collections[0].id"), "{form}");
+}
+
+#[test]
+fn wallhaven_source_edit_persists_required_and_excluded_tags() {
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [
+                {
+                    "enabled": true,
+                    "type": "wallhaven",
+                    "query": "",
+                    "required_tags": ["Machinarium", "robot"],
+                    "excluded_tags": ["anime"]
+                }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.start_edit_for_current();
+
+    let fields = app
+        .editing
+        .as_ref()
+        .and_then(|session| session.draft_source.as_ref())
+        .map(App::source_editable_fields)
+        .expect("draft source fields");
+    let required_idx = fields
+        .iter()
+        .position(|field| field == "required_tags")
+        .expect("required tags field");
+    let excluded_idx = fields
+        .iter()
+        .position(|field| field == "excluded_tags")
+        .expect("excluded tags field");
+
+    {
+        let editing = app.editing.as_mut().expect("editing");
+        editing.field_cursor = required_idx;
+        editing.field_buffer = "Machinarium, robot, video game art".into();
+    }
+    app.commit_edit_field_buffer();
+    {
+        let editing = app.editing.as_mut().expect("editing");
+        editing.field_cursor = excluded_idx;
+        editing.field_buffer = "anime, lowres".into();
+    }
+    app.commit_edit_field_buffer();
+    app.save_edit_item(false).expect("save tag edit");
+
+    let source = &app.ctx.config.sources[0];
+    assert_eq!(
+        source.required_tags,
+        vec!["Machinarium", "robot", "video game art"]
+    );
+    assert_eq!(source.excluded_tags, vec!["anime", "lowres"]);
+    assert_eq!(
+        walls_core::config::wallhaven_effective_query(
+            &walls_core::config::source_wallhaven_search(source)
+        ),
+        "+Machinarium +robot +\"video game art\" -anime -lowres"
+    );
+    let text = fs::read_to_string(&app.ctx.paths.config_file).expect("config json");
+    assert!(text.contains("\"required_tags\""), "{text}");
+    assert!(text.contains("\"excluded_tags\""), "{text}");
+}
+
+#[test]
+fn wallhaven_tag_fields_edit_individual_tags() {
+    let rt = tokio::runtime::Runtime::new().expect("rt");
+    let mut app = test_app_with_config(
+        serde_json::json!({
+            "change": { "enabled": true, "internet_enabled": true },
+            "paths": { "cache_dir": "/tmp/c", "download_dir": "/tmp/d", "favorites_dir": "/tmp/f", "fetched_dir": "/tmp/fe", "compose_dir": "/tmp/co" },
+            "sources": [
+                {
+                    "enabled": true,
+                    "type": "wallhaven",
+                    "query": "",
+                    "required_tags": ["Machinarium", "robot"],
+                    "excluded_tags": ["anime", "lowres"]
+                }
+            ]
+        }),
+        serde_json::json!({}),
+    );
+    app.tab = Tab::Config;
+    app.config_cursor = CONFIG_BLOCK_SOURCES;
+    app.start_edit_for_current();
+
+    let fields = app
+        .editing
+        .as_ref()
+        .and_then(|session| session.draft_source.as_ref())
+        .map(App::source_editable_fields)
+        .expect("draft source fields");
+    let required_idx = fields
+        .iter()
+        .position(|field| field == "required_tags")
+        .expect("required tags field");
+    let excluded_idx = fields
+        .iter()
+        .position(|field| field == "excluded_tags")
+        .expect("excluded tags field");
+    {
+        let editing = app.editing.as_mut().expect("editing");
+        editing.field_cursor = required_idx;
+        editing.field_buffer = "Machinarium, robot".into();
+    }
+
+    handle_key(&mut app, KeyEvent::from(KeyCode::Enter), rt.handle()).expect("enter tag list");
+    handle_key(&mut app, KeyEvent::from(KeyCode::Right), rt.handle()).expect("select robot");
+    handle_key(&mut app, KeyEvent::from(KeyCode::Char('x')), rt.handle()).expect("delete robot");
+
+    assert_eq!(app.ctx.config.sources[0].required_tags, vec!["Machinarium"]);
+
+    handle_key(&mut app, KeyEvent::from(KeyCode::Char('a')), rt.handle()).expect("add tag");
+    for c in "video game art".chars() {
+        handle_key(&mut app, KeyEvent::from(KeyCode::Char(c)), rt.handle()).expect("type tag");
+    }
+    handle_key(&mut app, KeyEvent::from(KeyCode::Enter), rt.handle()).expect("commit added tag");
+
+    assert_eq!(
+        app.ctx.config.sources[0].required_tags,
+        vec!["Machinarium", "video game art"]
+    );
+
+    handle_key(&mut app, KeyEvent::from(KeyCode::Char('e')), rt.handle()).expect("edit tag");
+    for _ in 0..3 {
+        handle_key(&mut app, KeyEvent::from(KeyCode::Backspace), rt.handle()).expect("trim tag");
+    }
+    for c in "illustration".chars() {
+        handle_key(&mut app, KeyEvent::from(KeyCode::Char(c)), rt.handle()).expect("type edit");
+    }
+    handle_key(&mut app, KeyEvent::from(KeyCode::Enter), rt.handle()).expect("commit edit");
+
+    assert_eq!(
+        app.ctx.config.sources[0].required_tags,
+        vec!["Machinarium", "video game illustration"]
+    );
+
+    handle_key(&mut app, KeyEvent::from(KeyCode::Esc), rt.handle()).expect("leave tag list");
+    {
+        let editing = app.editing.as_mut().expect("editing");
+        editing.field_cursor = excluded_idx;
+        editing.field_buffer = "anime, lowres".into();
+    }
+    handle_key(&mut app, KeyEvent::from(KeyCode::Enter), rt.handle()).expect("enter excluded list");
+    handle_key(&mut app, KeyEvent::from(KeyCode::Char('x')), rt.handle()).expect("delete anime");
+
+    assert_eq!(app.ctx.config.sources[0].excluded_tags, vec!["lowres"]);
+    let form = render_text(&app, 100, 30);
+    assert!(form.contains("x delete"), "{form}");
+    assert!(form.contains("a add"), "{form}");
+    assert!(form.contains("e edit"), "{form}");
 }
 
 #[test]
@@ -2830,6 +3194,8 @@ fn wallhaven_source_edit_shows_broadened_search_notice() {
         key,
         walls_core::config::WallhavenSearch {
             q: "nebula".into(),
+            required_tags: Vec::new(),
+            excluded_tags: Vec::new(),
             categories: "111".into(),
             purity: "100".into(),
             sorting: "random".into(),

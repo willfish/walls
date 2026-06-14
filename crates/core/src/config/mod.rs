@@ -30,10 +30,11 @@ pub use source_schema::{
 };
 pub use unsplash::UnsplashSourceConfig;
 pub use wallhaven::{
-    default_wallhaven_source, source_wallhaven_prefer, source_wallhaven_search,
-    wallhaven_ratio_choices, wallhaven_ratio_supported, wallhaven_resolution_choices,
-    wallhaven_resolution_supported, WallhavenCollection, WallhavenPrefer, WallhavenSearch,
-    WALLHAVEN_DEFAULT_QUERY, WALLHAVEN_FALLBACK_RESOLUTION,
+    default_wallhaven_source, normalize_wallhaven_tags, source_wallhaven_prefer,
+    source_wallhaven_search, wallhaven_effective_query, wallhaven_excluded_tag_query_part,
+    wallhaven_ratio_choices, wallhaven_ratio_supported, wallhaven_required_tag_query_part,
+    wallhaven_resolution_choices, wallhaven_resolution_supported, WallhavenCollection,
+    WallhavenPrefer, WallhavenSearch, WALLHAVEN_DEFAULT_QUERY, WALLHAVEN_FALLBACK_RESOLUTION,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -169,6 +170,10 @@ pub struct SourceEntry {
     pub path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub excluded_tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -34,3 +34,4 @@ portable-pty = "0.9"
 predicates = "3"
 serde_json.workspace = true
 tempfile = "3"
+wiremock = "0.6"

@@ -1,4 +1,12 @@
-pub(crate) const COMPLETIONS: &[&str] = &["next", "prev", "pause", "favorite", "status", "quit"];
+pub(crate) const COMPLETIONS: &[&str] = &[
+    "next",
+    "prev",
+    "pause",
+    "favorite",
+    "source from-current",
+    "status",
+    "quit",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ParsedCommand<'a> {
@@ -6,6 +14,7 @@ pub(crate) enum ParsedCommand<'a> {
     Prev,
     TogglePause,
     Favorite,
+    SourceFromCurrent,
     Status,
     Quit,
     Empty,
@@ -19,6 +28,7 @@ impl<'a> ParsedCommand<'a> {
             "prev" | "p" => Self::Prev,
             "pause" | "toggle-pause" => Self::TogglePause,
             "favorite" | "fav" | "f" => Self::Favorite,
+            "source from-current" => Self::SourceFromCurrent,
             "status" => Self::Status,
             "quit" | "q" => Self::Quit,
             "" => Self::Empty,
@@ -65,6 +75,10 @@ mod tests {
         assert_eq!(ParsedCommand::parse("fav"), ParsedCommand::Favorite);
         assert_eq!(ParsedCommand::parse("f"), ParsedCommand::Favorite);
         assert_eq!(ParsedCommand::parse("status"), ParsedCommand::Status);
+        assert_eq!(
+            ParsedCommand::parse("source from-current"),
+            ParsedCommand::SourceFromCurrent
+        );
         assert_eq!(ParsedCommand::parse("quit"), ParsedCommand::Quit);
         assert_eq!(ParsedCommand::parse("q"), ParsedCommand::Quit);
     }

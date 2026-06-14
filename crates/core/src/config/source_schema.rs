@@ -83,6 +83,8 @@ pub fn source_config_fields(source_type: &str) -> &'static [&'static str] {
             "enabled",
             "type",
             "query",
+            "required_tags",
+            "excluded_tags",
             "categories",
             "purity",
             "sorting",
@@ -128,6 +130,8 @@ pub fn source_editable_fields(entry: &SourceEntry) -> Vec<&'static str> {
         SourceKind::Wallhaven => vec![
             "enabled",
             "query",
+            "required_tags",
+            "excluded_tags",
             "category_general",
             "category_anime",
             "category_people",
@@ -150,13 +154,14 @@ pub fn source_editable_fields(entry: &SourceEntry) -> Vec<&'static str> {
 
 /// Whether an allowed source field should preserve an explicitly empty string.
 ///
-/// Most source fields use empty input to clear an optional JSON key. Wallhaven's
-/// query is different: an empty query means "search Wallhaven using filters
-/// only", so it must survive edits and normalization as `""`.
+/// Most source fields use empty input to clear an optional JSON key. Some
+/// Wallhaven fields use empty values as active search choices: an empty query
+/// means "search using filters only", and empty ratio/resolution means "send no
+/// aspect ratio or minimum resolution constraint".
 pub fn source_field_preserves_blank(source_type: &str, key: &str) -> bool {
     matches!(
         (SourceKind::parse(source_type), key),
-        (SourceKind::Wallhaven, "query")
+        (SourceKind::Wallhaven, "query" | "atleast" | "ratios")
     )
 }
 
@@ -179,6 +184,16 @@ pub fn normalize_source_entry(entry: &mut SourceEntry) {
     } else {
         normalize_optional_field(&allowed, "query", &mut entry.query);
     }
+    if allowed.contains("required_tags") {
+        entry.required_tags = super::wallhaven::normalize_wallhaven_tags(&entry.required_tags);
+    } else {
+        entry.required_tags.clear();
+    }
+    if allowed.contains("excluded_tags") {
+        entry.excluded_tags = super::wallhaven::normalize_wallhaven_tags(&entry.excluded_tags);
+    } else {
+        entry.excluded_tags.clear();
+    }
     normalize_optional_field(&allowed, "url", &mut entry.url);
     normalize_optional_field(&allowed, "collection", &mut entry.collection);
     normalize_optional_field(&allowed, "user", &mut entry.user);
@@ -194,8 +209,16 @@ pub fn normalize_source_entry(entry: &mut SourceEntry) {
     normalize_optional_field(&allowed, "purity", &mut entry.purity);
     normalize_optional_field(&allowed, "sorting", &mut entry.sorting);
     normalize_optional_field(&allowed, "order", &mut entry.order);
-    normalize_optional_field(&allowed, "atleast", &mut entry.atleast);
-    normalize_optional_field(&allowed, "ratios", &mut entry.ratios);
+    if source_field_preserves_blank(&entry.source_type, "atleast") && allowed.contains("atleast") {
+        normalize_blank_preserving_field(&mut entry.atleast);
+    } else {
+        normalize_optional_field(&allowed, "atleast", &mut entry.atleast);
+    }
+    if source_field_preserves_blank(&entry.source_type, "ratios") && allowed.contains("ratios") {
+        normalize_blank_preserving_field(&mut entry.ratios);
+    } else {
+        normalize_optional_field(&allowed, "ratios", &mut entry.ratios);
+    }
     if !allowed.contains("prefer") {
         entry.prefer = None;
     }
@@ -345,6 +368,8 @@ mod tests {
             source_type: "wallhaven".into(),
             label: Some("Old label".into()),
             query: Some("jupiter".into()),
+            required_tags: Vec::new(),
+            excluded_tags: Vec::new(),
             path: Some("/nope".into()),
             url: Some("https://example.com".into()),
             api_key: Some("secret".into()),
@@ -400,6 +425,38 @@ mod tests {
         normalize_source_entry(&mut entry);
 
         assert_eq!(entry.query.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn normalize_wallhaven_preserves_empty_ratio_and_resolution_filters() {
+        let mut entry = SourceEntry {
+            enabled: true,
+            source_type: "wallhaven".into(),
+            ratios: Some("   ".into()),
+            atleast: Some("   ".into()),
+            ..SourceEntry::default()
+        };
+
+        normalize_source_entry(&mut entry);
+
+        assert_eq!(entry.ratios.as_deref(), Some(""));
+        assert_eq!(entry.atleast.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn normalize_wallhaven_keeps_structured_tag_filters() {
+        let mut entry = SourceEntry {
+            enabled: true,
+            source_type: "wallhaven".into(),
+            required_tags: vec![" Machinarium ".into(), String::new(), "robot".into()],
+            excluded_tags: vec![" anime ".into(), String::new()],
+            ..SourceEntry::default()
+        };
+
+        normalize_source_entry(&mut entry);
+
+        assert_eq!(entry.required_tags, vec!["Machinarium", "robot"]);
+        assert_eq!(entry.excluded_tags, vec!["anime"]);
     }
 
     #[test]

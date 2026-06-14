@@ -93,6 +93,30 @@ pub enum EditTarget {
     SearchFilters,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TagEditorMode {
+    Browse,
+    Add,
+    Edit,
+}
+
+#[derive(Debug, Clone)]
+pub struct TagEditor {
+    pub tag_cursor: usize,
+    pub mode: TagEditorMode,
+    pub input: String,
+}
+
+impl TagEditor {
+    pub fn browse() -> Self {
+        Self {
+            tag_cursor: 0,
+            mode: TagEditorMode::Browse,
+            input: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct EditSession {
     pub target: EditTarget,
@@ -100,6 +124,7 @@ pub struct EditSession {
     pub draft_block_values: HashMap<String, String>,
     pub field_cursor: usize,
     pub field_buffer: String,
+    pub tag_editor: Option<TagEditor>,
     pub validation_errors: Vec<String>,
 }
 
@@ -115,6 +140,7 @@ impl EditSession {
             draft_block_values,
             field_cursor: 0,
             field_buffer: String::new(),
+            tag_editor: None,
             validation_errors: Vec::new(),
         }
     }
