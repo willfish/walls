@@ -6,6 +6,7 @@ use std::str::FromStr;
 
 mod advance;
 mod apply;
+pub(crate) mod apply_transaction;
 mod load;
 mod queue_providers;
 mod state_ops;
