@@ -1687,26 +1687,25 @@ fn cmd_undo(json: bool) -> anyhow::Result<()> {
 fn cmd_restore_previous(command: &str, status: &str, json: bool) -> anyhow::Result<()> {
     let mut ctx = WallsCtx::load()?;
     match ctx.advance_prev() {
-        Ok(Some(p)) if json => {
-            print_json(output::command_result(command, true, status, Some(p), None))?
-        }
+        Ok(Some(p)) if json => print_json(
+            output::CommandOutcome::new(command, true, status)
+                .with_path(p)
+                .json(),
+        )?,
         Ok(Some(p)) => println!("{}", p.display()),
-        Ok(None) if json => print_json(output::command_result(
-            command,
-            false,
-            "no_previous",
-            None,
-            Some("no_previous"),
-        ))?,
+        Ok(None) if json => print_json(
+            output::CommandOutcome::new(command, false, "no_previous")
+                .with_exit_code_reason("no_previous")
+                .json(),
+        )?,
         Ok(None) => println!("{}", recovery::no_previous_wallpaper()),
         Err(WallsError::PreviousOriginalMissing { path }) if json => {
-            print_json(output::command_result(
-                command,
-                false,
-                "missing_previous",
-                Some(path),
-                Some("missing_previous"),
-            ))?;
+            print_json(
+                output::CommandOutcome::new(command, false, "missing_previous")
+                    .with_path(path)
+                    .with_exit_code_reason("missing_previous")
+                    .json(),
+            )?;
             std::process::exit(1);
         }
         Err(WallsError::PreviousOriginalMissing { path }) => {
