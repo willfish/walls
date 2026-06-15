@@ -6,6 +6,7 @@ mod footer;
 mod navigation;
 mod open_targets;
 mod source_edit;
+pub(super) mod source_field_schema;
 mod wallhaven_edit;
 
 use std::collections::HashMap;
@@ -14,11 +15,10 @@ use std::path::PathBuf;
 use walls_core::apply::ApplyTrigger;
 
 pub(crate) use edit_fields::{
-    block_field_kind, block_field_label, source_field_kind_for, source_field_label, EditFieldKind,
-    APPLY_DISPLAY_BLOCK_FIELDS, CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY,
-    CONFIG_BLOCK_ROTATION, CONFIG_BLOCK_SOURCES, CONFIG_BLOCK_TUI, LIBRARY_BLOCK_FIELDS,
-    ROTATION_BLOCK_FIELDS, SEARCH_FILTER_FIELDS, TUI_BLOCK_FIELDS, WALLHAVEN_BLOCK_FIELDS,
-    WALLHAVEN_FIELDS_BLOCK,
+    block_field_kind, block_field_label, EditFieldKind, APPLY_DISPLAY_BLOCK_FIELDS,
+    CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION, CONFIG_BLOCK_SOURCES,
+    CONFIG_BLOCK_TUI, LIBRARY_BLOCK_FIELDS, ROTATION_BLOCK_FIELDS, SEARCH_FILTER_FIELDS,
+    TUI_BLOCK_FIELDS, WALLHAVEN_BLOCK_FIELDS, WALLHAVEN_FIELDS_BLOCK,
 };
 #[cfg(test)]
 pub(crate) use edit_fields::{APPLY_BACKEND_CHOICES, DISPLAY_MODE_CHOICES};
