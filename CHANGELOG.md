@@ -9,6 +9,24 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+## [0.13.4] - 2026-06-15
+  git hooks install on enter (pre-commit + pre-push)
+  nix fmt              — run all format/lint hooks
+  pre-commit run -a    — same, manually
+  cargo build / test / clippy
+  nix build .#checks.x86_64-linux.pre-commit
+  config: ~/.config/walls/config.json
+## Unreleased (8564ce3..4041cca)
+### Refactoring
+- (**cli**) route cache commands through outcomes - (8564ce3) - William Fish
+- (**core**) route providers through runners - (cebb62b) - William Fish
+- (**core**) prune public facade modules - (ec28c99) - William Fish
+- (**tui**) deepen config edit schema - (25df09c) - William Fish
+### Miscellaneous Chores
+- (**release**) include issue footer in release commits - (4041cca) - William Fish
+
+
+
 ## [0.13.3] - 2026-06-15
   git hooks install on enter (pre-commit + pre-push)
   nix fmt              — run all format/lint hooks
@@ -211,7 +229,8 @@ Initial share of the workspace (M1–M5 scaffold).
 - `systemd` user `walls.service` + `walls.timer`; Nix flake; CI (rustfmt, clippy, test, audit/deny, multi-arch Nix)
 - Example `config.json` / `secrets.json` and home-manager timer sketch
 
-[unreleased]: https://github.com/willfish/walls/compare/v0.13.3...HEAD
+[unreleased]: https://github.com/willfish/walls/compare/v0.13.4...HEAD
+[0.13.4]: https://github.com/willfish/walls/compare/v0.13.3...v0.13.4
 [0.13.3]: https://github.com/willfish/walls/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/willfish/walls/releases/tag/v0.13.2
 [0.9.0]: https://github.com/willfish/walls/compare/v0.8.0...v0.9.0
