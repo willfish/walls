@@ -84,22 +84,26 @@ fn cli_cache_prune_requires_force_and_dry_run_does_not_mutate() {
     walls_cmd()
         .env("XDG_CONFIG_HOME", &config_home)
         .env("XDG_STATE_HOME", &state_home)
-        .args(["cache", "prune"])
+        .args(["cache", "prune", "--json"])
         .assert()
         .code(2)
-        .stderr(predicate::str::contains(
-            "refusing to mutate without --force",
+        .stdout(predicate::str::contains("\"status\": \"force_required\""))
+        .stdout(predicate::str::contains("\"exit_code_reason\": \"force_required\""))
+        .stdout(predicate::str::contains(
+            "\"message\": \"cache prune: refusing to mutate without --force; use --dry-run to preview\"",
         ));
 
     walls_cmd()
         .env("XDG_CONFIG_HOME", &config_home)
         .env("XDG_STATE_HOME", &state_home)
-        .args(["cache", "prune", "--dry-run"])
+        .args(["cache", "prune", "--dry-run", "--json"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "would reset provider storage: 1 queued",
-        ));
+            "\"status\": \"would_reset_provider_storage\"",
+        ))
+        .stdout(predicate::str::contains("\"dry_run\": true"))
+        .stdout(predicate::str::contains("\"queue_len\": 1"));
 
     let state = fs::read_to_string(&state_file).unwrap();
     assert!(state.contains("wallhaven:abc"));
@@ -117,4 +121,30 @@ fn cli_cache_prune_requires_force_and_dry_run_does_not_mutate() {
 
     let state = fs::read_to_string(state_file).unwrap();
     assert!(!state.contains("wallhaven:abc"));
+}
+
+#[test]
+fn cli_cache_clear_queue_json_reports_noop_when_queue_empty() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (config_home, state_home, _cache_dir) = setup_xdg_home(tmp.path());
+    let state_file = state_home.join("walls").join("state.json");
+    fs::write(
+        &state_file,
+        serde_json::json!({ "cache_queue": [] }).to_string(),
+    )
+    .unwrap();
+
+    walls_cmd()
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_STATE_HOME", &state_home)
+        .args(["cache", "clear-queue", "--force", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"command\": \"cache clear-queue\"",
+        ))
+        .stdout(predicate::str::contains("\"changed\": false"))
+        .stdout(predicate::str::contains("\"status\": \"noop\""))
+        .stdout(predicate::str::contains("\"queue_cleared\": 0"))
+        .stdout(predicate::str::contains("\"exit_code_reason\": null"));
 }
