@@ -1,4 +1,4 @@
-use walls_core::selection::{pick_next, PickInput};
+use walls_core::{pick_next, PickInput};
 
 #[test]
 fn avoids_recent_ids() {

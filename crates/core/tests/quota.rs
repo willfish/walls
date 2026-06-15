@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::Write;
 use std::time::{Duration, UNIX_EPOCH};
 
-use walls_core::quota::enforce_download_quota_bytes;
+use walls_core::enforce_download_quota_bytes;
 
 #[test]
 fn enforce_download_quota_deletes_oldest_when_over_limit() {

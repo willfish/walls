@@ -3,9 +3,9 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 
 use tempfile::TempDir;
+use walls_core::compose;
 use walls_core::config::{DisplayConfig, DisplayFiltersConfig, ImageMagickFilterConfig};
 use walls_core::paths::WallsPaths;
-use walls_core::pipeline::compose;
 
 #[test]
 fn compose_returns_original_when_filter_list_is_empty() {

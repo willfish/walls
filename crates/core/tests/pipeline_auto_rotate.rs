@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use image::codecs::jpeg::JpegEncoder;
 use image::{ExtendedColorType, GenericImageView, ImageEncoder};
 use tempfile::TempDir;
+use walls_core::compose;
 use walls_core::config::DisplayConfig;
 use walls_core::paths::WallsPaths;
-use walls_core::pipeline::compose;
 
 #[test]
 fn compose_returns_original_when_auto_rotate_disabled() {
