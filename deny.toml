@@ -41,16 +41,12 @@ skip = [
   { crate = "rand@0.9.4", reason = "Retained by icy_sixel/quantette in the image preview stack; workspace code uses rand 0.10." },
   { crate = "rand_core@0.6.4", reason = "Retained by rand 0.8 in ratatui-image; workspace code uses rand_core 0.10 through rand 0.10." },
   { crate = "rand_core@0.9.5", reason = "Retained by rand 0.9/quantette in the image preview stack; workspace code uses rand_core 0.10 through rand 0.10." },
+  { crate = "roxmltree@0.20.0", reason = "Retained by fontconfig-parser via fontdb in the usvg 0.47 stack; usvg itself uses roxmltree 0.21." },
   { crate = "rustix@0.38.44", reason = "Retained by ratatui-image; crossterm/tempfile use rustix 1.x." },
   { crate = "syn@1.0.109", reason = "Retained by gtk/glib proc-macro-error; the broader macro ecosystem in this workspace uses syn 2." },
   { crate = "thiserror@1.0.69", reason = "Retained by GTK/portable-pty/ratatui-image dependencies; workspace crates use thiserror 2." },
   { crate = "thiserror-impl@1.0.69", reason = "Retained with thiserror 1.x by GTK/portable-pty/ratatui-image dependencies." },
   { crate = "toml_edit@0.19.15", reason = "Retained by proc-macro-crate 1.x via gtk3-macros; glib/system-deps use newer toml_edit." },
-  { crate = "bitflags@1.3.2", reason = "Retained by png 0.17 via tiny-skia/resvg in walls-tray; image 0.25 uses bitflags 2.x." },
-  { crate = "image-webp@0.1.3", reason = "Retained by resvg 0.44 in walls-tray; image 0.25 uses image-webp 0.2.x." },
-  { crate = "png@0.17.16", reason = "Retained by tiny-skia 0.11 in walls-tray; image 0.25 uses png 0.18.x." },
-  { crate = "zune-core@0.4.12", reason = "Retained by resvg 0.44 in walls-tray; image 0.25 uses zune-core 0.5.x." },
-  { crate = "zune-jpeg@0.4.21", reason = "Retained by resvg 0.44 in walls-tray; image 0.25 uses zune-jpeg 0.5.x." },
 ]
 
 [sources]
