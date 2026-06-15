@@ -1,9 +1,10 @@
 use std::fs;
+use std::hint::black_box;
 use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use walls_core::config::SourceEntry;
 use walls_core::providers::{configured_source_providers, enabled_local_sources};
 use walls_core::quota::enforce_download_quota_bytes;
