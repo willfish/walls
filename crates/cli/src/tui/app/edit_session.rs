@@ -10,10 +10,9 @@ use super::edit_fields::{
     block_field_kind, block_field_value_at, choice_display_value, commit_block_field_buffer,
     cycle_choice_value, default_wallhaven_source_entry, reddit_time_field_locked,
     search_filter_field_value_at, source_entry_display_name, source_removal_protected,
-    toggle_bool_value, APPLY_DISPLAY_BLOCK_FIELDS, CONFIG_BLOCK_APPLY_DISPLAY,
-    CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION, CONFIG_BLOCK_SOURCES, CONFIG_BLOCK_TUI,
-    LIBRARY_BLOCK_FIELDS, ROTATION_BLOCK_FIELDS, SEARCH_FILTER_FIELDS, TUI_BLOCK_FIELDS,
-    WALLHAVEN_BLOCK_FIELDS, WALLHAVEN_FIELDS_BLOCK,
+    toggle_bool_value, CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION,
+    CONFIG_BLOCK_SOURCES, CONFIG_BLOCK_TUI, SEARCH_FILTER_FIELDS, WALLHAVEN_BLOCK_FIELDS,
+    WALLHAVEN_FIELDS_BLOCK,
 };
 use super::{
     config_block_edit, source_edit, source_field_schema, wallhaven_edit, App, EditFieldKind,
@@ -162,11 +161,7 @@ impl App {
                     .unwrap_or(&self.ctx.config.sources[*i]);
                 source_field_schema::source_field_specs(src).len()
             }
-            EditTarget::Block(CONFIG_BLOCK_ROTATION) => ROTATION_BLOCK_FIELDS.len(),
-            EditTarget::Block(CONFIG_BLOCK_LIBRARY) => LIBRARY_BLOCK_FIELDS.len(),
-            EditTarget::Block(CONFIG_BLOCK_APPLY_DISPLAY) => APPLY_DISPLAY_BLOCK_FIELDS.len(),
-            EditTarget::Block(CONFIG_BLOCK_TUI) => TUI_BLOCK_FIELDS.len(),
-            EditTarget::Block(_) => 0,
+            EditTarget::Block(block) => source_field_schema::block_field_keys(*block).len(),
             EditTarget::Wallhaven => WALLHAVEN_BLOCK_FIELDS.len(),
             EditTarget::SearchFilters => SEARCH_FILTER_FIELDS.len(),
             _ => 0,
@@ -189,18 +184,10 @@ impl App {
                     .map_or(EditFieldKind::Text, |spec| spec.kind)
             }
             EditTarget::Block(block) => {
-                let keys = match *block {
-                    CONFIG_BLOCK_ROTATION => ROTATION_BLOCK_FIELDS,
-                    CONFIG_BLOCK_LIBRARY => LIBRARY_BLOCK_FIELDS,
-                    CONFIG_BLOCK_APPLY_DISPLAY => APPLY_DISPLAY_BLOCK_FIELDS,
-                    CONFIG_BLOCK_TUI => TUI_BLOCK_FIELDS,
-                    _ => &[] as &[&str],
-                };
-                if let Some(key) = keys.get(sess.field_cursor) {
-                    block_field_kind(*block, key)
-                } else {
-                    EditFieldKind::Text
-                }
+                let specs = source_field_schema::block_field_specs(*block);
+                specs
+                    .get(sess.field_cursor)
+                    .map_or(EditFieldKind::Text, |spec| spec.kind)
             }
             EditTarget::Wallhaven => {
                 if let Some(key) = WALLHAVEN_BLOCK_FIELDS.get(sess.field_cursor) {
