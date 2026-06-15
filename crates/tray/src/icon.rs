@@ -173,19 +173,19 @@ fn ksni_icons_from_path(
 }
 
 fn rasterize_svg_to_rgba(svg: &str, size: u32) -> anyhow::Result<Vec<u8>> {
-    let options = usvg::Options {
+    let options = resvg::usvg::Options {
         font_family: "sans-serif".to_string(),
-        ..usvg::Options::default()
+        ..resvg::usvg::Options::default()
     };
-    let tree = usvg::Tree::from_str(svg, &options)?;
-    let mut pixmap =
-        tiny_skia::Pixmap::new(size, size).ok_or_else(|| anyhow::anyhow!("pixmap alloc failed"))?;
-    pixmap.fill(tiny_skia::Color::TRANSPARENT);
+    let tree = resvg::usvg::Tree::from_str(svg, &options)?;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(size, size)
+        .ok_or_else(|| anyhow::anyhow!("pixmap alloc failed"))?;
+    pixmap.fill(resvg::tiny_skia::Color::TRANSPARENT);
 
     let svg_w = tree.size().width();
     let svg_h = tree.size().height();
     let scale = (size as f32 / svg_w.max(svg_h)).min(1.0);
-    let transform = tiny_skia::Transform::from_scale(scale, scale);
+    let transform = resvg::tiny_skia::Transform::from_scale(scale, scale);
     resvg::render(&tree, transform, &mut pixmap.as_mut());
 
     Ok(pixmap
