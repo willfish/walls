@@ -151,6 +151,8 @@ pub struct SearchHit {
     pub label: String,
 }
 
+pub(crate) use history_browse_view::{BrowseRow, BrowseRowKind};
+
 pub struct App {
     pub ctx: WallsCtx,
     pub tab: Tab,
@@ -258,7 +260,7 @@ impl App {
     }
 
     pub fn browse_lines(&self) -> Vec<String> {
-        history_browse_view::browse_lines(self.browse_items(), self.cursor)
+        history_browse_view::browse_lines(&self.browse_rows(), self.cursor)
     }
 
     pub fn search_lines(&self) -> Vec<String> {
@@ -276,7 +278,14 @@ impl App {
     }
 
     pub fn browse_items(&self) -> Vec<String> {
-        history_browse_view::browse_items(
+        self.browse_rows()
+            .into_iter()
+            .map(|row| row.label())
+            .collect()
+    }
+
+    pub fn browse_rows(&self) -> Vec<BrowseRow> {
+        history_browse_view::browse_rows(
             &self.ctx.state.cache_queue,
             &self.local_candidates,
             &self.ctx.state.history,
@@ -284,8 +293,9 @@ impl App {
     }
 
     pub fn selected_browse_preview_path(&self) -> Option<PathBuf> {
+        let rows = self.browse_rows();
         history_browse_view::selected_browse_preview_path(
-            self.browse_items(),
+            &rows,
             self.cursor,
             &self.ctx.paths.cache_dir,
         )
@@ -307,30 +317,25 @@ impl App {
     }
 
     pub async fn apply_browse_selection(&mut self) -> anyhow::Result<Option<String>> {
-        let items = self.browse_items();
-        let Some(line) = items.get(self.cursor) else {
+        let rows = self.browse_rows();
+        let Some(row) = rows.get(self.cursor) else {
             return Ok(None);
         };
-        if let Some(id) = line.strip_prefix("queue: ") {
-            self.ctx.prioritize_cache_id(id)?;
-            if let Some(p) = self.ctx.advance_next_manual().await? {
-                return Ok(Some(format!("applied queue head: {}", p.display())));
+        match &row.kind {
+            BrowseRowKind::Queue(id) => {
+                self.ctx.prioritize_cache_id(id)?;
+                if let Some(p) = self.ctx.advance_next_manual().await? {
+                    return Ok(Some(format!("applied queue head: {}", p.display())));
+                }
+                return Ok(Some("queue item not applicable".into()));
             }
-            return Ok(Some("queue item not applicable".into()));
-        }
-        if let Some(path) = line.strip_prefix("local: ") {
-            let p = PathBuf::from(path);
-            if p.exists() {
-                self.ctx.apply_file(&p, ApplyTrigger::Manual)?;
-                return Ok(Some(format!("applied: {}", p.display())));
+            BrowseRowKind::Local(path) | BrowseRowKind::History(path) => {
+                if path.exists() {
+                    self.ctx.apply_file(path, ApplyTrigger::Manual)?;
+                    return Ok(Some(format!("applied: {}", path.display())));
+                }
             }
-        }
-        if let Some(path) = line.strip_prefix("history: ") {
-            let p = PathBuf::from(path);
-            if p.exists() {
-                self.ctx.apply_file(&p, ApplyTrigger::Manual)?;
-                return Ok(Some(format!("applied: {}", p.display())));
-            }
+            BrowseRowKind::Section(_) | BrowseRowKind::Empty(_) => {}
         }
         Ok(None)
     }

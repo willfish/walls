@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use super::{wallhaven_edit, App, EditTarget, Tab};
+use super::{wallhaven_edit, App, BrowseRowKind, EditTarget, Tab};
 use crate::tui::open_target::{self, OpenTarget};
 
 impl App {
@@ -57,16 +57,13 @@ impl App {
     }
 
     fn selected_browse_open_target(&self) -> Option<OpenTarget> {
-        let line = self.browse_items().get(self.cursor)?.clone();
-        if let Some(path) = line
-            .strip_prefix("local: ")
-            .or_else(|| line.strip_prefix("history: "))
-        {
-            return Some(OpenTarget::Path(PathBuf::from(path)));
+        match &self.browse_rows().get(self.cursor)?.kind {
+            BrowseRowKind::Local(path) | BrowseRowKind::History(path) => {
+                Some(OpenTarget::Path(path.clone()))
+            }
+            BrowseRowKind::Queue(id) => self.open_target_for_cache_queue_id(id),
+            BrowseRowKind::Section(_) | BrowseRowKind::Empty(_) => None,
         }
-
-        let id = line.strip_prefix("queue: ")?;
-        self.open_target_for_cache_queue_id(id)
     }
 
     fn selected_search_open_target(&self) -> Option<OpenTarget> {
