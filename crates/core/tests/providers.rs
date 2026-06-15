@@ -3,7 +3,7 @@ use walls_core::providers::{
     configured_providers, configured_source_providers, enabled_local_sources, unsplash_provider,
     wallhaven_provider, ProviderAttemptOutcome, ProviderCapability, ProviderFailureKind,
     ProviderKind, ProviderNoCandidateReason, ProviderOperation, ProviderRetry, ProviderRetryReason,
-    ProviderStatus, ProviderStatusReport,
+    ProviderRunOutcome, ProviderStatus, ProviderStatusReport,
 };
 
 fn test_config(internet_enabled: bool) -> Config {
@@ -680,6 +680,37 @@ fn provider_status_report_records_no_candidate_attempts() {
         ProviderAttemptOutcome::NoCandidates {
             reason: ProviderNoCandidateReason::EmptyResult,
             candidate_count: Some(0)
+        }
+    );
+}
+
+#[test]
+fn provider_run_outcome_pairs_path_and_attempt() {
+    let provider = configured_source_providers(&[SourceEntry {
+        enabled: true,
+        source_type: "folder".into(),
+        label: Some("Local library".into()),
+        path: Some("/tmp/walls".into()),
+        ..SourceEntry::default()
+    }])
+    .remove(0);
+
+    let outcome = ProviderRunOutcome::applied(
+        Some(std::path::PathBuf::from("/tmp/walls/a.jpg")),
+        provider
+            .attempt(ProviderOperation::AdvanceNext)
+            .applied(Some(4)),
+    );
+
+    assert_eq!(
+        outcome.applied_path.as_deref(),
+        Some(std::path::Path::new("/tmp/walls/a.jpg"))
+    );
+    assert_eq!(outcome.attempt.provider_id, "Local library");
+    assert_eq!(
+        outcome.attempt.outcome,
+        ProviderAttemptOutcome::Applied {
+            candidate_count: Some(4)
         }
     );
 }

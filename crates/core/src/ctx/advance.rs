@@ -4,8 +4,8 @@ use crate::config::{SelectionStrategy, SourceKind};
 use crate::error::{Result, WallsError};
 use crate::providers::{
     ProviderAttempt, ProviderCapability, ProviderDescriptor, ProviderFailureKind, ProviderKind,
-    ProviderNoCandidateReason, ProviderOperation, ProviderRetry, ProviderStatus,
-    ProviderStatusReport,
+    ProviderNoCandidateReason, ProviderOperation, ProviderRetry, ProviderRunOutcome,
+    ProviderStatus, ProviderStatusReport,
 };
 use crate::state::State;
 use rand::RngExt;
@@ -225,20 +225,31 @@ impl<'ctx> AdvanceNext<'ctx> {
         let candidate_count = picker.seen_any;
         let Some(path) = picker.finish() else {
             tracing::info!("no wallpaper candidates");
-            self.record(provider.no_candidates(
-                ProviderNoCandidateReason::EmptyResult,
-                Some(candidate_count),
-            ));
-            return Ok(None);
+            return Ok(
+                self.finish_provider_outcome(ProviderRunOutcome::not_applied(
+                    provider.no_candidates(
+                        ProviderNoCandidateReason::EmptyResult,
+                        Some(candidate_count),
+                    ),
+                )),
+            );
         };
         self.ctx
             .apply_file_inner(&path, ApplyTrigger::Auto, None, true)?;
-        self.record(provider.applied(Some(candidate_count)));
-        Ok(Some(path))
+        Ok(self.finish_provider_outcome(ProviderRunOutcome::applied(
+            Some(path),
+            provider.applied(Some(candidate_count)),
+        )))
     }
 
     fn record(&mut self, attempt: ProviderAttempt) {
         self.ctx.record_provider_attempt(attempt);
+    }
+
+    fn finish_provider_outcome(&mut self, outcome: ProviderRunOutcome) -> Option<PathBuf> {
+        let applied_path = outcome.applied_path.clone();
+        self.record(outcome.attempt);
+        applied_path
     }
 
     fn record_all_skipped(&mut self, reason: ProviderNoCandidateReason) {
@@ -301,23 +312,20 @@ impl<'ctx> AdvanceNext<'ctx> {
         };
 
         match result {
-            Ok(Some(path)) => {
-                self.record(
-                    provider
-                        .attempt(ProviderOperation::AdvanceNext)
-                        .applied(Some(1)),
-                );
-                Ok(Some(path))
-            }
-            Ok(None) => {
-                self.record(
+            Ok(Some(path)) => Ok(self.finish_provider_outcome(ProviderRunOutcome::applied(
+                Some(path),
+                provider
+                    .attempt(ProviderOperation::AdvanceNext)
+                    .applied(Some(1)),
+            ))),
+            Ok(None) => Ok(
+                self.finish_provider_outcome(ProviderRunOutcome::not_applied(
                     provider
                         .attempt(ProviderOperation::AdvanceNext)
                         .no_candidates(ProviderNoCandidateReason::EmptyResult, Some(0))
                         .with_fallback(fallback_provider_id),
-                );
-                Ok(None)
-            }
+                )),
+            ),
             Err(error) => {
                 tracing::warn!(
                     provider = provider.id,
@@ -325,13 +333,14 @@ impl<'ctx> AdvanceNext<'ctx> {
                     "provider failed, trying next source"
                 );
                 let (kind, status_code) = ProviderFailureKind::classify(&error);
-                self.record(
-                    provider
-                        .attempt(ProviderOperation::AdvanceNext)
-                        .failed(kind, status_code, Some(error.to_string()))
-                        .with_fallback(fallback_provider_id),
-                );
-                Ok(None)
+                Ok(
+                    self.finish_provider_outcome(ProviderRunOutcome::not_applied(
+                        provider
+                            .attempt(ProviderOperation::AdvanceNext)
+                            .failed(kind, status_code, Some(error.to_string()))
+                            .with_fallback(fallback_provider_id),
+                    )),
+                )
             }
         }
     }
@@ -384,24 +393,25 @@ impl<'ctx> AdvanceNext<'ctx> {
         match result {
             Ok(Some(path)) => {
                 let retries = std::mem::take(&mut self.provider_retries);
-                self.record(
+                Ok(self.finish_provider_outcome(ProviderRunOutcome::applied(
+                    Some(path),
                     provider
                         .attempt(ProviderOperation::AdvanceNext)
                         .with_retries(retries)
                         .applied(Some(1)),
-                );
-                Ok(Some(path))
+                )))
             }
             Ok(None) => {
                 let retries = std::mem::take(&mut self.provider_retries);
-                self.record(
-                    provider
-                        .attempt(ProviderOperation::AdvanceNext)
-                        .with_retries(retries)
-                        .no_candidates(ProviderNoCandidateReason::EmptyResult, Some(0))
-                        .with_fallback(fallback_provider_id),
-                );
-                Ok(None)
+                Ok(
+                    self.finish_provider_outcome(ProviderRunOutcome::not_applied(
+                        provider
+                            .attempt(ProviderOperation::AdvanceNext)
+                            .with_retries(retries)
+                            .no_candidates(ProviderNoCandidateReason::EmptyResult, Some(0))
+                            .with_fallback(fallback_provider_id),
+                    )),
+                )
             }
             Err(error) => {
                 let retries = std::mem::take(&mut self.provider_retries);
@@ -411,14 +421,15 @@ impl<'ctx> AdvanceNext<'ctx> {
                     "provider failed, trying next source"
                 );
                 let (kind, status_code) = ProviderFailureKind::classify(&error);
-                self.record(
-                    provider
-                        .attempt(ProviderOperation::AdvanceNext)
-                        .with_retries(retries)
-                        .failed(kind, status_code, Some(error.to_string()))
-                        .with_fallback(fallback_provider_id),
-                );
-                Ok(None)
+                Ok(
+                    self.finish_provider_outcome(ProviderRunOutcome::not_applied(
+                        provider
+                            .attempt(ProviderOperation::AdvanceNext)
+                            .with_retries(retries)
+                            .failed(kind, status_code, Some(error.to_string()))
+                            .with_fallback(fallback_provider_id),
+                    )),
+                )
             }
         }
     }
