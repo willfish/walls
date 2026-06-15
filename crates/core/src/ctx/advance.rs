@@ -81,6 +81,14 @@ impl WallsCtx {
             })?;
         Ok(Some(path))
     }
+
+    pub(crate) fn record_provider_attempt(&mut self, attempt: ProviderAttempt) {
+        crate::events::append_event_best_effort(
+            &self.paths.event_journal_file,
+            &crate::events::EventRecord::provider_attempt(attempt.clone()),
+        );
+        self.provider_status_report.push(attempt);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,8 +180,10 @@ impl<'ctx> AdvanceNext<'ctx> {
     async fn apply_provider_slot(&mut self, slot: ProviderSlot) -> anyhow::Result<Option<PathBuf>> {
         match slot {
             ProviderSlot::Local => self.apply_local_candidate(),
-            ProviderSlot::Unsplash => self.apply_unsplash_queue().await,
-            ProviderSlot::Wallhaven => self.apply_wallhaven_queue().await,
+            ProviderSlot::Unsplash => super::queue_providers::apply_unsplash_queue(self.ctx).await,
+            ProviderSlot::Wallhaven => {
+                super::queue_providers::apply_wallhaven_queue(self.ctx).await
+            }
             ProviderSlot::Bing => self.apply_bing().await,
             ProviderSlot::Json => self.apply_json_feed().await,
             ProviderSlot::MediaRss => self.apply_media_rss().await,
@@ -204,267 +214,6 @@ impl<'ctx> AdvanceNext<'ctx> {
         }
     }
 
-    async fn apply_wallhaven_queue(&mut self) -> anyhow::Result<Option<PathBuf>> {
-        let provider = crate::providers::wallhaven_provider(&self.ctx.config, &self.ctx.secrets);
-        let client = self.wallhaven_client()?;
-        if let Some(path) = self.apply_wallhaven_queue_head(&client, &provider).await? {
-            self.record(
-                provider
-                    .attempt(ProviderOperation::AdvanceNext)
-                    .applied(None),
-            );
-            return Ok(Some(path));
-        }
-
-        if !provider.enabled {
-            let reason = if self.ctx.config.change.internet_enabled {
-                ProviderNoCandidateReason::Disabled
-            } else {
-                ProviderNoCandidateReason::OfflineDisabled
-            };
-            let status = if reason == ProviderNoCandidateReason::OfflineDisabled {
-                ProviderStatus::OfflineDisabled
-            } else {
-                ProviderStatus::Disabled
-            };
-            self.record(
-                provider
-                    .attempt(ProviderOperation::QueueRefill)
-                    .with_status(status)
-                    .skipped(reason)
-                    .with_fallback("bing"),
-            );
-            return Ok(None);
-        }
-
-        match crate::wallhaven::refill_wallhaven_cache(
-            &client,
-            &self.ctx.config,
-            &mut self.ctx.state,
-        )
-        .await
-        {
-            Ok(()) => self.ctx.save_state()?,
-            Err(error) => {
-                tracing::warn!(
-                    error = %error,
-                    "wallhaven: queue refill failed, trying next source"
-                );
-                self.record(
-                    provider
-                        .attempt(ProviderOperation::QueueRefill)
-                        .failed(ProviderFailureKind::Unknown, None, Some(error.to_string()))
-                        .with_fallback("bing"),
-                );
-            }
-        }
-        let applied = self.apply_wallhaven_queue_head(&client, &provider).await?;
-        if applied.is_some() {
-            self.record(
-                provider
-                    .attempt(ProviderOperation::AdvanceNext)
-                    .applied(None),
-            );
-        } else if !self
-            .ctx
-            .provider_status_report
-            .attempted_provider(&provider.id)
-        {
-            self.record(
-                provider
-                    .attempt(ProviderOperation::QueueRefill)
-                    .no_candidates(ProviderNoCandidateReason::QueueEmpty, Some(0))
-                    .with_fallback("bing"),
-            );
-        }
-        Ok(applied)
-    }
-
-    fn wallhaven_client(&self) -> anyhow::Result<crate::wallhaven::WallhavenClient> {
-        crate::wallhaven::WallhavenClient::new(
-            crate::wallhaven::api_base(),
-            &self.ctx.secrets.wallhaven_api_key,
-        )
-    }
-
-    async fn apply_wallhaven_queue_head(
-        &mut self,
-        client: &crate::wallhaven::WallhavenClient,
-        provider: &crate::providers::ProviderDescriptor,
-    ) -> anyhow::Result<Option<PathBuf>> {
-        use anyhow::Context;
-
-        let Some(id) = self.ctx.state.cache_queue.first().cloned() else {
-            return Ok(None);
-        };
-        if crate::unsplash::queue_photo_id(&id).is_some() {
-            return Ok(None);
-        }
-        let path = if let Some(p) = self.cached_wallhaven_path(&id) {
-            p
-        } else {
-            let wp = client
-                .fetch_wallpaper(&id)
-                .await
-                .with_context(|| provider.failure_scope("metadata fetch").to_string())?;
-            client
-                .download_to_cache_with_quota(
-                    &wp,
-                    &self.ctx.paths.cache_dir,
-                    &self.ctx.paths.download_dir,
-                    self.ctx.config.quota.size_mb,
-                    self.ctx.config.quota.enabled,
-                )
-                .await
-                .with_context(|| provider.failure_scope("download").to_string())?
-        };
-        self.ctx.state.cache_queue.remove(0);
-        self.ctx
-            .apply_file_inner(&path, ApplyTrigger::Auto, Some(id.clone()), true)?;
-        Ok(Some(path))
-    }
-
-    async fn apply_unsplash_queue(&mut self) -> anyhow::Result<Option<PathBuf>> {
-        let provider = crate::providers::unsplash_provider(&self.ctx.config, &self.ctx.secrets);
-        if !provider.enabled {
-            let (status, reason) = self.unsplash_unavailable_reason();
-            self.record(
-                provider
-                    .attempt(ProviderOperation::QueueRefill)
-                    .with_status(status)
-                    .skipped(reason)
-                    .with_fallback("wallhaven"),
-            );
-            return Ok(None);
-        }
-
-        let client = self.unsplash_client()?;
-        if let Some(path) = self.apply_unsplash_queue_head(&client).await? {
-            self.record(
-                provider
-                    .attempt(ProviderOperation::AdvanceNext)
-                    .applied(None),
-            );
-            return Ok(Some(path));
-        }
-
-        match crate::unsplash::refill_unsplash_cache(&client, &self.ctx.config, &mut self.ctx.state)
-            .await
-        {
-            Ok(()) => self.ctx.save_state()?,
-            Err(error) => {
-                tracing::warn!(
-                    error = %error,
-                    "unsplash: queue refill failed, trying next source"
-                );
-                self.record(
-                    provider
-                        .attempt(ProviderOperation::QueueRefill)
-                        .failed(ProviderFailureKind::Unknown, None, Some(error.to_string()))
-                        .with_fallback("wallhaven"),
-                );
-            }
-        }
-        let applied = self.apply_unsplash_queue_head(&client).await?;
-        if applied.is_some() {
-            self.record(
-                provider
-                    .attempt(ProviderOperation::AdvanceNext)
-                    .applied(None),
-            );
-        } else if !self
-            .ctx
-            .provider_status_report
-            .attempted_provider(&provider.id)
-        {
-            self.record(
-                provider
-                    .attempt(ProviderOperation::QueueRefill)
-                    .no_candidates(ProviderNoCandidateReason::QueueEmpty, Some(0))
-                    .with_fallback("wallhaven"),
-            );
-        }
-        Ok(applied)
-    }
-
-    fn unsplash_unavailable_reason(&self) -> (ProviderStatus, ProviderNoCandidateReason) {
-        if !self.ctx.config.change.internet_enabled {
-            return (
-                ProviderStatus::OfflineDisabled,
-                ProviderNoCandidateReason::OfflineDisabled,
-            );
-        }
-        if self.ctx.secrets.unsplash_access_key.is_empty() {
-            return (
-                ProviderStatus::CredentialMissing,
-                ProviderNoCandidateReason::CredentialMissing,
-            );
-        }
-        (
-            ProviderStatus::Disabled,
-            ProviderNoCandidateReason::NoEnabledSource,
-        )
-    }
-
-    fn unsplash_client(&self) -> anyhow::Result<crate::unsplash::UnsplashClient> {
-        crate::unsplash::UnsplashClient::new(
-            crate::unsplash::api_base(),
-            &self.ctx.secrets.unsplash_access_key,
-        )
-    }
-
-    async fn apply_unsplash_queue_head(
-        &mut self,
-        client: &crate::unsplash::UnsplashClient,
-    ) -> anyhow::Result<Option<PathBuf>> {
-        use anyhow::Context;
-
-        let Some(queue_item) = self.ctx.state.cache_queue.first().cloned() else {
-            return Ok(None);
-        };
-        let Some(photo_id) = crate::unsplash::queue_photo_id(&queue_item) else {
-            return Ok(None);
-        };
-        let provider = crate::providers::unsplash_provider(&self.ctx.config, &self.ctx.secrets);
-
-        let photo = client
-            .fetch_photo(photo_id)
-            .await
-            .with_context(|| provider.failure_scope("metadata fetch").to_string())?;
-        let path = if let Some(path) =
-            crate::unsplash::cached_photo_path(&self.ctx.paths.cache_dir, photo_id)
-        {
-            path
-        } else {
-            client
-                .download_to_cache_with_quota(
-                    &photo,
-                    &self.ctx.paths.cache_dir,
-                    &self.ctx.paths.download_dir,
-                    self.ctx.config.quota.size_mb,
-                    self.ctx.config.quota.enabled,
-                )
-                .await
-                .with_context(|| provider.failure_scope("download").to_string())?
-        };
-
-        self.ctx.state.cache_queue.remove(0);
-        let description = photo.best_description().map(str::to_string);
-        self.ctx.apply_file_inner_with_metadata(
-            &path,
-            ApplyTrigger::Auto,
-            None,
-            crate::state::CurrentWallMetadata {
-                provider: Some("unsplash".into()),
-                source_url: Some(photo.links.html),
-                author: Some(photo.user.name),
-                description,
-            },
-            true,
-        )?;
-        Ok(Some(path))
-    }
-
     fn apply_local_candidate(&mut self) -> anyhow::Result<Option<PathBuf>> {
         let provider = local_provider();
         let mut picker = LocalCandidatePicker::new(
@@ -489,11 +238,7 @@ impl<'ctx> AdvanceNext<'ctx> {
     }
 
     fn record(&mut self, attempt: ProviderAttempt) {
-        crate::events::append_event_best_effort(
-            &self.ctx.paths.event_journal_file,
-            &crate::events::EventRecord::provider_attempt(attempt.clone()),
-        );
-        self.ctx.provider_status_report.push(attempt);
+        self.ctx.record_provider_attempt(attempt);
     }
 
     fn record_all_skipped(&mut self, reason: ProviderNoCandidateReason) {
@@ -676,10 +421,6 @@ impl<'ctx> AdvanceNext<'ctx> {
                 Ok(None)
             }
         }
-    }
-
-    fn cached_wallhaven_path(&self, id: &str) -> Option<PathBuf> {
-        crate::wallhaven::cached_wallpaper_path(&self.ctx.paths.cache_dir, id)
     }
 
     // Minimal support for Bing provider (public endpoint, no key) so that

@@ -7,6 +7,7 @@ use std::str::FromStr;
 mod advance;
 mod apply;
 mod load;
+mod queue_providers;
 mod state_ops;
 
 pub use state_ops::TrashPlan;
