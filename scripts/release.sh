@@ -104,7 +104,7 @@ cargo test --workspace --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
 
 git add CHANGELOG.md Cargo.toml Cargo.lock cog.toml scripts/release.sh
-git commit -m "chore(release): release ${tag}"
+git commit -m "chore(release): release ${tag}" -m "Issue: No ticket/issue"
 nix-shell -p cocogitto --run "cog check HEAD~1..HEAD"
 git push origin main
 git -c tag.gpgSign=false tag -f "$tag" HEAD
