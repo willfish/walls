@@ -2,17 +2,14 @@ use walls_core::config::{
     default_wallhaven_source, normalize_source_entry, persist_config, Config, SourceEntry,
     WallhavenPrefer,
 };
-use walls_core::validate::{
-    validate_config_diagnostics, validate_source_edit, validate_wallhaven_edit,
-};
+use walls_core::validate::{validate_source_edit, validate_wallhaven_edit};
 
 use super::edit_fields::{
-    block_field_kind, block_field_value_at, choice_display_value, commit_block_field_buffer,
-    cycle_choice_value, default_wallhaven_source_entry, reddit_time_field_locked,
-    search_filter_field_value_at, source_entry_display_name, source_removal_protected,
-    toggle_bool_value, CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION,
-    CONFIG_BLOCK_SOURCES, CONFIG_BLOCK_TUI, SEARCH_FILTER_FIELDS, WALLHAVEN_BLOCK_FIELDS,
-    WALLHAVEN_FIELDS_BLOCK,
+    block_field_kind, block_field_value_at, choice_display_value, cycle_choice_value,
+    default_wallhaven_source_entry, reddit_time_field_locked, search_filter_field_value_at,
+    source_entry_display_name, source_removal_protected, toggle_bool_value,
+    CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION, CONFIG_BLOCK_SOURCES,
+    CONFIG_BLOCK_TUI, SEARCH_FILTER_FIELDS, WALLHAVEN_BLOCK_FIELDS, WALLHAVEN_FIELDS_BLOCK,
 };
 use super::{
     config_block_edit, source_edit, source_field_schema, wallhaven_edit, App, EditFieldKind,
@@ -224,6 +221,10 @@ impl App {
             if let Some(key) = SEARCH_FILTER_FIELDS.get(sess.field_cursor) {
                 return self.wallhaven_block_field_locked(key);
             }
+        }
+        if let EditTarget::Block(block) = &sess.target {
+            return source_field_schema::block_field_spec_at(*block, sess.field_cursor)
+                .is_some_and(|spec| spec.locked);
         }
         if let EditTarget::Source(_) = &sess.target {
             if let Some(draft) = &sess.draft_source {
@@ -605,7 +606,8 @@ impl App {
                     .as_ref()
                     .map(|sess| sess.draft_block_values.clone())
                     .unwrap_or_default();
-                block_field_value_at(&self.ctx.config, *block, &draft, idx)
+                source_field_schema::block_field_spec_at(*block, idx)
+                    .map_or_else(String::new, |spec| spec.value(&self.ctx.config, &draft))
             }
             EditTarget::Wallhaven => {
                 let draft = self
@@ -646,9 +648,10 @@ impl App {
                         source_field_schema::source_field_value(src, &spec.key)
                     })
                 }
-                EditTarget::Block(block) => {
-                    block_field_value_at(&self.ctx.config, *block, &sess.draft_block_values, idx)
-                }
+                EditTarget::Block(block) => source_field_schema::block_field_spec_at(*block, idx)
+                    .map_or_else(String::new, |spec| {
+                        spec.value(&self.ctx.config, &sess.draft_block_values)
+                    }),
                 EditTarget::Wallhaven => block_field_value_at(
                     &self.ctx.config,
                     WALLHAVEN_FIELDS_BLOCK,
@@ -678,28 +681,15 @@ impl App {
             EditTarget::Wallhaven | EditTarget::SearchFilters => {
                 validate_wallhaven_edit(config, secrets)
             }
-            EditTarget::Block(CONFIG_BLOCK_LIBRARY) => {
-                validate_config_diagnostics(config, secrets, paths)
-                    .into_iter()
-                    .filter(|diagnostic| diagnostic.path.starts_with("quota."))
-                    .map(|diagnostic| diagnostic.to_string())
-                    .collect()
-            }
-            EditTarget::Block(CONFIG_BLOCK_APPLY_DISPLAY) => {
-                let mut issues: Vec<String> = validate_config_diagnostics(config, secrets, paths)
-                    .into_iter()
-                    .filter(|diagnostic| diagnostic.path.starts_with("apply."))
-                    .map(|diagnostic| diagnostic.to_string())
-                    .collect();
-                if config.display.target_width.is_some() ^ config.display.target_height.is_some() {
-                    issues.push(
-                        "display target: set both target_width and target_height, or clear both"
-                            .into(),
-                    );
-                }
-                issues
-            }
-            EditTarget::Block(_) => Vec::new(),
+            EditTarget::Block(block) => source_field_schema::block_field_spec_at(*block, 0)
+                .map_or_else(Vec::new, |spec| {
+                    source_field_schema::validation_issues(
+                        spec.validation_scope,
+                        config,
+                        secrets,
+                        paths,
+                    )
+                }),
         }
     }
 
@@ -939,20 +929,16 @@ impl App {
                     }
                 }
                 EditTarget::Block(block) => {
-                    commit_block_field_buffer(
-                        *block,
-                        field_idx,
-                        &buf,
-                        &mut sess.draft_block_values,
-                    );
+                    if let Some(spec) = source_field_schema::block_field_spec_at(*block, field_idx)
+                    {
+                        spec.commit(&buf, &mut sess.draft_block_values);
+                    }
                 }
                 EditTarget::Wallhaven => {
-                    commit_block_field_buffer(
-                        WALLHAVEN_FIELDS_BLOCK,
-                        field_idx,
-                        &buf,
-                        &mut sess.draft_block_values,
-                    );
+                    if let Some(key) = WALLHAVEN_BLOCK_FIELDS.get(field_idx) {
+                        sess.draft_block_values
+                            .insert((*key).into(), buf.trim().to_string());
+                    }
                 }
                 EditTarget::SearchFilters => {
                     if let Some(key) = SEARCH_FILTER_FIELDS.get(field_idx) {
@@ -999,21 +985,16 @@ impl App {
                     };
                 }
             }
-            EditTarget::Block(CONFIG_BLOCK_ROTATION) => {
-                config_block_edit::apply_rotation_draft(&mut config, &sess.draft_block_values);
-                success_msg = "config saved: rotation".into();
-            }
-            EditTarget::Block(CONFIG_BLOCK_LIBRARY) => {
-                config_block_edit::apply_library_draft(&mut config, &sess.draft_block_values);
-                success_msg = "config saved: library".into();
-            }
-            EditTarget::Block(CONFIG_BLOCK_APPLY_DISPLAY) => {
-                config_block_edit::apply_display_draft(&mut config, &sess.draft_block_values);
-                success_msg = "config saved: display".into();
-            }
-            EditTarget::Block(CONFIG_BLOCK_TUI) => {
-                config_block_edit::apply_tui_draft(&mut config, &sess.draft_block_values);
-                success_msg = "config saved: tui preferences".into();
+            EditTarget::Block(block) => {
+                if let Some(spec) = source_field_schema::block_field_spec_at(*block, 0) {
+                    if let Some(message) = source_field_schema::apply_block_draft(
+                        spec.persistence_target,
+                        &mut config,
+                        &sess.draft_block_values,
+                    ) {
+                        success_msg = message.into();
+                    }
+                }
             }
             EditTarget::Wallhaven => {
                 wallhaven_edit::apply_block_draft(

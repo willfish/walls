@@ -575,26 +575,6 @@ pub(super) fn search_filter_field_value_at(
     }
 }
 
-pub(super) fn commit_block_field_buffer(
-    block: usize,
-    field_idx: usize,
-    buf: &str,
-    draft: &mut HashMap<String, String>,
-) {
-    let keys = match block {
-        CONFIG_BLOCK_ROTATION => ROTATION_BLOCK_FIELDS,
-        CONFIG_BLOCK_LIBRARY => LIBRARY_BLOCK_FIELDS,
-        CONFIG_BLOCK_APPLY_DISPLAY => APPLY_DISPLAY_BLOCK_FIELDS,
-        CONFIG_BLOCK_TUI => TUI_BLOCK_FIELDS,
-        WALLHAVEN_FIELDS_BLOCK => WALLHAVEN_BLOCK_FIELDS,
-        _ => return,
-    };
-    let Some(key) = keys.get(field_idx) else {
-        return;
-    };
-    draft.insert((*key).into(), buf.trim().to_string());
-}
-
 pub(super) fn default_wallhaven_source_entry() -> SourceEntry {
     default_wallhaven_source()
 }
