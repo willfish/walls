@@ -9,6 +9,37 @@ GitHub milestone names (v0.2, v0.4, …) do not always match crate versions: **0
 
 ## [Unreleased]
 
+## [0.13.3] - 2026-06-15
+  git hooks install on enter (pre-commit + pre-push)
+  nix fmt              — run all format/lint hooks
+  pre-commit run -a    — same, manually
+  cargo build / test / clippy
+  nix build .#checks.x86_64-linux.pre-commit
+  config: ~/.config/walls/config.json
+## Unreleased (cb13579..c227ad0)
+### Bug Fixes
+- (**benches**) use standard black_box - (b9763ce) - William Fish
+- (**tray**) collapse resvg dependency graph - (401b546) - William Fish
+- (**tray**) use resvg raster types - (46b1451) - William Fish
+### Refactoring
+- (**cli**) introduce command outcomes - (5509778) - William Fish
+- (**cli**) centralize source edit field schema - (5df4ea7) - William Fish
+- (**cli**) extract command result output helpers - (cb13579) - William Fish
+- (**core**) expose binary resolution through facade - (c227ad0) - William Fish
+- (**core**) introduce provider run outcomes - (a13fc70) - William Fish
+- (**core**) extract apply transaction - (10ea985) - William Fish
+- (**core**) extract queue provider execution - (e39cca9) - William Fish
+- (**tray**) extract action runner - (b571260) - William Fish
+- (**tui**) centralize block edit field schema - (b4917c1) - William Fish
+- (**tui**) structure browse row selection - (6ece324) - William Fish
+### Miscellaneous Chores
+- (**deps**) bump criterion from 0.5.1 to 0.8.2 - (d06a7e6) - dependabot[bot]
+- (**deps**) bump resvg from 0.44.0 to 0.47.0 - (9f992aa) - dependabot[bot]
+- (**deps**) bump chrono from 0.4.44 to 0.4.45 - (d94371b) - dependabot[bot]
+- (**deps**) bump ratatui from 0.30.0 to 0.30.1 - (0d76d63) - dependabot[bot]
+
+
+
 ## [0.13.2] - 2026-06-14
 
 Reissued mutable release for the completed v0.10.0, v0.11.0, v0.12.0, and v0.13.0 milestone work after moving the repository to rewritten linear conventional-commit history.
@@ -180,7 +211,8 @@ Initial share of the workspace (M1–M5 scaffold).
 - `systemd` user `walls.service` + `walls.timer`; Nix flake; CI (rustfmt, clippy, test, audit/deny, multi-arch Nix)
 - Example `config.json` / `secrets.json` and home-manager timer sketch
 
-[unreleased]: https://github.com/willfish/walls/compare/v0.13.2...HEAD
+[unreleased]: https://github.com/willfish/walls/compare/v0.13.3...HEAD
+[0.13.3]: https://github.com/willfish/walls/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/willfish/walls/releases/tag/v0.13.2
 [0.9.0]: https://github.com/willfish/walls/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/willfish/walls/compare/v0.7.0...v0.8.0
