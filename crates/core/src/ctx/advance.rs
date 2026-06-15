@@ -113,6 +113,107 @@ enum ProviderSlot {
     Spotlight,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ProviderRunner {
+    Local,
+    Queue {
+        slot: ProviderSlot,
+    },
+    Direct {
+        source_kind: SourceKind,
+        fallback_provider_id: &'static str,
+    },
+    Inline {
+        source_kind: SourceKind,
+        internet_required: bool,
+        fallback_provider_id: &'static str,
+    },
+}
+
+impl ProviderRunner {
+    fn for_slot(slot: ProviderSlot) -> Self {
+        match slot {
+            ProviderSlot::Local => Self::Local,
+            ProviderSlot::Unsplash | ProviderSlot::Wallhaven => Self::Queue { slot },
+            ProviderSlot::Bing => Self::Direct {
+                source_kind: SourceKind::Bing,
+                fallback_provider_id: "json",
+            },
+            ProviderSlot::Json => Self::Direct {
+                source_kind: SourceKind::Json,
+                fallback_provider_id: "mediarss",
+            },
+            ProviderSlot::MediaRss => Self::Direct {
+                source_kind: SourceKind::MediaRss,
+                fallback_provider_id: "reddit",
+            },
+            ProviderSlot::Reddit => Self::Inline {
+                source_kind: SourceKind::Reddit,
+                internet_required: true,
+                fallback_provider_id: "next configured provider",
+            },
+            ProviderSlot::Apod => Self::Inline {
+                source_kind: SourceKind::Apod,
+                internet_required: true,
+                fallback_provider_id: "next configured provider",
+            },
+            ProviderSlot::Pixabay => Self::Inline {
+                source_kind: SourceKind::Pixabay,
+                internet_required: true,
+                fallback_provider_id: "next configured provider",
+            },
+            ProviderSlot::Immich => Self::Inline {
+                source_kind: SourceKind::Immich,
+                internet_required: true,
+                fallback_provider_id: "next configured provider",
+            },
+            ProviderSlot::Attribution => Self::Inline {
+                source_kind: SourceKind::Attribution,
+                internet_required: true,
+                fallback_provider_id: "next configured provider",
+            },
+            ProviderSlot::Spotlight => Self::Inline {
+                source_kind: SourceKind::Spotlight,
+                internet_required: false,
+                fallback_provider_id: "next configured provider",
+            },
+        }
+    }
+
+    async fn run(
+        self,
+        advance: &mut AdvanceNext<'_>,
+    ) -> anyhow::Result<Option<ProviderRunOutcome>> {
+        match self {
+            Self::Local => advance.apply_local_candidate(),
+            Self::Queue {
+                slot: ProviderSlot::Unsplash,
+            } => super::queue_providers::apply_unsplash_queue(advance.ctx).await,
+            Self::Queue {
+                slot: ProviderSlot::Wallhaven,
+            } => super::queue_providers::apply_wallhaven_queue(advance.ctx).await,
+            Self::Queue { .. } => Ok(None),
+            Self::Direct {
+                source_kind,
+                fallback_provider_id,
+            } => {
+                advance
+                    .try_direct_provider(source_kind, fallback_provider_id)
+                    .await
+            }
+            Self::Inline {
+                source_kind,
+                internet_required,
+                fallback_provider_id,
+            } => {
+                advance
+                    .try_inline_provider(source_kind, internet_required, fallback_provider_id)
+                    .await
+            }
+        }
+    }
+}
+
 struct AdvanceNext<'ctx> {
     ctx: &'ctx mut WallsCtx,
     mode: AdvanceMode,
@@ -178,43 +279,11 @@ impl<'ctx> AdvanceNext<'ctx> {
     }
 
     async fn apply_provider_slot(&mut self, slot: ProviderSlot) -> anyhow::Result<Option<PathBuf>> {
-        match slot {
-            ProviderSlot::Local => self.apply_local_candidate(),
-            ProviderSlot::Unsplash => super::queue_providers::apply_unsplash_queue(self.ctx).await,
-            ProviderSlot::Wallhaven => {
-                super::queue_providers::apply_wallhaven_queue(self.ctx).await
-            }
-            ProviderSlot::Bing => self.apply_bing().await,
-            ProviderSlot::Json => self.apply_json_feed().await,
-            ProviderSlot::MediaRss => self.apply_media_rss().await,
-            ProviderSlot::Reddit => {
-                self.try_inline_provider(SourceKind::Reddit, true, "next configured provider")
-                    .await
-            }
-            ProviderSlot::Apod => {
-                self.try_inline_provider(SourceKind::Apod, true, "next configured provider")
-                    .await
-            }
-            ProviderSlot::Pixabay => {
-                self.try_inline_provider(SourceKind::Pixabay, true, "next configured provider")
-                    .await
-            }
-            ProviderSlot::Immich => {
-                self.try_inline_provider(SourceKind::Immich, true, "next configured provider")
-                    .await
-            }
-            ProviderSlot::Attribution => {
-                self.try_inline_provider(SourceKind::Attribution, true, "next configured provider")
-                    .await
-            }
-            ProviderSlot::Spotlight => {
-                self.try_inline_provider(SourceKind::Spotlight, false, "next configured provider")
-                    .await
-            }
-        }
+        let outcome = ProviderRunner::for_slot(slot).run(self).await?;
+        Ok(outcome.and_then(|outcome| self.finish_provider_outcome(outcome)))
     }
 
-    fn apply_local_candidate(&mut self) -> anyhow::Result<Option<PathBuf>> {
+    fn apply_local_candidate(&mut self) -> anyhow::Result<Option<ProviderRunOutcome>> {
         let provider = local_provider();
         let mut picker = LocalCandidatePicker::new(
             &self.ctx.state.history,
@@ -225,18 +294,16 @@ impl<'ctx> AdvanceNext<'ctx> {
         let candidate_count = picker.seen_any;
         let Some(path) = picker.finish() else {
             tracing::info!("no wallpaper candidates");
-            return Ok(
-                self.finish_provider_outcome(ProviderRunOutcome::not_applied(
-                    provider.no_candidates(
-                        ProviderNoCandidateReason::EmptyResult,
-                        Some(candidate_count),
-                    ),
-                )),
-            );
+            return Ok(Some(ProviderRunOutcome::not_applied(
+                provider.no_candidates(
+                    ProviderNoCandidateReason::EmptyResult,
+                    Some(candidate_count),
+                ),
+            )));
         };
         self.ctx
             .apply_file_inner(&path, ApplyTrigger::Auto, None, true)?;
-        Ok(self.finish_provider_outcome(ProviderRunOutcome::applied(
+        Ok(Some(ProviderRunOutcome::applied(
             Some(path),
             provider.applied(Some(candidate_count)),
         )))
@@ -268,7 +335,7 @@ impl<'ctx> AdvanceNext<'ctx> {
         source_kind: SourceKind,
         internet_required: bool,
         fallback_provider_id: &'static str,
-    ) -> anyhow::Result<Option<PathBuf>> {
+    ) -> anyhow::Result<Option<ProviderRunOutcome>> {
         let Some(source) = self
             .ctx
             .config
@@ -281,24 +348,22 @@ impl<'ctx> AdvanceNext<'ctx> {
         };
         let provider = crate::providers::provider_for_source(&source);
         if !source.enabled {
-            self.record(
+            return Ok(Some(ProviderRunOutcome::not_applied(
                 provider
                     .attempt(ProviderOperation::AdvanceNext)
                     .with_status(ProviderStatus::Disabled)
                     .skipped(ProviderNoCandidateReason::Disabled)
                     .with_fallback(fallback_provider_id),
-            );
-            return Ok(None);
+            )));
         }
         if internet_required && !self.ctx.config.change.internet_enabled {
-            self.record(
+            return Ok(Some(ProviderRunOutcome::not_applied(
                 provider
                     .attempt(ProviderOperation::AdvanceNext)
                     .with_status(ProviderStatus::OfflineDisabled)
                     .skipped(ProviderNoCandidateReason::OfflineDisabled)
                     .with_fallback(fallback_provider_id),
-            );
-            return Ok(None);
+            )));
         }
 
         let result = match source_kind {
@@ -312,20 +377,18 @@ impl<'ctx> AdvanceNext<'ctx> {
         };
 
         match result {
-            Ok(Some(path)) => Ok(self.finish_provider_outcome(ProviderRunOutcome::applied(
+            Ok(Some(path)) => Ok(Some(ProviderRunOutcome::applied(
                 Some(path),
                 provider
                     .attempt(ProviderOperation::AdvanceNext)
                     .applied(Some(1)),
             ))),
-            Ok(None) => Ok(
-                self.finish_provider_outcome(ProviderRunOutcome::not_applied(
-                    provider
-                        .attempt(ProviderOperation::AdvanceNext)
-                        .no_candidates(ProviderNoCandidateReason::EmptyResult, Some(0))
-                        .with_fallback(fallback_provider_id),
-                )),
-            ),
+            Ok(None) => Ok(Some(ProviderRunOutcome::not_applied(
+                provider
+                    .attempt(ProviderOperation::AdvanceNext)
+                    .no_candidates(ProviderNoCandidateReason::EmptyResult, Some(0))
+                    .with_fallback(fallback_provider_id),
+            ))),
             Err(error) => {
                 tracing::warn!(
                     provider = provider.id,
@@ -333,14 +396,12 @@ impl<'ctx> AdvanceNext<'ctx> {
                     "provider failed, trying next source"
                 );
                 let (kind, status_code) = ProviderFailureKind::classify(&error);
-                Ok(
-                    self.finish_provider_outcome(ProviderRunOutcome::not_applied(
-                        provider
-                            .attempt(ProviderOperation::AdvanceNext)
-                            .failed(kind, status_code, Some(error.to_string()))
-                            .with_fallback(fallback_provider_id),
-                    )),
-                )
+                Ok(Some(ProviderRunOutcome::not_applied(
+                    provider
+                        .attempt(ProviderOperation::AdvanceNext)
+                        .failed(kind, status_code, Some(error.to_string()))
+                        .with_fallback(fallback_provider_id),
+                )))
             }
         }
     }
@@ -349,7 +410,7 @@ impl<'ctx> AdvanceNext<'ctx> {
         &mut self,
         source_kind: SourceKind,
         fallback_provider_id: &'static str,
-    ) -> anyhow::Result<Option<PathBuf>> {
+    ) -> anyhow::Result<Option<ProviderRunOutcome>> {
         let Some(source) = self
             .ctx
             .config
@@ -362,24 +423,22 @@ impl<'ctx> AdvanceNext<'ctx> {
         };
         let provider = crate::providers::provider_for_source(&source);
         if !source.enabled {
-            self.record(
+            return Ok(Some(ProviderRunOutcome::not_applied(
                 provider
                     .attempt(ProviderOperation::AdvanceNext)
                     .with_status(ProviderStatus::Disabled)
                     .skipped(ProviderNoCandidateReason::Disabled)
                     .with_fallback(fallback_provider_id),
-            );
-            return Ok(None);
+            )));
         }
         if !self.ctx.config.change.internet_enabled {
-            self.record(
+            return Ok(Some(ProviderRunOutcome::not_applied(
                 provider
                     .attempt(ProviderOperation::AdvanceNext)
                     .with_status(ProviderStatus::OfflineDisabled)
                     .skipped(ProviderNoCandidateReason::OfflineDisabled)
                     .with_fallback(fallback_provider_id),
-            );
-            return Ok(None);
+            )));
         }
 
         self.provider_retries.clear();
@@ -393,7 +452,7 @@ impl<'ctx> AdvanceNext<'ctx> {
         match result {
             Ok(Some(path)) => {
                 let retries = std::mem::take(&mut self.provider_retries);
-                Ok(self.finish_provider_outcome(ProviderRunOutcome::applied(
+                Ok(Some(ProviderRunOutcome::applied(
                     Some(path),
                     provider
                         .attempt(ProviderOperation::AdvanceNext)
@@ -403,15 +462,13 @@ impl<'ctx> AdvanceNext<'ctx> {
             }
             Ok(None) => {
                 let retries = std::mem::take(&mut self.provider_retries);
-                Ok(
-                    self.finish_provider_outcome(ProviderRunOutcome::not_applied(
-                        provider
-                            .attempt(ProviderOperation::AdvanceNext)
-                            .with_retries(retries)
-                            .no_candidates(ProviderNoCandidateReason::EmptyResult, Some(0))
-                            .with_fallback(fallback_provider_id),
-                    )),
-                )
+                Ok(Some(ProviderRunOutcome::not_applied(
+                    provider
+                        .attempt(ProviderOperation::AdvanceNext)
+                        .with_retries(retries)
+                        .no_candidates(ProviderNoCandidateReason::EmptyResult, Some(0))
+                        .with_fallback(fallback_provider_id),
+                )))
             }
             Err(error) => {
                 let retries = std::mem::take(&mut self.provider_retries);
@@ -421,15 +478,13 @@ impl<'ctx> AdvanceNext<'ctx> {
                     "provider failed, trying next source"
                 );
                 let (kind, status_code) = ProviderFailureKind::classify(&error);
-                Ok(
-                    self.finish_provider_outcome(ProviderRunOutcome::not_applied(
-                        provider
-                            .attempt(ProviderOperation::AdvanceNext)
-                            .with_retries(retries)
-                            .failed(kind, status_code, Some(error.to_string()))
-                            .with_fallback(fallback_provider_id),
-                    )),
-                )
+                Ok(Some(ProviderRunOutcome::not_applied(
+                    provider
+                        .attempt(ProviderOperation::AdvanceNext)
+                        .with_retries(retries)
+                        .failed(kind, status_code, Some(error.to_string()))
+                        .with_fallback(fallback_provider_id),
+                )))
             }
         }
     }
@@ -437,10 +492,6 @@ impl<'ctx> AdvanceNext<'ctx> {
     // Minimal support for Bing provider (public endpoint, no key) so that
     // a SourceEntry {type: "bing"} can deliver a real wallpaper.
     // Fetches current daily image using reqwest (already a dep).
-    async fn apply_bing(&mut self) -> anyhow::Result<Option<PathBuf>> {
-        self.try_direct_provider(SourceKind::Bing, "json").await
-    }
-
     async fn apply_bing_inner(&mut self) -> anyhow::Result<Option<PathBuf>> {
         use crate::config::SourceKind;
         let bing_sources: Vec<_> = self
@@ -532,10 +583,6 @@ impl<'ctx> AdvanceNext<'ctx> {
     }
 
     // Minimal support for JSON image feed (url + optional image_path like "$.download_url").
-    async fn apply_json_feed(&mut self) -> anyhow::Result<Option<PathBuf>> {
-        self.try_direct_provider(SourceKind::Json, "mediarss").await
-    }
-
     async fn apply_json_feed_inner(&mut self) -> anyhow::Result<Option<PathBuf>> {
         use crate::config::SourceKind;
         let json_sources: Vec<_> = self
@@ -633,11 +680,6 @@ impl<'ctx> AdvanceNext<'ctx> {
 
     // Minimal support for Media RSS (url pointing to RSS with enclosure or media:content).
     // Supports the default in example for "mediarss" type.
-    async fn apply_media_rss(&mut self) -> anyhow::Result<Option<PathBuf>> {
-        self.try_direct_provider(SourceKind::MediaRss, "reddit")
-            .await
-    }
-
     async fn apply_media_rss_inner(&mut self) -> anyhow::Result<Option<PathBuf>> {
         use crate::config::SourceKind;
         let rss_sources: Vec<_> = self

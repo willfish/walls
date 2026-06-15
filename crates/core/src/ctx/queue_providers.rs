@@ -6,22 +6,24 @@ use super::WallsCtx;
 use crate::apply::ApplyTrigger;
 use crate::providers::{
     ProviderDescriptor, ProviderFailureKind, ProviderNoCandidateReason, ProviderOperation,
-    ProviderStatus,
+    ProviderRunOutcome, ProviderStatus,
 };
 
-pub(super) async fn apply_wallhaven_queue(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
+pub(super) async fn apply_wallhaven_queue(
+    ctx: &mut WallsCtx,
+) -> anyhow::Result<Option<ProviderRunOutcome>> {
     let provider = crate::providers::wallhaven_provider(&ctx.config, &ctx.secrets);
     let client = crate::wallhaven::WallhavenClient::new(
         crate::wallhaven::api_base(),
         &ctx.secrets.wallhaven_api_key,
     )?;
     if let Some(path) = apply_wallhaven_queue_head(ctx, &client, &provider).await? {
-        ctx.record_provider_attempt(
+        return Ok(Some(ProviderRunOutcome::applied(
+            Some(path),
             provider
                 .attempt(ProviderOperation::AdvanceNext)
                 .applied(None),
-        );
-        return Ok(Some(path));
+        )));
     }
 
     if !provider.enabled {
@@ -35,45 +37,44 @@ pub(super) async fn apply_wallhaven_queue(ctx: &mut WallsCtx) -> anyhow::Result<
         } else {
             ProviderStatus::Disabled
         };
-        ctx.record_provider_attempt(
+        return Ok(Some(ProviderRunOutcome::not_applied(
             provider
                 .attempt(ProviderOperation::QueueRefill)
                 .with_status(status)
                 .skipped(reason)
                 .with_fallback("bing"),
-        );
-        return Ok(None);
+        )));
     }
 
     match crate::wallhaven::refill_wallhaven_cache(&client, &ctx.config, &mut ctx.state).await {
         Ok(()) => ctx.save_state()?,
         Err(error) => {
             tracing::warn!(error = %error, "wallhaven: queue refill failed, trying next source");
-            ctx.record_provider_attempt(
+            return Ok(Some(ProviderRunOutcome::not_applied(
                 provider
                     .attempt(ProviderOperation::QueueRefill)
                     .failed(ProviderFailureKind::Unknown, None, Some(error.to_string()))
                     .with_fallback("bing"),
-            );
+            )));
         }
     }
 
     let applied = apply_wallhaven_queue_head(ctx, &client, &provider).await?;
-    if applied.is_some() {
-        ctx.record_provider_attempt(
+    if let Some(path) = applied {
+        Ok(Some(ProviderRunOutcome::applied(
+            Some(path),
             provider
                 .attempt(ProviderOperation::AdvanceNext)
                 .applied(None),
-        );
-    } else if !ctx.provider_status_report.attempted_provider(&provider.id) {
-        ctx.record_provider_attempt(
+        )))
+    } else {
+        Ok(Some(ProviderRunOutcome::not_applied(
             provider
                 .attempt(ProviderOperation::QueueRefill)
                 .no_candidates(ProviderNoCandidateReason::QueueEmpty, Some(0))
                 .with_fallback("bing"),
-        );
+        )))
     }
-    Ok(applied)
 }
 
 async fn apply_wallhaven_queue_head(
@@ -111,59 +112,60 @@ async fn apply_wallhaven_queue_head(
     Ok(Some(path))
 }
 
-pub(super) async fn apply_unsplash_queue(ctx: &mut WallsCtx) -> anyhow::Result<Option<PathBuf>> {
+pub(super) async fn apply_unsplash_queue(
+    ctx: &mut WallsCtx,
+) -> anyhow::Result<Option<ProviderRunOutcome>> {
     let provider = crate::providers::unsplash_provider(&ctx.config, &ctx.secrets);
     if !provider.enabled {
         let (status, reason) = unsplash_unavailable_reason(ctx);
-        ctx.record_provider_attempt(
+        return Ok(Some(ProviderRunOutcome::not_applied(
             provider
                 .attempt(ProviderOperation::QueueRefill)
                 .with_status(status)
                 .skipped(reason)
                 .with_fallback("wallhaven"),
-        );
-        return Ok(None);
+        )));
     }
 
     let client = unsplash_client(ctx)?;
     if let Some(path) = apply_unsplash_queue_head(ctx, &client, &provider).await? {
-        ctx.record_provider_attempt(
+        return Ok(Some(ProviderRunOutcome::applied(
+            Some(path),
             provider
                 .attempt(ProviderOperation::AdvanceNext)
                 .applied(None),
-        );
-        return Ok(Some(path));
+        )));
     }
 
     match crate::unsplash::refill_unsplash_cache(&client, &ctx.config, &mut ctx.state).await {
         Ok(()) => ctx.save_state()?,
         Err(error) => {
             tracing::warn!(error = %error, "unsplash: queue refill failed, trying next source");
-            ctx.record_provider_attempt(
+            return Ok(Some(ProviderRunOutcome::not_applied(
                 provider
                     .attempt(ProviderOperation::QueueRefill)
                     .failed(ProviderFailureKind::Unknown, None, Some(error.to_string()))
                     .with_fallback("wallhaven"),
-            );
+            )));
         }
     }
 
     let applied = apply_unsplash_queue_head(ctx, &client, &provider).await?;
-    if applied.is_some() {
-        ctx.record_provider_attempt(
+    if let Some(path) = applied {
+        Ok(Some(ProviderRunOutcome::applied(
+            Some(path),
             provider
                 .attempt(ProviderOperation::AdvanceNext)
                 .applied(None),
-        );
-    } else if !ctx.provider_status_report.attempted_provider(&provider.id) {
-        ctx.record_provider_attempt(
+        )))
+    } else {
+        Ok(Some(ProviderRunOutcome::not_applied(
             provider
                 .attempt(ProviderOperation::QueueRefill)
                 .no_candidates(ProviderNoCandidateReason::QueueEmpty, Some(0))
                 .with_fallback("wallhaven"),
-        );
+        )))
     }
-    Ok(applied)
 }
 
 fn unsplash_unavailable_reason(ctx: &WallsCtx) -> (ProviderStatus, ProviderNoCandidateReason) {
