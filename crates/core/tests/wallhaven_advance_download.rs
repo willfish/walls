@@ -5,6 +5,7 @@ mod common {
 }
 
 use common::FetchHarness;
+use walls_core::providers::ProviderOperation;
 use wiremock::MockServer;
 
 #[tokio::test]
@@ -28,4 +29,10 @@ async fn advance_next_downloads_when_queued_but_not_cached() {
     let applied = ctx.advance_next().await.unwrap().expect("applied");
     assert!(applied.exists());
     assert!(ctx.state.cache_queue.is_empty());
+    assert!(ctx
+        .provider_status_report
+        .attempts
+        .iter()
+        .any(|attempt| attempt.provider_id == "wallhaven"
+            && attempt.operation == ProviderOperation::AdvanceNext));
 }

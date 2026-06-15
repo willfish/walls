@@ -1,5 +1,6 @@
 use std::fs;
 
+use walls_core::providers::ProviderOperation;
 use walls_core::WallsCtx;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -103,4 +104,10 @@ async fn advance_next_downloads_queued_unsplash_photo_and_records_metadata() {
         current.description.as_deref(),
         Some("A mountain at sunrise")
     );
+    assert!(ctx
+        .provider_status_report
+        .attempts
+        .iter()
+        .any(|attempt| attempt.provider_id == "unsplash"
+            && attempt.operation == ProviderOperation::AdvanceNext));
 }
