@@ -165,35 +165,13 @@ pub fn menu_actions_for_availability(
 }
 
 pub fn dispatch(action: MenuAction) -> ActionOutcome {
-    let walls = resolve_walls_bin();
-    match action {
-        MenuAction::Next => dispatch_next(),
-        MenuAction::Prev => dispatch_prev(),
-        MenuAction::Favorite => dispatch_favorite(),
-        MenuAction::Pause => dispatch_set_paused(true),
-        MenuAction::Resume => dispatch_set_paused(false),
-        MenuAction::OpenTui => match crate::tui::spawn_tui(&walls) {
-            Ok(()) => ActionOutcome {
-                refresh: false,
-                quit: false,
-                feedback: Some(ActionFeedback::success("Opened TUI")),
-            },
-            Err(err) => {
-                let message = open_tui_error_message(&err);
-                tracing::warn!("{message}");
-                ActionOutcome {
-                    refresh: true,
-                    quit: false,
-                    feedback: Some(ActionFeedback::error(message)),
-                }
-            }
+    TrayActionRunner::new(
+        RealCoreActionExecutor,
+        RealTuiLauncher {
+            walls: resolve_walls_bin(),
         },
-        MenuAction::Quit => ActionOutcome {
-            refresh: false,
-            quit: true,
-            feedback: None,
-        },
-    }
+    )
+    .dispatch(action)
 }
 
 fn open_tui_error_message(error: &anyhow::Error) -> String {
@@ -209,77 +187,161 @@ pub fn tooltip_with_feedback(base: &str, feedback: Option<&ActionFeedback>) -> S
     }
 }
 
-fn dispatch_next() -> ActionOutcome {
-    match rotation::advance_manual() {
-        Ok(Some(path)) => ActionOutcome::refreshing(Some(ActionFeedback::success(format!(
-            "Applied next wallpaper: {}",
-            display_path(&path)
-        )))),
-        Ok(None) => ActionOutcome::refreshing(Some(ActionFeedback::no_change(
-            "No next wallpaper available",
-        ))),
-        Err(err) => {
-            let message = format!("Next wallpaper failed: {err:#}");
-            tracing::warn!("{message}");
-            ActionOutcome::refreshing(Some(ActionFeedback::error(message)))
+trait CoreActionExecutor {
+    fn advance_next(&self) -> anyhow::Result<Option<PathBuf>>;
+    fn advance_prev(&self) -> anyhow::Result<Option<PathBuf>>;
+    fn favorite_current(&self) -> anyhow::Result<PathBuf>;
+    fn set_paused(&self, paused: bool) -> anyhow::Result<bool>;
+}
+
+trait TuiLauncher {
+    fn spawn_tui(&self) -> anyhow::Result<()>;
+}
+
+struct TrayActionRunner<C, T> {
+    core: C,
+    tui: T,
+}
+
+impl<C, T> TrayActionRunner<C, T>
+where
+    C: CoreActionExecutor,
+    T: TuiLauncher,
+{
+    fn new(core: C, tui: T) -> Self {
+        Self { core, tui }
+    }
+
+    fn dispatch(&self, action: MenuAction) -> ActionOutcome {
+        match action {
+            MenuAction::Next => self.dispatch_next(),
+            MenuAction::Prev => self.dispatch_prev(),
+            MenuAction::Favorite => self.dispatch_favorite(),
+            MenuAction::Pause => self.dispatch_set_paused(true),
+            MenuAction::Resume => self.dispatch_set_paused(false),
+            MenuAction::OpenTui => self.dispatch_open_tui(),
+            MenuAction::Quit => ActionOutcome {
+                refresh: false,
+                quit: true,
+                feedback: None,
+            },
+        }
+    }
+
+    fn dispatch_next(&self) -> ActionOutcome {
+        match self.core.advance_next() {
+            Ok(Some(path)) => ActionOutcome::refreshing(Some(ActionFeedback::success(format!(
+                "Applied next wallpaper: {}",
+                display_path(&path)
+            )))),
+            Ok(None) => ActionOutcome::refreshing(Some(ActionFeedback::no_change(
+                "No next wallpaper available",
+            ))),
+            Err(err) => {
+                let message = format!("Next wallpaper failed: {err:#}");
+                tracing::warn!("{message}");
+                ActionOutcome::refreshing(Some(ActionFeedback::error(message)))
+            }
+        }
+    }
+
+    fn dispatch_prev(&self) -> ActionOutcome {
+        match self.core.advance_prev() {
+            Ok(Some(path)) => ActionOutcome::refreshing(Some(ActionFeedback::success(format!(
+                "Restored previous wallpaper: {}",
+                display_path(&path)
+            )))),
+            Ok(None) => {
+                ActionOutcome::refreshing(Some(ActionFeedback::no_change("No previous wallpaper")))
+            }
+            Err(err) => {
+                let message = format!("Previous wallpaper failed: {err:#}");
+                tracing::warn!("{message}");
+                ActionOutcome::refreshing(Some(ActionFeedback::error(message)))
+            }
+        }
+    }
+
+    fn dispatch_favorite(&self) -> ActionOutcome {
+        match self.core.favorite_current() {
+            Ok(path) => ActionOutcome::refreshing(Some(ActionFeedback::success(format!(
+                "Favorited current wallpaper: {}",
+                display_path(&path)
+            )))),
+            Err(err) => {
+                let message = format!("Favorite current wallpaper failed: {err:#}");
+                tracing::warn!("{message}");
+                ActionOutcome::refreshing(Some(ActionFeedback::error(message)))
+            }
+        }
+    }
+
+    fn dispatch_set_paused(&self, paused: bool) -> ActionOutcome {
+        match self.core.set_paused(paused) {
+            Ok(true) => ActionOutcome::refreshing(Some(ActionFeedback::success("Rotation paused"))),
+            Ok(false) => {
+                ActionOutcome::refreshing(Some(ActionFeedback::success("Rotation resumed")))
+            }
+            Err(err) => {
+                let action = if paused { "Pause" } else { "Resume" };
+                let message = format!("{action} rotation failed: {err:#}");
+                tracing::warn!("{message}");
+                ActionOutcome::refreshing(Some(ActionFeedback::error(message)))
+            }
+        }
+    }
+
+    fn dispatch_open_tui(&self) -> ActionOutcome {
+        match self.tui.spawn_tui() {
+            Ok(()) => ActionOutcome {
+                refresh: false,
+                quit: false,
+                feedback: Some(ActionFeedback::success("Opened TUI")),
+            },
+            Err(err) => {
+                let message = open_tui_error_message(&err);
+                tracing::warn!("{message}");
+                ActionOutcome {
+                    refresh: true,
+                    quit: false,
+                    feedback: Some(ActionFeedback::error(message)),
+                }
+            }
         }
     }
 }
 
-fn dispatch_prev() -> ActionOutcome {
-    let result: anyhow::Result<Option<PathBuf>> = (|| {
+struct RealCoreActionExecutor;
+
+impl CoreActionExecutor for RealCoreActionExecutor {
+    fn advance_next(&self) -> anyhow::Result<Option<PathBuf>> {
+        rotation::advance_manual()
+    }
+
+    fn advance_prev(&self) -> anyhow::Result<Option<PathBuf>> {
         let mut ctx = WallsCtx::load()?;
         Ok(ctx.advance_prev()?)
-    })();
-    match result {
-        Ok(Some(path)) => ActionOutcome::refreshing(Some(ActionFeedback::success(format!(
-            "Restored previous wallpaper: {}",
-            display_path(&path)
-        )))),
-        Ok(None) => {
-            ActionOutcome::refreshing(Some(ActionFeedback::no_change("No previous wallpaper")))
-        }
-        Err(err) => {
-            let message = format!("Previous wallpaper failed: {err:#}");
-            tracing::warn!("{message}");
-            ActionOutcome::refreshing(Some(ActionFeedback::error(message)))
-        }
     }
-}
 
-fn dispatch_favorite() -> ActionOutcome {
-    let result: anyhow::Result<PathBuf> = (|| {
+    fn favorite_current(&self) -> anyhow::Result<PathBuf> {
         let ctx = WallsCtx::load()?;
         ctx.favorite_current()
-    })();
-    match result {
-        Ok(path) => ActionOutcome::refreshing(Some(ActionFeedback::success(format!(
-            "Favorited current wallpaper: {}",
-            display_path(&path)
-        )))),
-        Err(err) => {
-            let message = format!("Favorite current wallpaper failed: {err:#}");
-            tracing::warn!("{message}");
-            ActionOutcome::refreshing(Some(ActionFeedback::error(message)))
-        }
     }
-}
 
-fn dispatch_set_paused(paused: bool) -> ActionOutcome {
-    let result: anyhow::Result<bool> = (|| {
+    fn set_paused(&self, paused: bool) -> anyhow::Result<bool> {
         let mut ctx = WallsCtx::load()?;
         ctx.set_paused(paused)?;
         Ok(ctx.state.paused)
-    })();
-    match result {
-        Ok(true) => ActionOutcome::refreshing(Some(ActionFeedback::success("Rotation paused"))),
-        Ok(false) => ActionOutcome::refreshing(Some(ActionFeedback::success("Rotation resumed"))),
-        Err(err) => {
-            let action = if paused { "Pause" } else { "Resume" };
-            let message = format!("{action} rotation failed: {err:#}");
-            tracing::warn!("{message}");
-            ActionOutcome::refreshing(Some(ActionFeedback::error(message)))
-        }
+    }
+}
+
+struct RealTuiLauncher {
+    walls: PathBuf,
+}
+
+impl TuiLauncher for RealTuiLauncher {
+    fn spawn_tui(&self) -> anyhow::Result<()> {
+        crate::tui::spawn_tui(&self.walls)
     }
 }
 
@@ -460,6 +522,50 @@ mod tests {
         assert!(message.contains("ghostty --class=walls"), "{message}");
         assert!(message.contains("walls tui"), "{message}");
         assert!(message.contains("WALLS_TUI_CMD"), "{message}");
+    }
+
+    #[test]
+    fn tray_action_runner_maps_tui_launch_failure_to_refreshing_error_outcome() {
+        struct UnusedCoreActions;
+
+        impl CoreActionExecutor for UnusedCoreActions {
+            fn advance_next(&self) -> anyhow::Result<Option<PathBuf>> {
+                unreachable!("OpenTui must not call core actions")
+            }
+
+            fn advance_prev(&self) -> anyhow::Result<Option<PathBuf>> {
+                unreachable!("OpenTui must not call core actions")
+            }
+
+            fn favorite_current(&self) -> anyhow::Result<PathBuf> {
+                unreachable!("OpenTui must not call core actions")
+            }
+
+            fn set_paused(&self, _paused: bool) -> anyhow::Result<bool> {
+                unreachable!("OpenTui must not call core actions")
+            }
+        }
+
+        struct FailingTuiLauncher;
+
+        impl TuiLauncher for FailingTuiLauncher {
+            fn spawn_tui(&self) -> anyhow::Result<()> {
+                Err(anyhow::anyhow!("terminal not found"))
+            }
+        }
+
+        let outcome = TrayActionRunner::new(UnusedCoreActions, FailingTuiLauncher)
+            .dispatch(MenuAction::OpenTui);
+
+        assert!(outcome.refresh);
+        assert!(!outcome.quit);
+        let feedback = outcome.feedback.expect("error feedback");
+        assert_eq!(feedback.kind, FeedbackKind::Error);
+        assert!(feedback.message.contains("Open TUI failed"), "{feedback:?}");
+        assert!(
+            feedback.message.contains("terminal not found"),
+            "{feedback:?}"
+        );
     }
 
     #[test]
