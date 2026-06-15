@@ -9,15 +9,15 @@ use walls_core::validate::{
 use super::edit_fields::{
     block_field_kind, block_field_value_at, choice_display_value, commit_block_field_buffer,
     cycle_choice_value, default_wallhaven_source_entry, reddit_time_field_locked,
-    search_filter_field_value_at, source_entry_display_name, source_field_kind_for,
-    source_removal_protected, toggle_bool_value, APPLY_DISPLAY_BLOCK_FIELDS,
-    CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION, CONFIG_BLOCK_SOURCES,
-    CONFIG_BLOCK_TUI, LIBRARY_BLOCK_FIELDS, ROTATION_BLOCK_FIELDS, SEARCH_FILTER_FIELDS,
-    TUI_BLOCK_FIELDS, WALLHAVEN_BLOCK_FIELDS, WALLHAVEN_FIELDS_BLOCK,
+    search_filter_field_value_at, source_entry_display_name, source_removal_protected,
+    toggle_bool_value, APPLY_DISPLAY_BLOCK_FIELDS, CONFIG_BLOCK_APPLY_DISPLAY,
+    CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION, CONFIG_BLOCK_SOURCES, CONFIG_BLOCK_TUI,
+    LIBRARY_BLOCK_FIELDS, ROTATION_BLOCK_FIELDS, SEARCH_FILTER_FIELDS, TUI_BLOCK_FIELDS,
+    WALLHAVEN_BLOCK_FIELDS, WALLHAVEN_FIELDS_BLOCK,
 };
 use super::{
-    config_block_edit, source_edit, wallhaven_edit, App, EditFieldKind, EditSession, EditTarget,
-    InputMode, Tab, TagEditor, TagEditorMode,
+    config_block_edit, source_edit, source_field_schema, wallhaven_edit, App, EditFieldKind,
+    EditSession, EditTarget, InputMode, Tab, TagEditor, TagEditorMode,
 };
 use crate::tui::style::StatusKind;
 
@@ -160,7 +160,7 @@ impl App {
                     .draft_source
                     .as_ref()
                     .unwrap_or(&self.ctx.config.sources[*i]);
-                Self::source_editable_fields(src).len()
+                source_field_schema::source_field_specs(src).len()
             }
             EditTarget::Block(CONFIG_BLOCK_ROTATION) => ROTATION_BLOCK_FIELDS.len(),
             EditTarget::Block(CONFIG_BLOCK_LIBRARY) => LIBRARY_BLOCK_FIELDS.len(),
@@ -183,12 +183,10 @@ impl App {
                     .draft_source
                     .as_ref()
                     .unwrap_or(&self.ctx.config.sources[*i]);
-                let names = Self::source_editable_fields(src);
-                if sess.field_cursor < names.len() {
-                    source_field_kind_for(src, &names[sess.field_cursor])
-                } else {
-                    EditFieldKind::Text
-                }
+                let specs = source_field_schema::source_field_specs(src);
+                specs
+                    .get(sess.field_cursor)
+                    .map_or(EditFieldKind::Text, |spec| spec.kind)
             }
             EditTarget::Block(block) => {
                 let keys = match *block {
@@ -242,8 +240,9 @@ impl App {
         }
         if let EditTarget::Source(_) = &sess.target {
             if let Some(draft) = &sess.draft_source {
-                let names = Self::source_editable_fields(draft);
-                if let Some(name) = names.get(sess.field_cursor) {
+                let specs = source_field_schema::source_field_specs(draft);
+                if let Some(spec) = specs.get(sess.field_cursor) {
+                    let name = spec.key.as_str();
                     if draft.source_type == "wallhaven" && name == "purity_nsfw" {
                         return self.wallhaven_block_field_locked(name);
                     }
@@ -467,8 +466,8 @@ impl App {
     fn current_source_field_name(&self) -> Option<String> {
         let session = self.editing.as_ref()?;
         let draft = session.draft_source.as_ref()?;
-        let names = Self::source_editable_fields(draft);
-        names.get(session.field_cursor).cloned()
+        let specs = source_field_schema::source_field_specs(draft);
+        specs.get(session.field_cursor).map(|spec| spec.key.clone())
     }
 
     fn current_tag_values(&self) -> Vec<String> {
@@ -576,20 +575,16 @@ impl App {
         choice_display_value(kind, value)
     }
 
+    #[cfg(test)]
     pub fn source_editable_fields(src: &walls_core::config::SourceEntry) -> Vec<String> {
-        source_edit::source_editable_fields(src)
-    }
-
-    pub fn get_source_field(src: &walls_core::config::SourceEntry, name: &str) -> String {
-        source_edit::get_source_field(src, name)
+        source_field_schema::source_field_specs(src)
+            .into_iter()
+            .map(|spec| spec.key)
+            .collect()
     }
 
     pub(super) fn parse_bool_like(s: &str) -> Option<bool> {
         source_edit::parse_bool_like(s)
-    }
-
-    pub fn set_source_field(draft: &mut walls_core::config::SourceEntry, name: &str, buf: &str) {
-        source_edit::set_source_field(draft, name, buf);
     }
 
     /// Pure value lookup for a field at a given cursor idx for a target (no reliance on live editing sess cursor).
@@ -612,12 +607,10 @@ impl App {
                 } else {
                     &self.ctx.config.sources[*i]
                 };
-                let names = Self::source_editable_fields(src);
-                if idx < names.len() {
-                    Self::get_source_field(src, &names[idx])
-                } else {
-                    String::new()
-                }
+                let specs = source_field_schema::source_field_specs(src);
+                specs.get(idx).map_or_else(String::new, |spec| {
+                    source_field_schema::source_field_value(src, &spec.key)
+                })
             }
             EditTarget::Block(block) => {
                 let draft = self
@@ -661,11 +654,10 @@ impl App {
                     } else {
                         &self.ctx.config.sources[*i]
                     };
-                    let names = Self::source_editable_fields(src);
-                    if idx < names.len() {
-                        return Self::get_source_field(src, &names[idx]);
-                    }
-                    String::new()
+                    let specs = source_field_schema::source_field_specs(src);
+                    specs.get(idx).map_or_else(String::new, |spec| {
+                        source_field_schema::source_field_value(src, &spec.key)
+                    })
                 }
                 EditTarget::Block(block) => {
                     block_field_value_at(&self.ctx.config, *block, &sess.draft_block_values, idx)
@@ -948,11 +940,11 @@ impl App {
             match &mut sess.target {
                 EditTarget::Source(i) if *i < self.ctx.config.sources.len() => {
                     if let Some(draft) = &mut sess.draft_source {
-                        let names = Self::source_editable_fields(draft);
-                        if field_idx < names.len() {
-                            let name = &names[field_idx];
+                        let specs = source_field_schema::source_field_specs(draft);
+                        if let Some(spec) = specs.get(field_idx) {
+                            let name = &spec.key;
                             let prev_type = draft.source_type.clone();
-                            Self::set_source_field(draft, name, &buf);
+                            source_field_schema::set_source_field_value(draft, name, &buf);
                             if name == "type" && draft.source_type != prev_type {
                                 normalize_source_entry(draft);
                             }

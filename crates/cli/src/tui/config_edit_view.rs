@@ -3,8 +3,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem};
 
 use super::app::{
-    self, App, EditTarget, CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY, CONFIG_BLOCK_ROTATION,
-    CONFIG_BLOCK_TUI,
+    self, source_field_schema, App, EditTarget, CONFIG_BLOCK_APPLY_DISPLAY, CONFIG_BLOCK_LIBRARY,
+    CONFIG_BLOCK_ROTATION, CONFIG_BLOCK_TUI,
 };
 use super::line_view;
 use super::sources_view;
@@ -63,11 +63,12 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
         }
 
         let mut fields: Vec<(String, String, app::EditFieldKind)> = vec![];
+        let mut field_keys: Vec<String> = vec![];
         if let Some(ref src) = sess.draft_source {
-            for name in app::App::source_editable_fields(src) {
-                let label = app::source_field_label(src, &name);
-                let v = app::App::get_source_field(src, &name);
-                fields.push((label, v, app::source_field_kind_for(src, &name)));
+            for spec in source_field_schema::source_field_specs(src) {
+                let value = source_field_schema::source_field_value(src, &spec.key);
+                fields.push((spec.label, value, spec.kind));
+                field_keys.push(spec.key);
             }
             if let Some(key) = walls_core::config::source_secrets_key(&src.source_type) {
                 fields.push((
@@ -75,12 +76,14 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
                     walls_core::config::SECRETS_EDIT_HINT.into(),
                     app::EditFieldKind::Text,
                 ));
+                field_keys.push(String::new());
             } else if src.source_type == "wallhaven" {
                 fields.push((
                     "Wallhaven API key".into(),
                     walls_core::config::SECRETS_EDIT_HINT.into(),
                     app::EditFieldKind::Text,
                 ));
+                field_keys.push(String::new());
             }
         } else if matches!(
             &sess.target,
@@ -103,6 +106,7 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
                         v.clone(),
                         app::block_field_kind(app::WALLHAVEN_FIELDS_BLOCK, k),
                     ));
+                    field_keys.push((*k).into());
                 }
             }
             if matches!(&sess.target, EditTarget::Wallhaven) {
@@ -111,6 +115,7 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
                     walls_core::config::SECRETS_EDIT_HINT.into(),
                     app::EditFieldKind::Text,
                 ));
+                field_keys.push(String::new());
             }
         } else if let EditTarget::Block(block) = &sess.target {
             let keys = match *block {
@@ -127,30 +132,16 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
                         v.clone(),
                         app::block_field_kind(*block, k),
                     ));
+                    field_keys.push(String::new());
                 }
             }
         }
 
         let max_label = fields.iter().map(|(l, _, _)| l.len()).max().unwrap_or(0);
         let pad = std::cmp::min(max_label, 28);
-        let wallhaven_keys = if matches!(&sess.target, EditTarget::Wallhaven) {
-            app::WALLHAVEN_BLOCK_FIELDS
-        } else if matches!(&sess.target, EditTarget::SearchFilters) {
-            app::SEARCH_FILTER_FIELDS
-        } else {
-            &[] as &[&str]
-        };
-        let source_names = sess
-            .draft_source
-            .as_ref()
-            .map(app::App::source_editable_fields);
         for (i, (k, v, kind)) in fields.iter().enumerate() {
             let padded = format!("{:>width$}", k, width = pad);
-            let field_key = source_names
-                .as_ref()
-                .and_then(|names| names.get(i).map(String::as_str))
-                .or_else(|| wallhaven_keys.get(i).copied())
-                .unwrap_or("");
+            let field_key = field_keys.get(i).map(String::as_str).unwrap_or("");
             let val = if i == sess.field_cursor {
                 match kind {
                     app::EditFieldKind::Text => format!("{}|", sess.field_buffer),
