@@ -118,20 +118,9 @@ fn config_edit_form_lines(app: &App) -> Vec<String> {
                 field_keys.push(String::new());
             }
         } else if let EditTarget::Block(block) = &sess.target {
-            let keys = match *block {
-                CONFIG_BLOCK_ROTATION => app::ROTATION_BLOCK_FIELDS,
-                CONFIG_BLOCK_LIBRARY => app::LIBRARY_BLOCK_FIELDS,
-                CONFIG_BLOCK_APPLY_DISPLAY => app::APPLY_DISPLAY_BLOCK_FIELDS,
-                CONFIG_BLOCK_TUI => app::TUI_BLOCK_FIELDS,
-                _ => &[],
-            };
-            for k in keys {
-                if let Some(v) = sess.draft_block_values.get(*k) {
-                    fields.push((
-                        app::block_field_label(*block, k),
-                        v.clone(),
-                        app::block_field_kind(*block, k),
-                    ));
+            for spec in source_field_schema::block_field_specs(*block) {
+                if let Some(v) = sess.draft_block_values.get(&spec.key) {
+                    fields.push((spec.label, v.clone(), spec.kind));
                     field_keys.push(String::new());
                 }
             }
