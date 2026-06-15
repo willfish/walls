@@ -1,8 +1,7 @@
 use super::{RefreshLevel, WallsCtx};
 use crate::apply::{ApplyTrigger, FillMode};
+use crate::ctx::apply_transaction::{ApplyRequest, ApplyTransaction};
 use crate::error::{Result, WallsError};
-use crate::events::{append_event_best_effort, EventRecord};
-use crate::pipeline;
 use crate::state::CurrentWallMetadata;
 use std::path::{Path, PathBuf};
 
@@ -97,75 +96,49 @@ impl WallsCtx {
         metadata: CurrentWallMetadata,
         update_history: bool,
     ) -> anyhow::Result<()> {
-        let provider = metadata.provider.clone();
-        let composed = match pipeline::compose(&self.paths, &self.config.display, original) {
-            Ok(composed) => composed,
-            Err(error) => {
-                append_event_best_effort(
-                    &self.paths.event_journal_file,
-                    &EventRecord::apply_failed(
-                        trigger,
-                        original,
-                        None,
-                        provider,
-                        error.to_string(),
-                    ),
-                );
-                return Err(error);
-            }
-        };
-        if let Err(error) = crate::apply::apply_wallpaper(
-            &self.config.apply,
-            &composed,
+        ApplyTransaction::new(self).run(ApplyRequest::new(
             original,
-            self.fill_mode(),
             trigger,
-        ) {
-            append_event_best_effort(
-                &self.paths.event_journal_file,
-                &EventRecord::apply_failed(
-                    trigger,
-                    original,
-                    Some(&composed),
-                    provider,
-                    error.to_string(),
-                ),
-            );
-            return Err(error);
-        }
-        let history_id = original.display().to_string();
-        let source_id = original
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("local")
-            .to_string();
-        self.state.current = Some(crate::state::CurrentWall {
-            source_id,
             wallhaven_id,
-            provider: metadata.provider,
-            source_url: metadata.source_url,
-            author: metadata.author,
-            description: metadata.description,
-            original_path: history_id.clone(),
-            composed_path: composed.display().to_string(),
-            post_filter_path: Some(composed.display().to_string()),
-        });
-        if update_history {
-            self.state.history.retain(|h| h != &history_id);
-            self.state.history.insert(0, history_id);
-            if self.state.history.len() > 1000 {
-                self.state.history.truncate(1000);
-            }
-            self.state.history_index = 0;
-        }
-        self.state.last_change_unix = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
-        self.save_state()?;
-        append_event_best_effort(
-            &self.paths.event_journal_file,
-            &EventRecord::apply(trigger, original, &composed, provider),
-        );
+            metadata,
+            update_history,
+        ))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use crate::apply::ApplyTrigger;
+    use crate::ctx::apply_transaction::ApplyRequest;
+    use crate::state::CurrentWallMetadata;
+
+    #[test]
+    fn apply_request_names_transaction_inputs() {
+        let metadata = CurrentWallMetadata {
+            provider: Some("unsplash".into()),
+            source_url: Some("https://example.test/photo".into()),
+            author: Some("A. Photographer".into()),
+            description: Some("trees".into()),
+        };
+
+        let request = ApplyRequest::new(
+            Path::new("/tmp/original.jpg"),
+            ApplyTrigger::Auto,
+            Some("wallhaven-id".into()),
+            metadata.clone(),
+            false,
+        );
+
+        assert_eq!(request.original, Path::new("/tmp/original.jpg"));
+        assert_eq!(request.trigger, ApplyTrigger::Auto);
+        assert_eq!(request.wallhaven_id.as_deref(), Some("wallhaven-id"));
+        assert_eq!(request.metadata.provider, metadata.provider);
+        assert_eq!(request.metadata.source_url, metadata.source_url);
+        assert_eq!(request.metadata.author, metadata.author);
+        assert_eq!(request.metadata.description, metadata.description);
+        assert!(!request.update_history);
     }
 }
