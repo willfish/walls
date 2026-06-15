@@ -20,6 +20,7 @@ use walls_core::{RefreshLevel, WallsCtx, WallsError};
 mod tui;
 
 mod bin_utils;
+mod output;
 mod recovery;
 
 #[derive(Parser)]
@@ -1282,39 +1283,6 @@ fn print_json(value: serde_json::Value) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn command_result(
-    command: &str,
-    changed: bool,
-    status: &str,
-    path: Option<PathBuf>,
-    exit_code_reason: Option<&str>,
-) -> serde_json::Value {
-    serde_json::json!({
-        "command": command,
-        "changed": changed,
-        "status": status,
-        "path": path.map(|path| path.display().to_string()),
-        "exit_code_reason": exit_code_reason,
-    })
-}
-
-fn next_result(
-    changed: bool,
-    status: &str,
-    path: Option<PathBuf>,
-    exit_code_reason: Option<&str>,
-    provider_report: &ProviderStatusReport,
-) -> serde_json::Value {
-    serde_json::json!({
-        "command": "next",
-        "changed": changed,
-        "status": status,
-        "path": path.map(|path| path.display().to_string()),
-        "exit_code_reason": exit_code_reason,
-        "provider_attempts": &provider_report.attempts,
-    })
-}
-
 async fn cmd_next(
     manual: bool,
     refresh: Option<CliRefreshLevel>,
@@ -1333,7 +1301,7 @@ async fn cmd_next(
     let mut ctx = WallsCtx::load()?;
     if let Some(level) = refresh {
         match ctx.refresh_current(level.into())? {
-            Some(p) if json => print_json(next_result(
+            Some(p) if json => print_json(output::next_result(
                 true,
                 "refreshed",
                 Some(p),
@@ -1344,7 +1312,7 @@ async fn cmd_next(
                 println!("{}", p.display());
                 print_provider_attempts_human(verbose, &ctx.provider_status_report);
             }
-            None if json => print_json(next_result(
+            None if json => print_json(output::next_result(
                 false,
                 "missing_current",
                 None,
@@ -1361,7 +1329,7 @@ async fn cmd_next(
         ctx.advance_next().await?
     };
     match applied {
-        Some(p) if json => print_json(next_result(
+        Some(p) if json => print_json(output::next_result(
             true,
             "applied",
             Some(p),
@@ -1372,7 +1340,7 @@ async fn cmd_next(
             println!("{}", p.display());
             print_provider_attempts_human(verbose, &ctx.provider_status_report);
         }
-        None if json => print_json(next_result(
+        None if json => print_json(output::next_result(
             false,
             "no_change",
             None,
@@ -1719,9 +1687,11 @@ fn cmd_undo(json: bool) -> anyhow::Result<()> {
 fn cmd_restore_previous(command: &str, status: &str, json: bool) -> anyhow::Result<()> {
     let mut ctx = WallsCtx::load()?;
     match ctx.advance_prev() {
-        Ok(Some(p)) if json => print_json(command_result(command, true, status, Some(p), None))?,
+        Ok(Some(p)) if json => {
+            print_json(output::command_result(command, true, status, Some(p), None))?
+        }
         Ok(Some(p)) => println!("{}", p.display()),
-        Ok(None) if json => print_json(command_result(
+        Ok(None) if json => print_json(output::command_result(
             command,
             false,
             "no_previous",
@@ -1730,7 +1700,7 @@ fn cmd_restore_previous(command: &str, status: &str, json: bool) -> anyhow::Resu
         ))?,
         Ok(None) => println!("{}", recovery::no_previous_wallpaper()),
         Err(WallsError::PreviousOriginalMissing { path }) if json => {
-            print_json(command_result(
+            print_json(output::command_result(
                 command,
                 false,
                 "missing_previous",
