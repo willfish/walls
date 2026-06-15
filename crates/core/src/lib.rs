@@ -15,7 +15,7 @@
 
 pub mod apply;
 pub mod autostart;
-pub mod bin_resolve;
+pub(crate) mod bin_resolve;
 pub mod config;
 pub mod cosmic_theme;
 pub mod ctx;
@@ -43,6 +43,7 @@ pub mod unsplash;
 pub mod validate;
 pub mod wallhaven;
 
+pub use bin_resolve::{resolve_binary, BinResolveOpts};
 pub use ctx::{RefreshLevel, WallsCtx};
 pub use error::{Result, WallsError};
 pub use paths::{expand_home, WallsPaths};

@@ -4,9 +4,9 @@ use std::process::Command;
 use std::time::SystemTime;
 
 use crate::recovery;
-use walls_core::bin_resolve::{resolve_binary, BinResolveOpts};
 use walls_core::paths::WallsPaths;
 use walls_core::tray::{decide_tray_action, TrayAction};
+use walls_core::{resolve_binary, BinResolveOpts};
 
 /// Resolve the `walls-tray` binary for auto-starting the tray from the TUI/CLI.
 pub fn resolve_tray_bin() -> PathBuf {
