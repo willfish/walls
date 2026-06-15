@@ -2,6 +2,47 @@ use std::path::{Path, PathBuf};
 
 use super::style::{self, StateKind};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BrowseRow {
+    pub kind: BrowseRowKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BrowseRowKind {
+    Section(&'static str),
+    Empty(String),
+    Queue(String),
+    Local(PathBuf),
+    History(PathBuf),
+}
+
+impl BrowseRow {
+    pub(crate) fn label(&self) -> String {
+        match &self.kind {
+            BrowseRowKind::Section(label) => (*label).into(),
+            BrowseRowKind::Empty(label) => label.clone(),
+            BrowseRowKind::Queue(id) => format!("queue: {id}"),
+            BrowseRowKind::Local(path) => format!("local: {}", path.display()),
+            BrowseRowKind::History(path) => format!("history: {}", path.display()),
+        }
+    }
+
+    pub(crate) fn preview_path(&self, cache_dir: &Path) -> Option<PathBuf> {
+        match &self.kind {
+            BrowseRowKind::Local(path) | BrowseRowKind::History(path) => {
+                path.is_file().then_some(path.clone())
+            }
+            BrowseRowKind::Queue(id) => {
+                if let Some(photo_id) = walls_core::unsplash::queue_photo_id(id) {
+                    return walls_core::unsplash::cached_photo_path(cache_dir, photo_id);
+                }
+                walls_core::wallhaven::cached_wallpaper_path(cache_dir, id)
+            }
+            BrowseRowKind::Section(_) | BrowseRowKind::Empty(_) => None,
+        }
+    }
+}
+
 pub(super) fn history_lines(history: &[String], cursor: usize) -> Vec<String> {
     let lines: Vec<String> = history
         .iter()
@@ -28,77 +69,77 @@ pub(super) fn selected_history_preview_path(history: &[String], cursor: usize) -
         .filter(|path| path.is_file())
 }
 
-pub(super) fn browse_lines(items: Vec<String>, cursor: usize) -> Vec<String> {
-    items
-        .into_iter()
+pub(super) fn browse_lines(rows: &[BrowseRow], cursor: usize) -> Vec<String> {
+    rows.iter()
         .enumerate()
-        .map(|(i, line)| {
+        .map(|(i, row)| {
             let mark = if i == cursor { ">" } else { " " };
-            format!("{mark} {line}")
+            format!("{mark} {}", row.label())
         })
         .collect()
 }
 
-pub(super) fn browse_items(
+pub(super) fn browse_rows(
     queue: &[String],
     local_candidates: &[PathBuf],
     history: &[String],
-) -> Vec<String> {
-    let mut items = Vec::new();
-    items.push("-- cache queue --".into());
+) -> Vec<BrowseRow> {
+    let mut rows = Vec::new();
+    rows.push(BrowseRow {
+        kind: BrowseRowKind::Section("-- cache queue --"),
+    });
     if queue.is_empty() {
-        items.push(style::state_text(StateKind::Empty, "queue is empty"));
+        rows.push(BrowseRow {
+            kind: BrowseRowKind::Empty(style::state_text(StateKind::Empty, "queue is empty")),
+        });
     } else {
         for id in queue {
-            items.push(format!("queue: {id}"));
+            rows.push(BrowseRow {
+                kind: BrowseRowKind::Queue(id.clone()),
+            });
         }
     }
-    items.push("-- local folders --".into());
+    rows.push(BrowseRow {
+        kind: BrowseRowKind::Section("-- local folders --"),
+    });
     if local_candidates.is_empty() {
-        items.push(style::state_text(
-            StateKind::Empty,
-            "no local candidates found",
-        ));
+        rows.push(BrowseRow {
+            kind: BrowseRowKind::Empty(style::state_text(
+                StateKind::Empty,
+                "no local candidates found",
+            )),
+        });
     } else {
         for path in local_candidates {
-            items.push(format!("local: {}", path.display()));
+            rows.push(BrowseRow {
+                kind: BrowseRowKind::Local(path.clone()),
+            });
         }
     }
-    items.push("-- history --".into());
+    rows.push(BrowseRow {
+        kind: BrowseRowKind::Section("-- history --"),
+    });
     if history.is_empty() {
-        items.push(style::state_text(
-            StateKind::Empty,
-            "no wallpaper history captured yet",
-        ));
+        rows.push(BrowseRow {
+            kind: BrowseRowKind::Empty(style::state_text(
+                StateKind::Empty,
+                "no wallpaper history captured yet",
+            )),
+        });
     } else {
         for h in history {
-            items.push(format!("history: {h}"));
+            rows.push(BrowseRow {
+                kind: BrowseRowKind::History(PathBuf::from(h)),
+            });
         }
     }
-    items
+    rows
 }
 
 pub(super) fn selected_browse_preview_path(
-    items: Vec<String>,
+    rows: &[BrowseRow],
     cursor: usize,
     cache_dir: &Path,
 ) -> Option<PathBuf> {
-    let line = items.get(cursor)?;
-    browse_preview_path_for_line(line, cache_dir)
-}
-
-fn browse_preview_path_for_line(line: &str, cache_dir: &Path) -> Option<PathBuf> {
-    if let Some(path) = line
-        .strip_prefix("local: ")
-        .or_else(|| line.strip_prefix("history: "))
-    {
-        let path = PathBuf::from(path);
-        return path.is_file().then_some(path);
-    }
-
-    let id = line.strip_prefix("queue: ")?;
-    if let Some(photo_id) = walls_core::unsplash::queue_photo_id(id) {
-        return walls_core::unsplash::cached_photo_path(cache_dir, photo_id);
-    }
-    walls_core::wallhaven::cached_wallpaper_path(cache_dir, id)
+    rows.get(cursor)?.preview_path(cache_dir)
 }

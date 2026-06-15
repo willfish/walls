@@ -16,7 +16,10 @@ static WALLHAVEN_API_BASE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 use super::{
     action_for_key,
-    app::{App, EditFieldKind, EditTarget, SearchHit, APPLY_BACKEND_CHOICES, DISPLAY_MODE_CHOICES},
+    app::{
+        App, BrowseRowKind, EditFieldKind, EditTarget, SearchHit, APPLY_BACKEND_CHOICES,
+        DISPLAY_MODE_CHOICES,
+    },
     apply_effect,
     chrome_view::{footer_keys, footer_paragraph},
     draw_inner, handle_key,
@@ -1676,6 +1679,36 @@ fn open_target_follows_current_history_browse_and_search_selection() {
     assert_eq!(
         app.selected_open_target(),
         Some(OpenTarget::Url("https://wallhaven.cc/w/abc123".into()))
+    );
+}
+
+#[test]
+fn browse_rows_expose_typed_selection_targets() {
+    let mut app = test_app();
+    let history_path = app.ctx.paths.config_dir.join("history.jpg");
+    fs::create_dir_all(history_path.parent().expect("history parent")).expect("history parent");
+    fs::write(&history_path, b"history").expect("history image");
+    app.ctx.state.cache_queue = vec!["wall-123".into()];
+    app.ctx.state.history = vec![history_path.display().to_string()];
+
+    let rows = app.browse_rows();
+
+    assert!(rows
+        .iter()
+        .any(|row| row.kind == BrowseRowKind::Queue("wall-123".into())));
+    assert!(rows.iter().any(|row| matches!(
+        &row.kind,
+        BrowseRowKind::Local(path) if path.file_name().and_then(|name| name.to_str()) == Some("a.jpg")
+    )));
+    assert!(rows
+        .iter()
+        .any(|row| row.kind == BrowseRowKind::History(history_path.clone())));
+    assert_eq!(
+        rows.iter()
+            .find(|row| row.kind == BrowseRowKind::Queue("wall-123".into()))
+            .expect("queue row")
+            .label(),
+        "queue: wall-123"
     );
 }
 
