@@ -3,9 +3,9 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 
 use tempfile::TempDir;
+use walls_core::compose;
 use walls_core::config::DisplayConfig;
 use walls_core::paths::WallsPaths;
-use walls_core::pipeline::compose;
 
 #[test]
 fn compose_leaves_display_mode_to_backend_when_target_size_is_missing() {

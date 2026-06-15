@@ -1,7 +1,7 @@
 use std::fs;
 
 use walls_core::config::SourceEntry;
-use walls_core::sources::list_images;
+use walls_core::list_images;
 
 #[test]
 fn lists_images_in_folder() {

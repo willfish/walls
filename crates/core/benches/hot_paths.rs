@@ -7,10 +7,8 @@ use std::time::{Duration, UNIX_EPOCH};
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use walls_core::config::SourceEntry;
 use walls_core::providers::{configured_source_providers, enabled_local_sources};
-use walls_core::quota::enforce_download_quota_bytes;
-use walls_core::selection::{pick_next, PickInput};
-use walls_core::sources::list_images;
 use walls_core::wallhaven::cached_wallpaper_path;
+use walls_core::{enforce_download_quota_bytes, list_images, pick_next, PickInput};
 
 fn bench_selection(c: &mut Criterion) {
     let candidates: Vec<String> = (0..1_024).map(|i| format!("wallpaper-{i:04}")).collect();
