@@ -1,4 +1,5 @@
 use crate::config::{Config, Secrets, SourceEntry, SourceKind};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -316,6 +317,28 @@ impl ProviderStatusReport {
         self.attempts
             .iter()
             .any(|attempt| attempt.provider_id == provider_id)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderRunOutcome {
+    pub applied_path: Option<PathBuf>,
+    pub attempt: ProviderAttempt,
+}
+
+impl ProviderRunOutcome {
+    pub fn applied(applied_path: Option<PathBuf>, attempt: ProviderAttempt) -> Self {
+        Self {
+            applied_path,
+            attempt,
+        }
+    }
+
+    pub fn not_applied(attempt: ProviderAttempt) -> Self {
+        Self {
+            applied_path: None,
+            attempt,
+        }
     }
 }
 
