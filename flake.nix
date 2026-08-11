@@ -102,7 +102,7 @@
 
         wallsPkg = rustPlatform.buildRustPackage {
           pname = "walls";
-          version = "0.13.0";
+          version = "0.13.4";
           src = wallsSrc;
           cargoLock.lockFile = ./Cargo.lock;
           cargoBuildFlags = [
@@ -137,7 +137,9 @@
           '';
 
           meta = with lib; {
-            description = "Personal wallpaper manager (CLI + tray)";
+            description = "Wallpaper manager with Wallhaven sources, CLI/TUI, and tray";
+            homepage = "https://github.com/willfish/walls";
+            changelog = "https://github.com/willfish/walls/releases/tag/v0.13.4";
             license = licenses.mit;
             mainProgram = "walls";
             platforms = platforms.linux ++ platforms.darwin;

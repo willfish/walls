@@ -7,7 +7,7 @@ default-members = ["crates/core", "crates/cli"]
 version = "0.13.4"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/william/walls"
+repository = "https://github.com/willfish/walls"
 rust-version = "1.86"
 
 [workspace.dependencies]
