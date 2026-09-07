@@ -15,7 +15,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 fs2 = "0.4"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
-resvg = "0.47"
+resvg = "0.48"
 ksni = { version = "0.3.4", default-features = false, features = ["blocking", "tokio"] }
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 tray-icon = { version = "0.24", default-features = false, features = ["gtk"] }
