@@ -12,7 +12,7 @@ chrono = { version = "0.4", default-features = false, features = ["std", "serde"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs"] }
 directories = "6"
-dirs = "6"
+dirs = "7"
 fs2 = "0.4"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 rand = "0.10"
